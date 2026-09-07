@@ -1,25 +1,14 @@
 /**
  * @file axi2flit.h
- * @brief AXI2FLIT 顶层模块头文件
+ * @brief 双向 AXI initiator-side AoU 协议桥顶层
  *
- * Axi2Flit 是整个桥接的顶层模块，对外暴露 AXI4 接口（作为从端接收 AXI 主机请求），
- * 对内实例化消息构造逻辑和 FlitPacker，最终向 FDI 输出 UCIe Flit。
+ * 发送方向：AXI AW/W/AR -> per-RP FIFO -> FlitPacker -> FDI
+ * 接收方向：FDI -> FlitUnpacker -> per-RP FIFO -> AXI B/R
  *
- * 内部结构：
- *
- *   ┌─────────────────────────────────────────────────────────────┐
- *   │                       Axi2Flit                              │
- *   │                                                             │
- *   │  AXI AW ──► [AW 通道处理线程] ──► wreq_msg 内部信号           │
- *   │  AXI W  ──► [W  通道处理线程] ──► wdata_msg 内部信号          │  ──► flit_out
- *   │  AXI AR ──► [AR 通道处理线程] ──► rreq_msg 内部信号           │
- *   │                                          └──► FlitPacker    │
- *   └─────────────────────────────────────────────────────────────┘
- *
- * 各通道处理线程负责：
- *   - 执行 valid/ready 握手，接收 AXI beat
- *   - 调用 MsgBuilder 构造 AoU 消息
- *   - 向 FlitPacker 的输入队列发送消息（通过 sc_signal 传递）
+ * RP_COUNT 是构造参数，默认值为 1，合法范围为 1～4。工程只连接一个 HBM
+ * 控制器时通常使用 RP0 即可；需要把不同端口或 QoS 类隔离时，再增加 RP 数量。
+ * 本模型采用 AxQOS % RP_COUNT 作为实现定义的简单映射，W beat 通过 AW 顺序队列
+ * 继承所属 RP，避免 AXI4 W 通道没有 WID 所导致的路由歧义。
  */
 
 #pragma once
@@ -27,87 +16,93 @@
 #include "axi_if.h"
 #include "aou_types.h"
 #include "msg_builder.h"
+#include "msg_decoder.h"
 #include "flit_packer.h"
+#include "flit_unpacker.h"
+#include "credit_manager.h"
+#include "rp_order_guard.h"
 
-// ============================================================
-//  Axi2Flit 顶层 SystemC 模块
-// ============================================================
+// FIFO / credit 深度常量定义在 aou_types.h（按链路 TAT 反推，见该文件注释）。
+
+// AXI4 W 不携带 ID/RP，需要按 AW 接收顺序保存写 burst 的路由信息。
+struct WriteRoute {
+    uint8_t rp = 0;
+    unsigned beats_remaining = 0;
+};
+inline std::ostream& operator<<(std::ostream& os, const WriteRoute& route) {
+    return os << "[WriteRoute rp=" << (int)route.rp
+              << " beats=" << route.beats_remaining << "]";
+}
+
 SC_MODULE(Axi2Flit) {
 public:
-    // ------ 时钟与复位 ------
     sc_in<bool> clk;
     sc_in<bool> rst_n;
 
-    // ------ AXI4 从端接口（Slave Interface）------
-    // 写地址通道（AW）
+    // AXI4 Slave 侧请求通道
     sc_in<bool>      aw_valid;
     sc_out<bool>     aw_ready;
     sc_in<AxChannel> aw_ch;
-
-    // 写数据通道（W）
-    sc_in<bool>     w_valid;
-    sc_out<bool>    w_ready;
-    sc_in<WChannel> w_ch;
-
-    // 读地址通道（AR）
+    sc_in<bool>      w_valid;
+    sc_out<bool>     w_ready;
+    sc_in<WChannel>  w_ch;
     sc_in<bool>      ar_valid;
     sc_out<bool>     ar_ready;
     sc_in<AxChannel> ar_ch;
 
-    // ------ FDI 输出接口 ------
-    sc_out<FlitTransfer> flit_out;   // 向 UCIe FDI 输出的 flit
-    sc_in<bool>          flit_ready; // FDI 背压信号
+    // AXI4 Slave 侧响应通道。valid/数据由本桥驱动，ready 由 AXI Master 驱动。
+    sc_out<bool>     b_valid;
+    sc_in<bool>      b_ready;
+    sc_out<BChannel> b_ch;
+    sc_out<bool>     r_valid;
+    sc_in<bool>      r_ready;
+    sc_out<RChannel> r_ch;
 
-    // ============================================================
-    //  构造函数
-    // ============================================================
-    SC_CTOR(Axi2Flit)
-        : packer("flit_packer")
-    {
-        // 连接内部 FlitPacker 的时钟和复位
-        packer.clk(clk);
-        packer.rst_n(rst_n);
+    // 双向 FDI 抽象接口
+    sc_out<FlitTransfer> flit_out;
+    sc_in<bool>          flit_ready;
+    sc_in<FlitTransfer>  flit_in;
+    sc_out<bool>         flit_in_ready;
 
-        // 连接 FlitPacker 的三路消息输入（通过内部 sc_fifo 通道桥接）
-        // sc_fifo 天然处理线程间生产者-消费者同步
-        packer.rreq_in(sig_rreq_fifo);
-        packer.wreq_in(sig_wreq_fifo);
-        packer.wdata_in(sig_wdata_fifo);
+    SC_HAS_PROCESS(Axi2Flit);
+    explicit Axi2Flit(sc_module_name name,
+                      unsigned rp_count = DEFAULT_RESOURCE_PLANES);
 
-        // 连接 Flit 输出
-        packer.flit_out(flit_out);
-        packer.flit_ready(flit_ready);
+    unsigned rp_count() const { return rp_count_; }
 
-        // 注册各通道处理线程
-        SC_THREAD(aw_channel_thread);
-        sensitive << clk.pos();
-        async_reset_signal_is(rst_n, false);
-
-        SC_THREAD(w_channel_thread);
-        sensitive << clk.pos();
-        async_reset_signal_is(rst_n, false);
-
-        SC_THREAD(ar_channel_thread);
-        sensitive << clk.pos();
-        async_reset_signal_is(rst_n, false);
+    /**
+     * 同 ID 跨 RP 的顺序违例计数（约束 C-1，见 rp_order_guard.h）。
+     * testbench 应在仿真结束时检查它为 0；不为 0 说明激励或 SoC 侧的
+     * QoS/ID 规划违反了集成约束，桥接单元无法保证 AXI 响应顺序。
+     */
+    unsigned long order_violations() const {
+        return rd_order_guard_.violations() + wr_order_guard_.violations();
     }
 
 private:
-    // ------ 内部子模块 ------
+    unsigned rp_count_;
     FlitPacker packer;
+    FlitUnpacker unpacker;
 
-    // ------ 内部通道：AXI 通道处理线程 → FlitPacker ------
-    // FIFO 深度设为 4，允许最多 4 条消息排队，为 FlitPacker 提供缓冲
-    sc_fifo<AouMessage>  sig_rreq_fifo{"rreq_fifo", 4};    // 读请求 FIFO
-    sc_fifo<AouMessage>  sig_wreq_fifo{"wreq_fifo", 4};    // 写请求 FIFO
-    sc_fifo<AouMessage>  sig_wdata_fifo{"wdata_fifo", 8};  // 写数据 FIFO（更深）
+    // 发送与接收队列均按 RP 分开，保证某一 RP credit 枯竭时不会形成跨 RP 队头阻塞。
+    sc_vector<sc_fifo<AouMessage>> sig_rreq_fifo;
+    sc_vector<sc_fifo<AouMessage>> sig_wreq_fifo;
+    sc_vector<sc_fifo<AouMessage>> sig_wdata_fifo;
+    sc_vector<sc_fifo<AouMessage>> sig_rdata_fifo;
+    sc_vector<sc_fifo<AouMessage>> sig_wresp_fifo;
 
-    // ============================================================
-    //  各通道处理线程
-    // ============================================================
-    void aw_channel_thread();  // 处理 AW 通道，生成 WriteReq 消息
-    void w_channel_thread();   // 处理 W  通道，生成 WriteData/WriteDataFull 消息
-    void ar_channel_thread();  // 处理 AR 通道，生成 ReadReq 消息
+    sc_fifo<CreditUpdate> sig_credit_update_fifo;
+    sc_fifo<CreditReturn> sig_credit_return_fifo;
+    sc_fifo<WriteRoute> sig_write_route_fifo;
+
+    void aw_channel_thread();
+    void w_channel_thread();
+    void ar_channel_thread();
+    void b_channel_thread();
+    void r_channel_thread();
+    uint8_t map_qos_to_rp(uint8_t qos) const;
+
+    // 同 ID 跨 RP 顺序约束检查（读写各一张表，理由见 rp_order_guard.h）
+    RpOrderGuard rd_order_guard_{"读"};
+    RpOrderGuard wr_order_guard_{"写"};
 };
-
-// AouMessage 的操作符定义已移至 aou_types.h，此处无需重复。

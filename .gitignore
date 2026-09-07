@@ -1,2 +1,38 @@
-/doc
-/systemc/doc
+# ============================================================
+#  甲方材料与第三方源码：不入库
+# ============================================================
+# 合同/规范原件（PDF、Word、图片），以及 Word 的临时锁文件
+doc/*.pdf
+doc/*.doc
+doc/*.docx
+doc/*.jpg
+doc/*.png
+doc/~$*
+# Tenstorrent/BOS 的 AoU 参考 RTL（Apache-2.0，第三方，仅本地参考）
+/reference
+
+# 注意：doc/ 下我们自己写的 .md 交付文档是要入库的，故不再整目录忽略。
+
+# ============================================================
+#  仿真构建产物：一律不入库
+# ============================================================
+# 可执行文件由 make 生成，文件名一律带位宽后缀（见 Makefile 头部注释）
+#   make / make perf / make golden      → axi2flit_{sim,perf,golden}_<WIDTH>
+#   make test-all / perf-all / golden-all → {func,perf,golden}_<WIDTH>
+systemc/sim/axi2flit_sim*
+systemc/sim/axi2flit_perf*
+systemc/sim/axi2flit_golden*
+systemc/sim/func_*
+systemc/sim/perf_*
+systemc/sim/golden_*
+systemc/obj/
+
+# 波形与日志：每次仿真重新生成，且体积大
+*.vcd
+*.log
+systemc/sim/perf_report.txt
+
+# 编译中间产物
+*.o
+*.d
+*.a

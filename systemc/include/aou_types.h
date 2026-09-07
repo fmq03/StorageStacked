@@ -10,13 +10,25 @@
  *   - 协议层使用其中 250B：10B 协议头 + 240B 载荷
  *   - 载荷分成 48 个 5B 粒度（granule），每条消息占整数个粒度
  *   - 消息类型由 MSGTYPE 字段（4bit）区分
+ *   - 一条消息允许跨 Flit 续传，但续传部分必须落在下一个 Flit 的 G0
+ *
+ * 【粒度常量与位域布局的来源】
+ *   本文件中所有粒度数与字段位置，均对齐 AoU 规范发起方公开的参考 RTL
+ *   reference/tt-oca-harness-aou/RTL/packet_def_pkg.sv：
+ *     - 粒度常量：该文件 L37~L48 的 AW_G / W*_G / WF*_G / B_G / AR_G / R*_G
+ *     - 位域布局：该文件中的 st_*_packet_tmp 打包结构（字节对齐的“线上格式”，
+ *       与之配对的 st_*_packet 是内部寄存器格式，两者字段顺序不同，勿混用）
+ *   注意：参考 RTL 为 Apache-2.0 第三方代码，本模型只对齐"参数与字段定义"，
+ *        不复制其任何实现代码。
  */
 
 #pragma once
 
 #include <systemc.h>
 #include <array>
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 // ============================================================
@@ -41,8 +53,61 @@ static constexpr int GRANULE_BYTES      = 5;
 // 粒度总数：240 / 5 = 48
 static constexpr int GRANULE_COUNT      = 48;
 
+// AoU 协议中的 RP 字段宽度为 2bit，因此协议最多支持 4 个 Resource Plane。
+// 具体工程可以只启用其中一部分；本模型默认只启用 RP0。
+static constexpr unsigned MAX_RESOURCE_PLANES     = 4;
+static constexpr unsigned DEFAULT_RESOURCE_PLANES = 1;
+
+// ============================================================
+//  链路参数（用于 FIFO/credit 容量反推，以及 testbench 的速率节流）
+// ============================================================
+// 指标要求：单通道 >= 24GT/s；这里按 UCIe x16 模块计算聚合裸带宽。
+static constexpr double LINK_LANES         = 16.0;      // UCIe x16
+static constexpr double LINK_GT_PER_LANE   = 24.0e9;    // 每 lane 24 GT/s
+// 裸链路字节速率（B/ns）：16 lane × 24 Gbps ÷ 8 = 48 GB/s = 48 B/ns
+static constexpr double LINK_BYTES_PER_NS  =
+    LINK_LANES * LINK_GT_PER_LANE / 8.0 / 1.0e9;
+// 一个 256B Flit 在链路上占用的时间（ns）：256 / 48 ≈ 5.333ns
+static constexpr double FLIT_PERIOD_NS     = FLIT_TOTAL_BYTES / LINK_BYTES_PER_NS;
+
+// 链路环回时间 TAT（Turn-Around Time，ns）：
+// 从本端发出 credit 返还，到对端据此发出的数据回到本端所经历的总时延，
+// 含两侧 D2D adaptor + PHY + 对端协议层。参考 RTL 的 MAS 按 40 周期 @1GHz
+// 取值，本模型沿用 40ns 这一量级。FIFO/credit 深度必须覆盖这段时间内
+// 链路可能灌入的数据量，否则 credit 往返本身就会成为带宽瓶颈。
+static constexpr double LINK_TAT_NS        = 40.0;
+
+// credit 环路时间（ns）：反推接收 FIFO 深度真正该用的是它，而不是 LINK_TAT_NS。
+//
+// LINK_TAT_NS 只涵盖"credit 已经上了链路"之后的飞行与对端处理。credit 从
+// "接收缓冲腾出来"到"真的上了链路"，还要额外经过三段，全都以 Flit 为粒度发生：
+//   ① 消息离开接收 FIFO、送上 AXI 之后，credit 才变成"待归还"   ≈ 接收流水线 2 拍
+//   ② 待归还量要攒够一个可编码的档位才发得出去 —— 归还量的编码
+//      只有 {1,4,8,16,32,64,128} 七档，凑不满档的余数只能等下一轮 ≈ 1~2 个 Flit 周期
+//   ③ 归还量要搭上一个出站 Flit 的头部，或单独发一条 CrdtGrant    ≈ 1 个 Flit 周期
+// 三段合计按 3 个 Flit 周期计入。
+//
+// 【这是 PERF-5 实测出来的】第一版只按 LINK_TAT_NS 反推深度，零飞行时间时
+// 一切正常；把单向飞行时间设成真实的 20ns 之后，读吞吐只能保持基线的 90%，
+// 数据方向的 Flit 平均填充从 100% 掉到 90% —— 对端不是没数据可发，是没 credit
+// 可用。补上这三段之后才恢复。
+static constexpr double CREDIT_RETURN_OVERHEAD_FLITS = 3.0;
+static constexpr double CREDIT_LOOP_NS =
+    LINK_TAT_NS + CREDIT_RETURN_OVERHEAD_FLITS * FLIT_PERIOD_NS;   // 40 + 16 = 56 ns
+
+// 深度反推的固定余量（条），用于吸收流水线级数与仲裁抖动
+static constexpr unsigned FIFO_MARGIN_ENTRIES = 4;
+
+// ============================================================
+//  全局日志开关
+// ============================================================
+// 功能仿真需要逐条打印消息/Flit 便于人工核对；性能仿真会跑几万个周期，
+// 打印会淹没输出也拖慢仿真，因此由 testbench 统一关闭。
+inline bool g_aou_verbose = true;
+
 // ============================================================
 //  消息类型编码（AoU Spec Table 1，MSGTYPE 4-bit 字段）
+//  与参考 RTL packet_def_pkg.sv L29~L35 的 MSG_* 参数一致
 // ============================================================
 enum class MsgType : uint8_t {
     Misc          = 0x0,   // 流控 / 接口管理（Misc）
@@ -51,7 +116,7 @@ enum class MsgType : uint8_t {
     WriteData     = 0x3,   // 写数据（对应 AXI W 通道，含 strobe）
     ReadData      = 0x4,   // 读数据（对应 AXI R 通道）
     WriteResp     = 0x5,   // 写响应（对应 AXI B 通道）
-    WriteDataFull = 0x6,   // 写数据（无 strobe，效率更高）
+    WriteDataFull = 0x6,   // 写数据（全 strobe，省掉 WSTRB 字段，效率更高）
     Reserved      = 0xF
 };
 
@@ -69,47 +134,306 @@ inline std::string msgtype_to_str(MsgType t) {
     }
 }
 
+// Misc 消息的子操作码（MISCOP，3bit）
+static constexpr uint8_t MISCOP_CRDT_GRANT = 0b100;  // 专用 credit 授予
+static constexpr uint8_t MISCOP_ACTIVATION = 0b000;  // 接口激活（本模型未实现）
+
 // ============================================================
 //  数据长度选项（DLENGTH，WriteData / ReadData 消息专用）
 // ============================================================
 enum class DataLength : uint8_t {
-    B256  = 0,   // 256-bit 数据，对应 8  granule
-    B512  = 1,   // 512-bit 数据，对应 12 granule
-    B1024 = 2    // 1024-bit 数据，对应 24 granule
+    B256  = 0,   // 256-bit  = 32B  数据
+    B512  = 1,   // 512-bit  = 64B  数据
+    B1024 = 2    // 1024-bit = 128B 数据
 };
 
-// 将 DataLength 转换为对应的粒度数量
-inline int dlength_to_granules(DataLength dl) {
+// DLENGTH → 单条消息承载的应用数据字节数
+constexpr int dlength_to_bytes(DataLength dl) {
+    switch (dl) {
+        case DataLength::B256:  return 32;
+        case DataLength::B512:  return 64;
+        case DataLength::B1024: return 128;
+        default:                return 32;
+    }
+}
+
+// ============================================================
+//  各消息类型的粒度数
+//  【重要】三类数据消息的粒度表互不相同，不能共用一张表：
+//    WriteData     （带 WSTRB） 8 / 15 / 30
+//    WriteDataFull （无 WSTRB） 7 / 14 / 27
+//    ReadData      （带 RLAST） 8 / 14 / 27
+//  来源：packet_def_pkg.sv L37~L48
+// ============================================================
+static constexpr int WREQ_GRANULES   = 3;   // AW_G，15B
+static constexpr int RREQ_GRANULES   = 3;   // AR_G，15B
+static constexpr int WRESP_GRANULES  = 1;   // B_G ，5B
+
+// Misc 消息长度随 MISCOP 变化
+static constexpr int MISC_ACTIVATION_GRANULES = 1;   // st_misc_activation_packet = 40bit
+static constexpr int MISC_CRDTGRANT_GRANULES  = 2;   // st_misc_grantcredit_packet = 80bit
+
+// WriteData（带 WSTRB）：W256b_G / W512b_G / W1024b_G
+constexpr int wdata_granules(DataLength dl) {
     switch (dl) {
         case DataLength::B256:  return 8;
-        case DataLength::B512:  return 12;
-        case DataLength::B1024: return 24;
+        case DataLength::B512:  return 15;
+        case DataLength::B1024: return 30;
+        default:                return 8;
+    }
+}
+
+// WriteDataFull（全 strobe，省去 WSTRB）：WF256b_G / WF512b_G / WF1024b_G
+constexpr int wdatafull_granules(DataLength dl) {
+    switch (dl) {
+        case DataLength::B256:  return 7;
+        case DataLength::B512:  return 14;
+        case DataLength::B1024: return 27;
+        default:                return 7;
+    }
+}
+
+// ReadData：R256b_G / R512b_G / R1024b_G
+constexpr int rdata_granules(DataLength dl) {
+    switch (dl) {
+        case DataLength::B256:  return 8;
+        case DataLength::B512:  return 14;
+        case DataLength::B1024: return 27;
         default:                return 8;
     }
 }
 
 // ============================================================
-//  各消息类型的粒度数（AoU Spec §5，Basic Profile）
+//  消息首字节的通用字段布局
+//
+//  参考 RTL 的所有 st_*_packet_tmp 结构，最低有效位一侧的排布是统一的
+//  （packed struct 中最后声明的字段是 LSB，线上格式按小端字节序落到 byte0）：
+//      bit[7:4] = MSGTYPE      —— 所有消息通用
+//      bit[3:2] = RP           —— 除 Misc 外通用
+//      bit[1:0] = DLENGTH      —— 仅数据类消息（WriteData/WriteDataFull/ReadData）
+//      Misc 特例：bit[3:1] = MISCOP，bit[0] = Rsvd
+//
+//  接收侧解包时，只要拿到消息的第一个字节就能算出整条消息占几个粒度，
+//  这正是跨 Flit 续传能够正确定界的前提。
 // ============================================================
-// WriteReq / ReadReq：4 granule = 20B
-static constexpr int REQ_GRANULES       = 4;
-// WriteResp：2 granule = 10B
-static constexpr int WRESP_GRANULES     = 2;
-// Misc：1 granule = 5B
-static constexpr int MISC_GRANULES      = 1;
+constexpr MsgType    msg_type_of(uint8_t b0)    { return static_cast<MsgType>((b0 >> 4) & 0xF); }
+constexpr uint8_t    msg_rp_of(uint8_t b0)      { return static_cast<uint8_t>((b0 >> 2) & 0x3); }
+constexpr DataLength msg_dlength_of(uint8_t b0) { return static_cast<DataLength>(b0 & 0x3); }
+constexpr uint8_t    misc_op_of(uint8_t b0)     { return static_cast<uint8_t>((b0 >> 1) & 0x7); }
+
+// 由消息首字节推出整条消息的粒度数；无法识别时返回 0（调用方按错误处理）
+constexpr int message_granules_from_header(uint8_t b0) {
+    switch (msg_type_of(b0)) {
+        case MsgType::WriteReq:      return WREQ_GRANULES;
+        case MsgType::ReadReq:       return RREQ_GRANULES;
+        case MsgType::WriteResp:     return WRESP_GRANULES;
+        case MsgType::WriteData:     return wdata_granules(msg_dlength_of(b0));
+        case MsgType::WriteDataFull: return wdatafull_granules(msg_dlength_of(b0));
+        case MsgType::ReadData:      return rdata_granules(msg_dlength_of(b0));
+        case MsgType::Misc:
+            return (misc_op_of(b0) == MISCOP_CRDT_GRANT) ? MISC_CRDTGRANT_GRANULES
+                                                         : MISC_ACTIVATION_GRANULES;
+        default:                     return 0;
+    }
+}
+
+// ============================================================
+//  本端 AXI 数据位宽对应的 DLENGTH（编译期常量）
+//
+//  真正的位宽定义在 axi_if.h（AXI_DATA_WIDTH）。这里直接从同一个宏求值，
+//  是为了让 aou_types.h 不反向依赖 axi_if.h —— 下面的 FIFO/credit 深度
+//  必须知道一条 ReadData 到底占几个 granule，而这取决于数据位宽：
+//      256b → 8 granule    512b → 14 granule    1024b → 27 granule
+//  msg_builder.h 中的 AXI_DLENGTH 直接取用本常量，并用 static_assert
+//  保证两处对位宽的理解一致。
+// ============================================================
+#ifndef AXI_DATA_WIDTH_CFG
+#define AXI_DATA_WIDTH_CFG 256
+#endif
+static constexpr DataLength CFG_DLENGTH =
+    (AXI_DATA_WIDTH_CFG == 256)  ? DataLength::B256  :
+    (AXI_DATA_WIDTH_CFG == 512)  ? DataLength::B512  : DataLength::B1024;
+
+// 本配置下三类数据消息各占几个 granule（供深度反推与 testbench 统计使用）
+static constexpr int CFG_RDATA_GRANULES     = rdata_granules(CFG_DLENGTH);
+static constexpr int CFG_WDATA_GRANULES     = wdata_granules(CFG_DLENGTH);
+static constexpr int CFG_WDATAFULL_GRANULES = wdatafull_granules(CFG_DLENGTH);
+// 一个 beat 承载的应用数据字节数（32 / 64 / 128）
+static constexpr int CFG_DATA_BYTES         = dlength_to_bytes(CFG_DLENGTH);
+
+// ============================================================
+//  FIFO / credit 深度：按链路 TAT 反推，而不是拍脑袋取整数
+//
+//  【为什么必须这么算】
+//  接收 credit 的本质是"我保证还能收下 N 个粒度"。本端把 credit 还给对端后，
+//  对端要经过一整个 TAT（credit 上行 + 对端调度 + 数据下行）数据才会到达。
+//  在这段时间里链路会持续灌数据，如果接收 FIFO 装不下 TAT × 链路带宽 的量，
+//  credit 就会先于链路耗尽——此时测出来的带宽反映的是 FIFO 太小，
+//  而不是协议本身的效率。参考 RTL 的 MAS 也是按同一套方法定 FIFO 深度的。
+//
+//  记号：
+//    LINK_BYTES_PER_NS  = 48 B/ns（UCIe x16 @24GT/s）
+//    LINK_TAT_NS        = 40 ns
+//    一条消息在链路上占用的"裸字节" = granule×5B × (256/240)
+//      （因为 240B 载荷里的每个字节，都要摊到 256B 的物理 flit 上）
+// ============================================================
+
+// 一条 N granule 的消息在链路上实际占用的裸字节数
+constexpr double message_wire_bytes(int granules) {
+    return granules * GRANULE_BYTES *
+           static_cast<double>(FLIT_TOTAL_BYTES) / PAYLOAD_BYTES;
+}
+
+// 一个 credit 环路时间内链路最多能灌进来多少条这样的消息（向上取整）
+constexpr unsigned messages_in_flight(int granules) {
+    return static_cast<unsigned>(
+               CREDIT_LOOP_NS * LINK_BYTES_PER_NS / message_wire_bytes(granules)) + 1u;
+}
+
+// credit 环路折算成时钟周期数（testbench 用 2ns 时钟 → 56/2 = 28 拍）
+static constexpr double MODEL_CLK_PERIOD_NS = 2.0;
+static constexpr unsigned CREDIT_LOOP_CYCLES =
+    static_cast<unsigned>(CREDIT_LOOP_NS / MODEL_CLK_PERIOD_NS);
+
+// ---- 接收侧（决定我们发给对端的初始 credit）----
+// ReadData：受链路灌入速率约束，深度必须随数据位宽变化。
+// 环路内的在飞字节数 = CREDIT_LOOP_NS × 48B/ns = 56 × 48 = 2688 B
+//   256b （ 8 granule/条）：2688B ÷ ( 8×5×256/240=42.7B) = 63 条，向上取整 64，+4 = 68 条
+//   512b （14 granule/条）：2688B ÷ (14×5×256/240=74.7B) = 36 条，向上取整 37，+4 = 41 条
+//   1024b（27 granule/条）：2688B ÷ (27×5×256/240= 144B) = 18 条，向上取整 19，+4 = 23 条
+// 三者对应的"在飞字节数"是一样的（≈2688B），只是每条消息更大、条数更少。
+// 注意 messages_in_flight() 内部已含 +1 的向上取整，别把它漏算成 63/36/18。
+static constexpr unsigned RX_RDATA_FIFO_DEPTH_PER_RP =
+    messages_in_flight(CFG_RDATA_GRANULES) + FIFO_MARGIN_ENTRIES;
+
+// WriteResp：源头是本端发出的写请求，速率上限是 AXI AW 的 1 条/拍，
+//   而不是链路带宽。因此按 credit 环路的周期数定深度：28 + 4 = 32 条
+static constexpr unsigned RX_WRESP_FIFO_DEPTH_PER_RP =
+    CREDIT_LOOP_CYCLES + FIFO_MARGIN_ENTRIES;
+
+// credit 以 granule 计：容量（条） × 每条消息的 granule 数
+static constexpr unsigned RX_RDATA_CREDITS_PER_RP =
+    RX_RDATA_FIFO_DEPTH_PER_RP * CFG_RDATA_GRANULES;  // 随位宽变化：8/14/27
+static constexpr unsigned RX_WRESP_CREDITS_PER_RP =
+    RX_WRESP_FIFO_DEPTH_PER_RP * WRESP_GRANULES;    // WriteResp   = 1 granule/条
+
+// ---- 发送侧（只是抹平 AXI 突发与打包节奏的缓冲，不参与 credit 协商）----
+// 深度取"一个 flit 能装下的最多消息条数"量级即可：
+//   48 granule ÷ 3 granule(请求) = 16 条；÷ 7 granule(WriteDataFull) ≈ 7 条，
+//   这里给写数据留两个 flit 的余量。
+static constexpr unsigned TX_REQ_FIFO_DEPTH_PER_RP   = 16;
+static constexpr unsigned TX_WDATA_FIFO_DEPTH_PER_RP = 16;
+
+// ============================================================
+//  比特级打包 / 解包工具
+//
+//  【比特序：MSB-first，直接对应规范 §5.8 的图】
+//  《AXI over UCIe Protocol Specification v0.8》§5.8 明确规定线上格式遵循
+//  PCIe 约定：
+//      Bytes count up            字节序号递增
+//      Bits count down           每字节内 bit7 → bit0
+//      Fields are arranged from left to right with MSB-first bit ordering
+//
+//  因此本工具按 MSB-first 排布：第一个 put() 的字段占 byte0 的高位，字段内
+//  部也是高位在前。好处是代码里的 put() 顺序 = 规范表格/图里字段从左到右的
+//  顺序，逐行对照即可复核，不需要在脑子里做任何翻转。
+//
+//  由此自动获得两个规范要求的性质：
+//    - put(addr, 64) 得到大端字节序（byte7 = AWADDR[63:56]），与 Figure 6 一致；
+//    - 3bit 的 credit 字段跨字节边界时自然衔接，与 Figure 21 一致。
+//
+//  历史注记：v1 曾按参考 RTL 的 st_*_packet_tmp 用小端比特序实现。该 RTL 在
+//  PROF/PROFEXTLEN→FLEX 一项上停留在 v0.8 之前的版本，且 CrdtGrant 多出一个
+//  前导保留位，与规范不符。现以 PDF 为唯一基线，RTL 仅作参数参考。
+// ============================================================
+class BitWriter {
+public:
+    explicit BitWriter(uint8_t* dst) : dst_(dst) {}
+
+    // 写入宽度为 width 的字段：value 的 bit(width-1) 先出，落在当前最高位
+    void put(uint64_t value, unsigned width) {
+        for (unsigned i = 0; i < width; ++i, ++bit_) {
+            if ((value >> (width - 1 - i)) & 1ULL)
+                dst_[bit_ >> 3] |= static_cast<uint8_t>(1u << (7 - (bit_ & 7)));
+        }
+    }
+    // 跳过 width 个保留位（RsvdZero，保持为 0）
+    void skip(unsigned width) { bit_ += width; }
+
+    // 按给定顺序写入一段字节（要求字节对齐）
+    void put_bytes(const uint8_t* src, unsigned n) {
+        sc_assert((bit_ & 7) == 0);
+        std::memcpy(dst_ + (bit_ >> 3), src, n);
+        bit_ += n * 8;
+    }
+
+    // 倒序写入一段字节：src[n-1] 先出。
+    // 用于 WDATA/RDATA/WSTRB —— 模型里这些数组是 data[0] = 最低有效字节，
+    // 而规范把 WDATA[1023:1016] 这样的最高位字节排在最前面（见 Figure 8~16）。
+    void put_bytes_msb_first(const uint8_t* src, unsigned n) {
+        sc_assert((bit_ & 7) == 0);
+        uint8_t* d = dst_ + (bit_ >> 3);
+        for (unsigned i = 0; i < n; ++i) d[i] = src[n - 1 - i];
+        bit_ += n * 8;
+    }
+
+    unsigned bits() const  { return bit_; }
+    unsigned bytes() const { return (bit_ + 7) / 8; }
+
+private:
+    uint8_t* dst_;
+    unsigned bit_ = 0;
+};
+
+class BitReader {
+public:
+    explicit BitReader(const uint8_t* src) : src_(src) {}
+
+    uint64_t get(unsigned width) {
+        uint64_t v = 0;
+        for (unsigned i = 0; i < width; ++i, ++bit_) {
+            v <<= 1;
+            if (src_[bit_ >> 3] & (1u << (7 - (bit_ & 7)))) v |= 1ULL;
+        }
+        return v;
+    }
+    void skip(unsigned width) { bit_ += width; }
+
+    void get_bytes(uint8_t* dst, unsigned n) {
+        sc_assert((bit_ & 7) == 0);
+        std::memcpy(dst, src_ + (bit_ >> 3), n);
+        bit_ += n * 8;
+    }
+
+    // 与 put_bytes_msb_first 对称：线上第一个字节还原到 dst[n-1]
+    void get_bytes_msb_first(uint8_t* dst, unsigned n) {
+        sc_assert((bit_ & 7) == 0);
+        const uint8_t* s = src_ + (bit_ >> 3);
+        for (unsigned i = 0; i < n; ++i) dst[n - 1 - i] = s[i];
+        bit_ += n * 8;
+    }
+
+    unsigned bits() const { return bit_; }
+
+private:
+    const uint8_t* src_;
+    unsigned bit_ = 0;
+};
 
 // ============================================================
 //  AoU 消息结构体
 //  采用"字节数组 + 元信息"的表示方式，方便后续直接填入 Flit 载荷
 // ============================================================
 
-// 消息最大字节数：24 granule × 5B = 120B（ReadData 1024b）
+// 最长消息为 WriteData1024 = 30 granule = 150B；这里按完整 48-granule
+// payload 预留空间，便于 Unpacker 对异常输入做有界拷贝以及后续扩展。
 static constexpr int MSG_MAX_BYTES = GRANULE_COUNT * GRANULE_BYTES;
 
 struct AouMessage {
     MsgType  type     = MsgType::Misc;     // 消息类型
+    uint8_t  rp       = 0;                 // Resource Plane，合法范围由顶层 RP_COUNT 决定
     int      granules = 0;                 // 该消息占用的粒度数
-    int      byte_len = 0;                 // 有效字节数（= granules × 5）
+    int      byte_len = 0;                 // 有效字节数（<= granules × 5）
     uint8_t  data[MSG_MAX_BYTES] = {};     // 消息载荷（按粒度对齐填充）
 
     // 来自 AXI 的原始事务 ID，用于日志追踪（不放入 Flit，仅模型内部使用）
@@ -119,12 +443,15 @@ struct AouMessage {
 
 // SystemC sc_signal<AouMessage> 要求：相等比较、输出操作符
 inline bool operator==(const AouMessage& a, const AouMessage& b) {
-    return a.type == b.type && a.axi_id == b.axi_id && a.axi_addr == b.axi_addr;
+    return a.type == b.type && a.rp == b.rp && a.granules == b.granules &&
+           a.byte_len == b.byte_len && a.axi_id == b.axi_id &&
+           a.axi_addr == b.axi_addr &&
+           std::memcmp(a.data, b.data, MSG_MAX_BYTES) == 0;
 }
 inline bool operator!=(const AouMessage& a, const AouMessage& b) { return !(a == b); }
 inline std::ostream& operator<<(std::ostream& os, const AouMessage& m) {
     os << "[AouMsg type=" << msgtype_to_str(m.type)
-       << " granules=" << m.granules
+       << " rp=" << (int)m.rp << " granules=" << m.granules
        << " id=" << m.axi_id << "]";
     return os;
 }
@@ -147,9 +474,12 @@ struct AouFlit {
     // ---- Protocol Header（10B）----
     // FDId[1:0]：Flit 目的 ID，单桥场景固定为 0
     uint8_t  fdid        = 0;
-    // MsgStart[47:0]：位图，标记 48 个 granule 中各自是否有新消息起始
-    uint64_t msg_start   = 0;   // 使用 bit[47:0]，bit[i]=1 表示 granule i 起始新消息
-    // MsgCredit[15:0]：随 flit 捎带回传的 credit 信息（发送方置 0，接收方回填）
+    // MsgStart[47:0]：位图，标记 48 个 granule 中各自是否有新消息起始。
+    // 注意语义：bit[i]=1 表示"granule i 是一条新消息的第一个粒度"。
+    // 若一条消息从上一个 Flit 续传过来，它占用的粒度对应 bit 为 0，
+    // 且续传部分必须从 G0 开始（即 bit0=0 意味着本 Flit 以续传开头）。
+    uint64_t msg_start   = 0;
+    // MsgCredit[15:0]：随业务 flit 捎带回传的 credit，由 CreditManager 生成
     uint16_t msg_credit  = 0;
 
     // ---- Protocol Payload（240B，48 × 5B granule）----
@@ -159,22 +489,44 @@ struct AouFlit {
     int      used_granules = 0;   // 本 flit 已使用的粒度数
     bool     valid         = false; // 该 flit 是否包含有效数据
 
-    // 将一条 AoU 消息追加写入载荷，并更新 msg_start 位图
-    // 返回：追加成功返回 true，剩余空间不足返回 false
-    bool pack_message(const AouMessage& msg) {
-        if (used_granules + msg.granules > GRANULE_COUNT) return false;
+    /**
+     * @brief 把一条消息的一个片段追加写入载荷（支持跨 Flit 续传）
+     *
+     * @param msg             待写入的消息
+     * @param granule_offset  该消息已经写入前面 Flit 的粒度数；0 表示消息起始
+     * @return 本次实际写入的粒度数（0 表示当前 Flit 已满）
+     *
+     * 只有 granule_offset == 0 时才置 MsgStart 位——这正是接收侧
+     * 区分"新消息"与"续传片段"的唯一依据。
+     */
+    int pack_fragment(const AouMessage& msg, int granule_offset) {
+        if (msg.granules <= 0 || granule_offset < 0 || granule_offset >= msg.granules) return 0;
+        int remain_msg  = msg.granules - granule_offset;
+        int remain_flit = GRANULE_COUNT - used_granules;
+        int take = std::min(remain_msg, remain_flit);
+        if (take <= 0) return 0;
 
-        // 在当前 granule 起始位置设置 MsgStart bit
-        msg_start |= (1ULL << used_granules);
+        if (granule_offset == 0) msg_start |= (1ULL << used_granules);
 
-        // 将消息字节写入载荷
-        int offset = used_granules * GRANULE_BYTES;
-        for (int i = 0; i < msg.byte_len; ++i) {
-            payload[offset + i] = msg.data[i];
+        int dst = used_granules * GRANULE_BYTES;
+        int src = granule_offset * GRANULE_BYTES;
+        for (int i = 0; i < take * GRANULE_BYTES; ++i) {
+            int s = src + i;
+            payload[dst + i] = (s < msg.byte_len) ? msg.data[s] : 0;
         }
-        used_granules += msg.granules;
+        used_granules += take;
         valid = true;
-        return true;
+        return take;
+    }
+
+    // 便捷接口：要求整条消息一次性放得下（用于 CrdtGrant 等短消息）
+    // 返回：追加成功 true；剩余空间不足则不做任何修改并返回 false
+    bool pack_message(const AouMessage& msg) {
+        if (msg.granules <= 0 || msg.byte_len < 0 ||
+            msg.byte_len > msg.granules * GRANULE_BYTES ||
+            msg.byte_len > MSG_MAX_BYTES ||
+            used_granules + msg.granules > GRANULE_COUNT) return false;
+        return pack_fragment(msg, 0) == msg.granules;
     }
 
     // 查询剩余可用粒度数
@@ -206,10 +558,16 @@ struct FlitTransfer {
 
 // SystemC 要求可赋值、可比较、可打印，为自定义类型提供这些操作
 inline bool operator==(const FlitTransfer& a, const FlitTransfer& b) {
-    // 仅比较 valid 和 used_granules，用于信号变化检测
-    return (a.valid == b.valid) &&
-           (a.flit.msg_start == b.flit.msg_start) &&
-           (a.flit.used_granules == b.flit.used_granules);
+    // sc_signal 依赖 operator== 判断值是否更新。这里必须比较完整的协议头和
+    // 有效 payload，否则两个布局相同、数据不同的连续 flit 可能不会触发更新。
+    if (a.valid != b.valid || a.flit.fdid != b.flit.fdid ||
+        a.flit.msg_start != b.flit.msg_start ||
+        a.flit.msg_credit != b.flit.msg_credit ||
+        a.flit.used_granules != b.flit.used_granules ||
+        a.flit.valid != b.flit.valid) {
+        return false;
+    }
+    return std::memcmp(a.flit.payload, b.flit.payload, PAYLOAD_BYTES) == 0;
 }
 inline bool operator!=(const FlitTransfer& a, const FlitTransfer& b) {
     return !(a == b);
@@ -231,6 +589,7 @@ inline void sc_trace(sc_trace_file* tf, const FlitTransfer& ft, const std::strin
     sc_trace(tf, ft.valid,              name + ".valid");
     sc_trace(tf, ft.flit.used_granules, name + ".used_granules");
     sc_trace(tf, ft.flit.msg_start,     name + ".msg_start");
+    sc_trace(tf, ft.flit.msg_credit,    name + ".msg_credit");
     sc_trace(tf, ft.flit.fdid,          name + ".fdid");
 }
 }  // namespace sc_core
