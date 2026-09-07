@@ -1,7 +1,7 @@
 # AXI2FLIT SystemC 模型设计
 
 > 对应课题：2026ZTE06-01「定制堆叠存储器链路性能建模和协议桥接单元技术」研究成果2
-> 最近更新：2026-09-07（完成 P0-1～P0-7、P1-8、P1-10，补齐延迟/带宽测量）
+> 最近更新：2026-09-07（补齐 UCIe 接入前线格式、边界适配、复位及负向检查）
 
 ## 1. 设计范围
 
@@ -15,6 +15,10 @@
 已实现：消息打包/解包、跨 Flit 消息续传、per-RP × per-message-type credit 流控、
 FDI 双向 ready/valid 背压、AXI 数据位宽 256/512/1024 参数化、按链路 TAT 反推的
 缓冲与 credit 深度。
+
+接入前扩展已实现：固定 250B 编解码、Format 6 散布/收集、无辅助字段接收定界、
+UCIe 侧双向 FIFO 适配器、共享链路参数、协调本地复位及 AXI 入口检查。
+具体字节表、接线和时序以 [wire_contract.md](wire_contract.md) 为准。
 
 不在本阶段范围：链路激活状态机（Activation/CSR）、responder 侧（入站 WREQ/RREQ/
 WDATA）、QoS 三模式仲裁、Flit2DFI（由存储控制器侧同事合并对齐）。
@@ -64,8 +68,10 @@ WDATA）、QoS 三模式仲裁、Flit2DFI（由存储控制器侧同事合并对
 - 按 `MsgStart[47:0]` 切分消息。**消息长度由首字节自描述**
   （`message_granules_from_header`），不能靠两个 MsgStart 位之间的距离推断——
   消息被截断到下一个 Flit 时，它后面根本没有第二个 MsgStart 位。
-- 维护跨 Flit 续传状态：`MsgStart[0] == 0` 表示本 Flit 以续传片段开头。
+- 维护跨 Flit 续传状态：有 carry 时 G0 为续传；无 carry 时 MsgStart=0 的位置为空。
 - 解析 header 的 `MsgCredit[15:0]` 与 Misc/CrdtGrant，把对端 grant 送入 Packer。
+- credit 事件也受 holding register 保护，内部事件 FIFO 满时 `nb_write` 重试并
+  撤销入站 ready；RP=4、每半包两条 CrdtGrant 可产生80条事件，超过内部64深度。
 - initiator 侧未实现的入站 WREQ/RREQ/WDATA 按协议异常计数。
 
 ### 2.3 AXI 五通道线程
@@ -243,14 +249,15 @@ WriteDataFull 7/14/27，ReadData 8/14/27），已与 PDF 的表逐项核对通�
 ### 6.2 位序规则（最容易错、也最难测出来的一条）
 
 规范 §5.8 的原话是 **"Bytes count up • Bits count down • MSB-first bit ordering"**。
-整个序列化器因此是 MSB-first：字节地址递增、每字节内 bit7→bit0。
+消息内部的数据序列化因此是 MSB-first：字节地址递增、每字节内 bit7→bit0。
+Protocol Header 则按图 5 独立逐位映射，不能整体套用消息字段顺序。
 
 这个错误当初能长期存在，是因为**测试激励掩盖了它**：早期数据图样是"一整拍同一个
 字节值"，地址也只用低 32 位，字节序整体翻转前后**完全一样**。现在的防线有两道：
 
 1. **黄金字节向量对拍**（`tb_golden_vectors.cpp`）：期望字节序列是**从 PDF 字段表
    手工转录**的常量，不经过任何本模型的代码路径。三种位宽各 71 个检查项，
-   覆盖全部 7 种消息 + Flit 头部（FDId / MsgStart / MsgCredit），
+   覆盖全部 7 种消息；PH/完整 PLP 由独立的 `tb_aou_wire.cpp` 覆盖，
    每项都核对总 granule 数、首字节自描述编码、以及**整条消息的每个字节**。
 2. **可辨识的激励**：数据图样改为「递增 ⊕ 走一位」（每字节都不同）并逐字节比对；
    地址高 32 位固定为 `TB_ADDR_TAG`，在链路上解回来核对。
@@ -271,7 +278,7 @@ WriteDataFull 7/14/27，ReadData 8/14/27），已与 PDF 的表逐项核对通�
 |---|---|
 | responder 侧（入站 WREQ/RREQ/WDATA） | 未实现，由 testbench 的 RemoteAouModel 扮演 |
 | **约束 C-1 的 SoC 侧落实**（同 AxID 固定 RP） | 模型内已加运行时断言（TC9 考核），但**约束本身要由 SoC 的 ID/QoS 规划保证**，桥接单元只能检出、不能修复 |
-| **AXI 合法性负向用例**（AxBURST≠INCR / AxSIZE 超位宽 / 跨 4KB / 非对齐） | 未实现。当前模型假定上游发出的是合法 AXI4 事务，非法激励行为未定义 |
+| **AXI 合法性检查**（非 INCR / 超位宽 SIZE / 跨 4KB / 非对齐 / WLAST） | 已实现；入口 fail-fast，`boundary-all` 从真实 AW/AR/W 端口验证 |
 | QoS 三模式仲裁 + 防饿死超时（P1-11） | 待做，当前为固定优先级 + RP 轮转 |
 | WLAST 重建（P1-12） | 随 responder 侧一起做（AoU 的 WriteData 不含 WLAST） |
 | 时钟频率决策（P1-13） | 当前 500MHz；1024b 下 AXI 侧上限 64GB/s，已不是瓶颈 |

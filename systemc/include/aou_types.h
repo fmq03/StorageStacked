@@ -13,11 +13,11 @@
  *   - 一条消息允许跨 Flit 续传，但续传部分必须落在下一个 Flit 的 G0
  *
  * 【粒度常量与位域布局的来源】
- *   本文件中所有粒度数与字段位置，均对齐 AoU 规范发起方公开的参考 RTL
- *   reference/tt-oca-harness-aou/RTL/packet_def_pkg.sv：
- *     - 粒度常量：该文件 L37~L48 的 AW_G / W*_G / WF*_G / B_G / AR_G / R*_G
- *     - 位域布局：该文件中的 st_*_packet_tmp 打包结构（字节对齐的“线上格式”，
- *       与之配对的 st_*_packet 是内部寄存器格式，两者字段顺序不同，勿混用）
+ *   权威基线为 doc/AXI over UCIe Protocol Specification v0.8.pdf。
+ *   reference/tt-oca-harness-aou/RTL/packet_def_pkg.sv 仅作历史交叉参考：
+ *     - AW_G / W*_G / WF*_G / B_G / AR_G / R*_G 可核对粒度数；
+ *     - st_*_packet_tmp 与 st_*_packet 分别是打包与内部寄存器格式，勿混用；
+ *     - FLEX16、CrdtGrant 和 MSB-first 等以 v0.8 为准，不能照搬旧 RTL。
  *   注意：参考 RTL 为 Apache-2.0 第三方代码，本模型只对齐"参数与字段定义"，
  *        不复制其任何实现代码。
  */
@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include "link_config.h"
 
 // ============================================================
 //  基本常量
@@ -62,11 +63,8 @@ static constexpr unsigned DEFAULT_RESOURCE_PLANES = 1;
 //  链路参数（用于 FIFO/credit 容量反推，以及 testbench 的速率节流）
 // ============================================================
 // 指标要求：单通道 >= 24GT/s；这里按 UCIe x16 模块计算聚合裸带宽。
-static constexpr double LINK_LANES         = 16.0;      // UCIe x16
-static constexpr double LINK_GT_PER_LANE   = 24.0e9;    // 每 lane 24 GT/s
 // 裸链路字节速率（B/ns）：16 lane × 24 Gbps ÷ 8 = 48 GB/s = 48 B/ns
-static constexpr double LINK_BYTES_PER_NS  =
-    LINK_LANES * LINK_GT_PER_LANE / 8.0 / 1.0e9;
+// 参数和 NRZ/PAM4 位数统一定义在 link_config.h；上式是默认 NRZ 配置。
 // 一个 256B Flit 在链路上占用的时间（ns）：256 / 48 ≈ 5.333ns
 static constexpr double FLIT_PERIOD_NS     = FLIT_TOTAL_BYTES / LINK_BYTES_PER_NS;
 
@@ -75,7 +73,7 @@ static constexpr double FLIT_PERIOD_NS     = FLIT_TOTAL_BYTES / LINK_BYTES_PER_N
 // 含两侧 D2D adaptor + PHY + 对端协议层。参考 RTL 的 MAS 按 40 周期 @1GHz
 // 取值，本模型沿用 40ns 这一量级。FIFO/credit 深度必须覆盖这段时间内
 // 链路可能灌入的数据量，否则 credit 往返本身就会成为带宽瓶颈。
-static constexpr double LINK_TAT_NS        = 40.0;
+// LINK_TAT_NS 默认 40ns，可通过 AOU_LINK_TAT_NS 编译参数覆盖。
 
 // credit 环路时间（ns）：反推接收 FIFO 深度真正该用的是它，而不是 LINK_TAT_NS。
 //
@@ -223,6 +221,10 @@ constexpr uint8_t    misc_op_of(uint8_t b0)     { return static_cast<uint8_t>((b
 
 // 由消息首字节推出整条消息的粒度数；无法识别时返回 0（调用方按错误处理）
 constexpr int message_granules_from_header(uint8_t b0) {
+    // 数据类 DLENGTH=3 是保留编码，不能落入粒度表的默认 256b 分支。
+    if ((msg_type_of(b0) == MsgType::WriteData ||
+         msg_type_of(b0) == MsgType::WriteDataFull ||
+         msg_type_of(b0) == MsgType::ReadData) && (b0 & 3) == 3) return 0;
     switch (msg_type_of(b0)) {
         case MsgType::WriteReq:      return WREQ_GRANULES;
         case MsgType::ReadReq:       return RREQ_GRANULES;
@@ -232,7 +234,7 @@ constexpr int message_granules_from_header(uint8_t b0) {
         case MsgType::ReadData:      return rdata_granules(msg_dlength_of(b0));
         case MsgType::Misc:
             return (misc_op_of(b0) == MISCOP_CRDT_GRANT) ? MISC_CRDTGRANT_GRANULES
-                                                         : MISC_ACTIVATION_GRANULES;
+                 : (misc_op_of(b0) == MISCOP_ACTIVATION) ? MISC_ACTIVATION_GRANULES : 0;
         default:                     return 0;
     }
 }
@@ -477,7 +479,7 @@ struct AouFlit {
     // MsgStart[47:0]：位图，标记 48 个 granule 中各自是否有新消息起始。
     // 注意语义：bit[i]=1 表示"granule i 是一条新消息的第一个粒度"。
     // 若一条消息从上一个 Flit 续传过来，它占用的粒度对应 bit 为 0，
-    // 且续传部分必须从 G0 开始（即 bit0=0 意味着本 Flit 以续传开头）。
+    // 且续传部分必须从 G0 开始。bit0=0 也可能只是 G0 为空，需结合接收 carry 判断。
     uint64_t msg_start   = 0;
     // MsgCredit[15:0]：随业务 flit 捎带回传的 credit，由 CreditManager 生成
     uint16_t msg_credit  = 0;

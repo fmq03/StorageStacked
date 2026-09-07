@@ -60,6 +60,9 @@ Axi2Flit::Axi2Flit(sc_module_name name, unsigned rp_count)
         unpacker.wresp_out[rp](sig_wresp_fifo[rp]);
     }
 
+    SC_METHOD(reset_queues_and_order);
+    sensitive << rst_n.neg() << clk.pos();
+
     SC_THREAD(aw_channel_thread);
     sensitive << clk.pos();
     async_reset_signal_is(rst_n, false);
@@ -78,6 +81,28 @@ Axi2Flit::Axi2Flit(sc_module_name name, unsigned rp_count)
 }
 uint8_t Axi2Flit::map_qos_to_rp(uint8_t qos) const {
     return static_cast<uint8_t>(qos % rp_count_);
+}
+
+void Axi2Flit::reset_queues_and_order() {
+    if (rst_n.read()) return;
+    // 异步拉低立即清理，保持复位时每个时钟沿再清一次，覆盖 FIFO 在前一
+    // delta 提交的写入。五通道/packer/unpacker 此时均处于复位，不会入队。
+    // 系统必须同时清空外部链路队列；本地复位不代表能够丢弃远端在途响应。
+    rd_order_guard_.reset();
+    wr_order_guard_.reset();
+    AouMessage msg;
+    for (unsigned rp = 0; rp < rp_count_; ++rp) {
+        while (sig_rreq_fifo[rp].nb_read(msg)) {}
+        while (sig_wreq_fifo[rp].nb_read(msg)) {}
+        while (sig_wdata_fifo[rp].nb_read(msg)) {}
+        while (sig_rdata_fifo[rp].nb_read(msg)) {}
+        while (sig_wresp_fifo[rp].nb_read(msg)) {}
+    }
+    CreditUpdate update;
+    while (sig_credit_update_fifo.nb_read(update)) {}
+    while (sig_credit_return_fifo.nb_read(update)) {}
+    WriteRoute route;
+    while (sig_write_route_fifo.nb_read(route)) {}
 }
 
 /**
@@ -107,6 +132,10 @@ void Axi2Flit::aw_channel_thread() {
         // ---- 1) 采样握手：上一拍拉高的 ready 与本拍的 valid 同时有效 ----
         if (ready_reg && aw_valid.read()) {
             AxChannel aw = aw_ch.read();
+            if (const char* error = axi_request_error(aw)) {
+                SC_REPORT_FATAL("Axi2Flit/AXI", error);
+                return;
+            }
             uint8_t rp = map_qos_to_rp(aw.qos);
             // 约束 C-1 检查：同一 AWID 的未完成事务必须落在同一个 RP，
             // 否则 B 响应可能跨 RP 乱序返回（详见 rp_order_guard.h）。
@@ -148,6 +177,11 @@ void Axi2Flit::w_channel_thread() {
         // ready_reg 只有在 have_route 成立时才会拉高，因此这里 route 一定有效。
         if (ready_reg && w_valid.read()) {
             WChannel w = w_ch.read();
+            // 必须在打包/入队前检查，不能用提前 WLAST 偷跑到下一条 AW 路由。
+            if (!axi_wlast_matches(route.beats_remaining, w.last)) {
+                SC_REPORT_FATAL("Axi2Flit/AXI", "AWLEN 与 WLAST 不一致");
+                return;
+            }
             // 全 strobe 有效时用 WriteDataFull（256b: 7 granule），
             // 比带 WSTRB 的 WriteData（8 granule）省 1 个 granule。
             AouMessage msg = MsgBuilder::is_full_strobe(w)
@@ -158,9 +192,7 @@ void Axi2Flit::w_channel_thread() {
 
             if (route.beats_remaining > 0) --route.beats_remaining;
             bool route_done = route.beats_remaining == 0;
-            if (route_done != w.last)
-                SC_REPORT_WARNING("Axi2Flit", "AWLEN 与 WLAST 不一致，按先到的结束条件收束");
-            if (route_done || w.last) have_route = false;
+            if (route_done) have_route = false;
 
             if (g_aou_verbose) {
                 std::cout << "[W  Thread] @" << sc_time_stamp()
@@ -189,6 +221,10 @@ void Axi2Flit::ar_channel_thread() {
         // ---- 1) 采样握手 ----
         if (ready_reg && ar_valid.read()) {
             AxChannel ar = ar_ch.read();
+            if (const char* error = axi_request_error(ar)) {
+                SC_REPORT_FATAL("Axi2Flit/AXI", error);
+                return;
+            }
             uint8_t rp = map_qos_to_rp(ar.qos);
             // 约束 C-1 检查，理由同 aw_channel_thread
             rd_order_guard_.bind(ar.id, rp);

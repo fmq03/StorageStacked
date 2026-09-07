@@ -23,8 +23,9 @@ void FlitUnpacker::unpacking_thread() {
     holding_flit_ = FlitTransfer{};
     pending_messages_.clear();
     pending_index_ = 0;
-    carry_active_ = false;
-    carry_have_ = 0;
+    pending_credits_.clear();
+    pending_credit_index_ = 0;
+    stream_decoder_.reset();
     flits_received_ = 0;
     granules_received_ = 0;
     flit_in_ready.write(true);
@@ -43,19 +44,20 @@ void FlitUnpacker::unpacking_thread() {
                 holding_flit_  = incoming;
                 holding_valid_ = true;
                 ++flits_received_;
-                granules_received_ +=
-                    static_cast<unsigned long>(incoming.flit.used_granules);
                 parse_holding_flit();
                 route_messages();   // 同拍尽量分发，避免每包多花一拍
             }
         }
 
         // 3) 本 Flit 的消息全部落进下游 FIFO 后释放 holding register
-        if (holding_valid_ && pending_index_ >= pending_messages_.size()) {
+        if (holding_valid_ && pending_index_ >= pending_messages_.size() &&
+            pending_credit_index_ >= pending_credits_.size()) {
             holding_valid_ = false;
             holding_flit_  = FlitTransfer{};
             pending_messages_.clear();
             pending_index_ = 0;
+            pending_credits_.clear();
+            pending_credit_index_ = 0;
         }
 
         flit_in_ready.write(!holding_valid_);
@@ -76,78 +78,27 @@ void FlitUnpacker::parse_holding_flit() {
     pending_index_ = 0;
     const AouFlit& flit = holding_flit_.flit;
 
+    // 先完整检查消息结构再提交 credit/响应，防止坏包产生部分副作用。
+    AouStreamDecoder::Result decoded;
+    try {
+        if (flit.fdid != 0) throw std::invalid_argument("本桥只接收 FDId=0");
+        decoded = stream_decoder_.consume(flit);
+    } catch (const std::exception& e) {
+        SC_REPORT_FATAL("FlitUnpacker/Protocol", e.what());
+        return;
+    }
+    granules_received_ += decoded.used_granules;
+
     // Protocol Header 中捎带的是"对端接收缓冲已释放"的 credit，直接送往
     // 本端 Tx CreditManager；字段本身不占 Protocol Payload。
     decode_header_credits(flit.msg_credit, rp_count_, [this](const CreditUpdate& update) {
-        credit_update_out.write(update);
+        pending_credits_.push_back(update);
     });
 
-    if (flit.used_granules <= 0) return;
-
-    int g = 0;
-
-    // ---- (a) 处理续传片段：本 Flit 以上一个 Flit 未发完的消息开头 ----
-    if (carry_active_) {
-        if ((flit.msg_start & 1ULL) != 0) {
-            // 发送侧本应把续传片段放在 G0 且不置 MsgStart[0]，出现这种情况
-            // 说明链路上丢/乱了包，丢弃残片并按新消息重新对齐。
-            SC_REPORT_WARNING("FlitUnpacker",
-                              "期待跨 Flit 续传片段，但 MsgStart[0]=1，丢弃残片");
-            carry_active_ = false;
-            carry_have_   = 0;
-        } else {
-            int need = carry_msg_.granules - carry_have_;
-            int take = std::min(need, flit.used_granules);
-            std::copy_n(&flit.payload[0], take * GRANULE_BYTES,
-                        carry_msg_.data + carry_have_ * GRANULE_BYTES);
-            carry_have_ += take;
-            g = take;
-            if (carry_have_ >= carry_msg_.granules) {
-                dispatch_message(carry_msg_);
-                carry_active_ = false;
-                carry_have_   = 0;
-            }
-            // 否则这条消息还要继续跨到下一个 Flit（1024b 消息可能连跨多包）
-        }
-    } else if ((flit.msg_start & 1ULL) == 0) {
-        SC_REPORT_WARNING("FlitUnpacker",
-                          "Flit 以非消息起始的 granule 开头，但本端没有待续传消息");
-        return;
-    }
-
-    // ---- (b) 本 Flit 内新起的消息 ----
-    while (g < flit.used_granules) {
-        if (((flit.msg_start >> g) & 1ULL) == 0) {
-            // 正常情况下不会走到这里（消息长度是自描述的），作为防御处理
-            ++g;
-            continue;
-        }
-        uint8_t b0 = flit.payload[g * GRANULE_BYTES];
-        int total = message_granules_from_header(b0);
-        if (total <= 0) {
-            SC_REPORT_WARNING("FlitUnpacker", "无法识别的消息类型，放弃解析本 Flit 剩余部分");
-            break;
-        }
-        int avail = flit.used_granules - g;
-        int take  = std::min(total, avail);
-
-        AouMessage msg;
-        msg.type     = msg_type_of(b0);
-        msg.rp       = msg_rp_of(b0);
-        msg.granules = total;
-        msg.byte_len = total * GRANULE_BYTES;
-        std::copy_n(&flit.payload[g * GRANULE_BYTES], take * GRANULE_BYTES, msg.data);
-
-        if (take < total) {
-            // 消息在 Flit 尾部被截断，剩余部分应出现在下一个 Flit 的 G0
-            carry_msg_    = msg;
-            carry_have_   = take;
-            carry_active_ = true;
-            break;      // 截断只可能发生在 Flit 尾部，后面不会再有消息
-        }
-        dispatch_message(msg);
-        g += total;
-    }
+    // 解析器先拼接 G0 的续传，再按 MsgStart 扫描新消息；空粒度和 credit-only
+    // Flit 不产生消息。消息长度来自首字节，而非相邻 MsgStart 间距。
+    // 具体边界检查和跨 Flit 状态现集中在 aou_stream_decoder.h，供接入端复用。
+    for (const auto& msg : decoded.messages) dispatch_message(msg);
 }
 
 // 按消息类型分类：Misc 直接转成 credit 事件，R/B 进入待分发队列，其余丢弃并告警
@@ -174,6 +125,12 @@ void FlitUnpacker::dispatch_message(const AouMessage& msg) {
 // 把已解析消息写入对应 RP 的接收 FIFO，一拍最多 UNPACK_MSGS_PER_CYCLE 条；
 // 下游 FIFO 满时提前退出，剩余消息留到下一拍继续。
 void FlitUnpacker::route_messages() {
+    // 使用非阻塞事件发送。FIFO 满就保留余量，主循环会保持 holding/撤销 ready，
+    // 下拍重试；不会在时钟线程内部阻塞并漏掉已经对外承诺的 Flit 握手。
+    while (pending_credit_index_ < pending_credits_.size()) {
+        if (!credit_update_out.nb_write(pending_credits_[pending_credit_index_])) return;
+        ++pending_credit_index_;
+    }
     unsigned routed = 0;
     while (pending_index_ < pending_messages_.size() && routed < UNPACK_MSGS_PER_CYCLE) {
         const AouMessage& msg = pending_messages_[pending_index_];
@@ -196,7 +153,7 @@ void FlitUnpacker::emit_credit_matrix(const CreditMatrix& grants) {
         for (unsigned k = 0; k < CREDIT_KIND_COUNT; ++k) {
             unsigned amount = grants[rp][k];
             if (amount != 0) {
-                credit_update_out.write(CreditUpdate{
+                pending_credits_.push_back(CreditUpdate{
                     static_cast<uint8_t>(rp), static_cast<CreditKind>(k), amount});
             }
         }

@@ -21,6 +21,7 @@
 #include "flit_unpacker.h"
 #include "credit_manager.h"
 #include "rp_order_guard.h"
+#include "axi_contract.h"
 
 // FIFO / credit 深度常量定义在 aou_types.h（按链路 TAT 反推，见该文件注释）。
 
@@ -94,6 +95,9 @@ private:
     sc_fifo<CreditUpdate> sig_credit_update_fifo;
     sc_fifo<CreditReturn> sig_credit_return_fifo;
     sc_fifo<WriteRoute> sig_write_route_fifo;
+
+    // sc_fifo 没有 reset 端口，复位期间必须显式丢弃全部旧事务与 credit。
+    void reset_queues_and_order();
 
     void aw_channel_thread();
     void w_channel_thread();

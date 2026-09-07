@@ -1,5 +1,23 @@
 # UCIe 参考模型接口与 AXI2Flit 连接分析
 
+> 2026-09-07 接入前更新：下文主体记录原始 UCIe 基线 `58a44f3` 的接口分析，
+> 其中“当前/待实现”均指补丁前状态。现已补齐的差异如下；新实现的完整契约见
+> [wire_contract.md](../systemc/doc/wire_contract.md)，实施步骤见
+> [接入指南](AXI2Flit接入UCIe链路实施指南.md)。
+
+| 原基线缺口 | 当前接入扩展 |
+|---|---|
+| 236B 无法承载250B | 新增 AouFormat6，FDI 固定250B；原格式保留 |
+| AoU 对象与字节流不兼容 | AouWireFlit、PH 编解码及完整 PLP 独立 golden |
+| used_granules 依赖 | 接收按 MsgStart/首字节/carry 解析，不经元数据旁路 |
+| ready/valid 与 FIFO | UcieAouEndpoint 已实现，深度1双向背压测试通过 |
+| 配置不一致 | 共用 x16/24G/NRZ；检查 lane/rate/modulation/format |
+| 简单存储事务未定义 | simple_mem_if.h 已定义；实际存储目标留给下阶段 |
+
+Format 6 的 PH 分散在物理 byte62..65、128..129、190..193；CRC 位于126..127、
+254..255。逻辑250B不是从物理byte2起连续摆放。FH/CRC算法仍属参考模型行为抽象。
+以上为组件测试结果，尚不是 AXI 经 UcieLink 到存储器的端到端验证结果。
+
 ## 1. 文档目的
 
 本文分析 `reference/ucie-model` 的模块结构、输入输出接口、数据格式、流控和参数化能力，并判断它能否与当前 `systemc` 目录下的 AXI2Flit 转接桥连接。

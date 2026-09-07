@@ -2,7 +2,7 @@
 
 > 项目：定制堆叠存储器链路性能建模和协议桥接（2026ZTE06-01）
 > 协议基线：**AXI over UCIe Protocol Specification v0.8（doc/ 下的 PDF）**
-> 最近更新：2026-09-07（第一阶段 SystemC 模型收口）
+> 最近更新：2026-09-07（第一阶段及 UCIe 接入前准备完成，端到端联调待开展）
 
 ---
 
@@ -222,19 +222,27 @@ AXI4 要求同 ID 同方向的响应保序，而 AoU 的多个 RP 是相互独�
 - 按 credit 环路反推的接收 FIFO 深度与初始 credit
 - 可配置的链路单向飞行时间与对端处理时延
 - 同 ID 跨 RP 顺序违例检测（约束 C-1）
+- 固定 250B PLP 编解码、独立 PH 黄金向量、Format 6 精确字节散布/收集
+- 接收定界只依赖线上字段与 carry，不依赖 `used_granules`
+- UCIe 侧 ready/valid ↔ FIFO 适配器及链路配置一致性检查
+- 本地协调复位、AXI 入口合法性与 WLAST fail-fast、1/2/4 RP 边界回归
+
+接入边界现冻结为 ready/valid + UCIe 侧 `UcieAouEndpoint`，默认单 RP、VC0、
+x16/24G/NRZ/48 GB/s。TX 无新增流水周期，RX 一拍 holding，其他排队/相位延迟
+单独计算。详细契约见 [wire_contract.md](../systemc/doc/wire_contract.md)。
+参考链路的 `AouFormat6` 只对齐字节位置，FH/CRC 保留行为抽象；不宣称完整 DLL 合规。
 
 **未实现 / 后续**
 
 | 项 | 状态 |
 |---|---|
 | responder 侧（入站 WREQ/RREQ/WDATA） | 由 testbench 的 RemoteAouModel 扮演 |
-| AXI 合法性负向用例（AxBURST≠INCR / AxSIZE 超位宽 / 跨 4KB / 非对齐） | 未实现，当前假定上游为合法 AXI4 |
 | QoS 三模式仲裁 + 防饿死超时 | 待做，当前为固定优先级 + RP 轮转 |
 | WLAST 重建 | 随 responder 侧一起做（AoU 的 WriteData 不含 WLAST） |
 | ACTIVATE/DEACTIVATE 完整状态机 | 当前在复位释放后直接交换初始 CrdtGrant |
 | Aggregator/Splitter、FDI cancel/stall、Early BRESP、CSR | P2，本阶段不做 |
 | Flit2DFI | 与存储控制器侧同事合并对齐 |
-| 与 FDI 侧 UCIe D2D 链路仿真模型联合测试 | 待对方模型就绪 |
+| 与 FDI 侧 UCIe D2D 链路仿真模型联合测试 | 接入前组件已验证；下一阶段接上真实 UcieLink、存储目标和端到端 scoreboard |
 
 ---
 

@@ -25,6 +25,9 @@ systemc/sim/axi2flit_golden*
 systemc/sim/func_*
 systemc/sim/perf_*
 systemc/sim/golden_*
+systemc/sim/wire_*
+systemc/sim/boundary_*
+systemc/sim/endpoint*
 systemc/obj/
 
 # 波形与日志：每次仿真重新生成，且体积大

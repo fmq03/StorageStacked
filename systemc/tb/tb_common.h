@@ -58,8 +58,8 @@ public:
      */
     void scan(const AouFlit& flit, const MsgSink& sink) {
         ++flits_;
-        granules_ += static_cast<unsigned long>(flit.used_granules);
-        if (flit.used_granules <= 0) return;
+        // 独立扫描器也只看线上字段；不能用发送对象的辅助粒度帮助 DUT 通过测试。
+        // 每段实际识别出的片段单独计数，空粒度即使非零也不参与统计。
 
         int g = 0;
         // ---- (a) 上一个 Flit 尾部截断的消息，续传部分必须落在 G0 ----
@@ -70,7 +70,8 @@ public:
                 carry_have_ = 0;
             } else {
                 int need = carry_.granules - carry_have_;
-                int take = std::min(need, flit.used_granules);
+                int take = std::min(need, GRANULE_COUNT);
+                granules_ += take;
                 std::copy_n(&flit.payload[0], take * GRANULE_BYTES,
                             carry_.data + carry_have_ * GRANULE_BYTES);
                 carry_have_ += take;
@@ -86,19 +87,17 @@ public:
                     sink(carry_);
                 }
             }
-        } else if ((flit.msg_start & 1ULL) == 0) {
-            ++errors_;                     // 没有待续传消息，却不是以新消息开头
-            return;
         }
 
         // ---- (b) 本 Flit 内新起的消息 ----
-        while (g < flit.used_granules) {
-            if (((flit.msg_start >> g) & 1ULL) == 0) { ++errors_; ++g; continue; }
+        while (g < GRANULE_COUNT) {
+            if (((flit.msg_start >> g) & 1ULL) == 0) { ++g; continue; }
             uint8_t b0 = flit.payload[g * GRANULE_BYTES];
             int total = message_granules_from_header(b0);
             if (total <= 0) { ++errors_; break; }
 
-            int take = std::min(total, flit.used_granules - g);
+            int take = std::min(total, GRANULE_COUNT - g);
+            granules_ += take;
             AouMessage msg;
             msg.type     = msg_type_of(b0);
             msg.rp       = msg_rp_of(b0);

@@ -2,7 +2,10 @@
 
 ## 1. 文档定位
 
-本文用于指导后续将 AXI2Flit 与 `reference/ucie-model` 连接。当前阶段不修改代码；待 AXI2Flit 的协议行为和外部接口冻结后，再按本文分阶段实施。
+本文用于指导将 AXI2Flit 与 `reference/ucie-model` 连接。2026-09-07 已完成接入前
+组件：250B 编解码、Format 6 字节映射、UCIe 侧适配器、共享配置和边界测试。
+下一阶段实施真实 UcieLink + 存储目标端联调。当前可依赖的契约见
+[wire_contract.md](../systemc/doc/wire_contract.md)，回归入口为根目录 `make preflight`。
 
 本文重点记录：
 
@@ -73,7 +76,7 @@ UCIe SoC侧适配与链路模型
 
 ## 3. 接入前必须冻结的内容
 
-AXI2Flit 尚未冻结时，不应提前把 UCIe 适配器绑定到其内部辅助字段。至少应先确定以下内容。
+下列内容已形成接入基线，决策结果记录在 §17；辅助字段不能进入 FDI 元数据。
 
 ### 3.1 AoU 线协议格式
 
@@ -93,7 +96,7 @@ AXI2Flit 尚未冻结时，不应提前把 UCIe 适配器绑定到其内部辅�
 
 ### 3.2 外部 Flit 接口
 
-冻结时应选择以下一种边界：
+当前采用第一种边界，第二种保留为未来重构方案：
 
 1. 保留当前 `FlitTransfer + ready/valid`；或
 2. 改为 `sc_fifo` Flit 事务接口。
@@ -177,20 +180,28 @@ AXI2Flit 尚未冻结时，不应提前把 UCIe 适配器绑定到其内部辅�
 
 ### 5.2 目标格式
 
-后续应新增独立格式，例如 `AouFormat6`：
+已新增独立 `AouFormat6`（CLI 为 `aou256`），按 AoU v0.8 图 4：
 
 ```text
-[0..1]     2B   Link Header：序号和replay标志
-[2..251]   250B AoU协议层字节流
-[252..253] 2B   CRC group A
-[254..255] 2B   CRC group B
+[0..1]      FH B0/B1
+[2..61]     G0..G11
+[62..65]    PH B0..B3
+[66..125]   G12..G23
+[126..127]  C0 B0/B1
+[128..129]  PH B4/B5
+[130..189]  G24..G35
+[190..193]  PH B6..B9
+[194..253]  G36..G47
+[254..255]  C1 B0/B1
 ```
 
-现有 CRC 分组可以延续：
+早期版本写成“byte2..251 连续 250B”不准确，已更正。逻辑 FDI payload 的
+`[PH B0..B9][G0..G47]` 由 scatter/gather 转换为上面的物理布局。
+参考链路沿用 CRC16-CCITT 行为算法，但改变分组与位置：
 
-- group A 覆盖 `[0..127]`；
-- group B 覆盖 `[128..251]`；
-- CRC 存放于 `[252..255]`。
+- C0 覆盖 `[0..125]`，存于 `[126..127]`；
+- C1 覆盖 `[128..253]`，存于 `[254..255]`；
+- FH 序号/replay 和 CCITT 均是模型抽象，不构成标准 UCIe DLL 合规声明。
 
 新增格式比直接修改 `Standard256` 更安全，因为可以保留参考模型已有测试和基线结果。
 
@@ -285,7 +296,9 @@ sc_fifo_in<AouWireFlit>  flit_rx;
 | 保持当前 AXI2Flit 接口不变 | 方案A：UCIe侧 ready/valid 适配器 |
 | 后续需要对齐 RTL FDI 接口 | 方案A，并保留可配置寄存延迟 |
 
-最终选择应在 AXI2Flit 接口冻结时记录到本文。无论选择哪一种，序列化、Format 6 和存储侧协议处理均保持一致。
+当前冻结为方案A，实现为 `systemc/integration/ucie_aou_endpoint.h`。接口对照表见
+`systemc/doc/wire_contract.md` §5；状态端口为 `sc_signal<unsigned>`，直接连接
+`UcieLink.link_state`，不是另造一个 `sc_signal<LinkState>`。
 
 ---
 
@@ -353,7 +366,8 @@ UcieAouEndpoint
 
 ### 8.3 `used_granules` 重建
 
-接收侧应按以下顺序推导有效粒度：
+当前接收路径不恢复或读取对象的 `used_granules` 字段；解析器按以下规则计算
+独立的统计值，并维护消息续传状态：
 
 1. 若存在上一 Flit 的未完成消息，从 G0 开始读取续传部分；
 2. 根据该消息总长度计算续传占用；
@@ -383,13 +397,15 @@ UcieAouEndpoint
 
 ### 9.3 适配器延迟
 
-建议将适配延迟独立参数化：
+当前实现的延迟如下，额外 N 拍可配置流水作为后续研究扩展：
 
 | 模式 | 行为 | 用途 |
 |---|---|---|
-| 0周期 | 仅delta cycle/type conversion，不推进`sc_time` | 默认功能和链路性能测试 |
-| 1周期 | TX/RX各带一级holding register | 接近硬件边界 |
-| N周期 | 显式pipeline延迟 | 研究D2D Adapter时延预算 |
+| 纯编解码 | 函数调用，不推进 `sc_time` | 250B 与对象转换 |
+| TX | ready/valid 握手沿直接 `nb_write` | 无新增 TX 流水周期 |
+| RX | FIFO 取出后进入 holding register，下一个 AXI 沿才能握手 | 至少 1 个 AXI 周期 |
+
+FIFO delta 可见性和时钟相位等待另计；不能把以上组合宣传为整体 0 cycle。
 
 适配器延迟必须与以下延迟分开统计：
 
@@ -410,6 +426,9 @@ UcieAouEndpoint
 4. 业务期间不执行独立热复位。
 
 若以后需要中途复位，必须同时定义公共 FIFO、retry buffer、序号、carry、credit 和未完成存储请求的清理/重训练规则。
+
+本轮已验证 AXI2Flit 本地协调复位：清消息 FIFO、路由、credit、顺序表和续传，
+重新公布容量；这依赖测试对端同步丢弃旧事务，并不解除上述 UCIe 热复位限制。
 
 ---
 
@@ -472,39 +491,31 @@ UcieLink.mem_tx_in
 
 ### 11.2 简单请求接口
 
-建议逻辑字段至少包括：
+公共类型已定义在 `systemc/include/simple_mem_if.h`。采用整 burst 请求：
 
 ```text
 SimpleMemRequest
-├── opcode：READ / WRITE
-├── address
-├── transaction tag / AXI ID
-├── length与beat size
-├── RP，单RP时固定0
-├── write data或数据流引用
-├── byte enable / WSTRB
-└── last
+├── write：读/写方向
+├── address：AxChannel，包含地址、ID、LEN、SIZE及属性
+├── rp：单RP时固定0
+└── write_beats：完整AXI lane数据、逐字节strobe和WUSER；读请求为空
 ```
 
-实现可选择：
-
-- 将完整写请求和所有写数据重组后一次性交给 Memory；或
-- 请求和写数据分流，以 beat/片段方式送入 Memory。
-
-首轮模型可选择前者以降低接口复杂度，但应限制最大 burst 并明确内部缓存上限。
+首轮收齐 `address.len+1` 个写 beat 后提交；最大256 beat且不跨4KB。接口不传
+额外 `last`，WREQ/WDATA 配对端根据 LEN 定界。目标端仍须限制 outstanding 总量
+和总缓存容量，不能因为单个 burst 有上限就使用无界队列。
 
 ### 11.3 简单响应接口
 
 ```text
 SimpleMemResponse
-├── type：READ_DATA / WRITE_ACK
-├── transaction tag / AXI ID
-├── response status
-├── read data
-└── last
+├── write、id、rp
+├── resp、user：用于B响应
+└── read_beats：逐beat数据、RRESP、RUSER；写响应为空
 ```
 
-MemoryAouPacker 负责将其转换为 RDATA/WRESP 消息，并按照240B payload容量进行分片和打包。
+MemoryAouPacker 负责转为 RDATA/WRESP；读响应最后一项生成 RLAST，按240B payload
+分片打包。该接口已定义，存储协议目标与实际 Memory 模型留给下一阶段实现。
 
 ### 11.4 不能省略的状态
 
@@ -536,7 +547,7 @@ MemoryAouPacker 负责将其转换为 RDATA/WRESP 消息，并按照240B payload
 | AoU payload | 240B/48 granule | AoU格式固定 |
 | FDI FIFO depth | 8～16起步 | 集成顶层运行时配置 |
 | retry buffer | 按反馈时延配置 | UCIe运行时配置 |
-| adapter latency | 0 cycle | 集成配置 |
+| adapter latency | TX新增0拍，RX holding 1拍 | 另计FIFO和时钟相位等待 |
 
 ### 12.2 Lane、速率和调制
 
@@ -547,7 +558,9 @@ MemoryAouPacker 负责将其转换为 RDATA/WRESP 消息，并按照240B payload
 - x16、24 GT/s、NRZ；或
 - x8、24 GT/s、PAM4。
 
-最终只保留与项目目标硬件一致的一套默认值，其他配置作为参数扫描用例。
+当前统一默认 x16/24G/NRZ，配置源为 `link_config.h`，UCIe 使用
+`make_aou_ucie_config()`。`config-check` 已编译验证 x8/PAM4、TAT80ns 的替代配置。
+该测试验证参数传递与功能；新的性能门限及真实 credit TAT 仍需联调实测。
 
 ---
 
@@ -605,7 +618,7 @@ AoU有效带宽利用率
 
 ## 14. 分阶段实施计划
 
-### 阶段1：冻结 AXI2Flit
+### 阶段1：冻结 AXI2Flit（已完成本轮门禁）
 
 - 完成发送、接收和credit功能；
 - 冻结 RP 参数和默认单RP行为；
@@ -615,23 +628,25 @@ AoU有效带宽利用率
 
 完成标志：AXI2Flit 独立回环测试能够通过字节级序列化检查。
 
-### 阶段2：增加 UCIe `AouFormat6`
+### 阶段2：增加 UCIe `AouFormat6`（组件已完成，链路验证待做）
 
 - 提供250B FDI payload；
 - 保留2B Header和4B CRC；
 - 保留现有 Standard256/Compact68；
 - 增加格式、CRC、错误检测和回归测试。
 
-完成标志：随机250B payload 经 UCIe 正常传输和错误重放后逐字节一致。
+组件门禁已通过：长度、逐字节位置、CRC全bit单错检测及原格式单元回归。
+下一阶段完成标志：随机250B payload 经真实 UcieLink 正常传输和错误重放后逐字节一致。
 
-### 阶段3：实现 SoC 侧边界
+### 阶段3：实现 SoC 侧边界（组件已完成，回环接线待做）
 
 - 实现选定的 FIFO 或 ready/valid 接口；
 - 实现 AoU 序列化/反序列化；
 - 接入 `link_state`；
-- 增加可配置适配延迟和统计。
+- 明确固定TX/RX边界延迟和时间戳；额外可配置流水作为后续扩展。
 
-完成标志：AXI2Flit 发出的 AoU Flit 可经过 UCIe 回环并恢复为相同字节流。
+组件门禁已通过：训练门控、深度1 FIFO、双向256包随机背压、TX握手沿时间戳。
+下一阶段完成标志：AXI2Flit 发出的 AoU Flit 经真实 UCIe 回环后恢复为相同字节流。
 
 ### 阶段4：实现存储侧最小模型
 
@@ -703,22 +718,24 @@ AoU有效带宽利用率
 
 ---
 
-## 17. 待 AXI2Flit 冻结时确认的决策表
+## 17. 接入前已冻结的决策表
 
 | 决策项 | 推荐默认值 | 冻结结果 |
 |---|---|---|
-| 外部Flit接口 | 纯SystemC优先FIFO；保持现接口则用ready/valid | 待定 |
-| 边界传输类型 | 固定250B `AouWireFlit` | 待定 |
-| 适配器位置 | UCIe侧 `UcieAouEndpoint` | 待定 |
-| 默认适配延迟 | 0 cycle | 待定 |
-| UCIe格式 | 新增 `AouFormat6` | 待定 |
-| Link Header/CRC | 2B + 4B | 待规范确认 |
-| 默认RP数 | 1 | 待定 |
-| 默认VC | 0 | 待定 |
-| 默认链路配置 | 与项目目标统一，当前可先对齐48 GB/s | 待定 |
-| Memory请求接口 | `SimpleMemRequest/Response` | 待定 |
-| 写请求缓存方式 | 首轮整burst重组，后续可流式化 | 待定 |
-| 主带宽利用率 | 240B AoU payload归一化 | 待定 |
-| 中途复位 | 首轮不支持，后续单独设计 | 待定 |
+| 外部Flit接口 | ready/valid | 已实现，保留现有四个Flit信号 |
+| 边界传输类型 | 固定250B `AouWireFlit` | 已实现；FDI payload/valid_bytes均250 |
+| 适配器位置 | UCIe侧 `UcieAouEndpoint` | 已实现并独立验证 |
+| 默认适配延迟 | TX新增0拍、RX 1拍 | 已冻结，排队/相位等待单列 |
+| UCIe格式 | `AouFormat6` | 图4字节映射已实现 |
+| Link Header/CRC | 2B + 4B | 槽位按图4；内容算法保留行为抽象 |
+| 默认RP数 | 1 | 已验证1/2/4，允许1～4参数化 |
+| 默认VC | 0 | 已实现，RP不映射成VC |
+| 默认链路配置 | x16/24G/NRZ，48 GB/s | 共享配置并检查一致性 |
+| Memory请求接口 | `SimpleMemRequest/Response` | 公共类型已定义，目标模型待实现 |
+| 写请求缓存方式 | 整burst重组 | 已冻结，目标端须再限制outstanding |
+| 主带宽利用率 | 240B AoU payload归一化 | 保留口径B，与raw效率并列 |
+| 中途复位 | UCIe联调首轮不支持 | 本地协调复位已测试，链路热复位另做 |
 
-AXI2Flit 冻结后，应先填写本表，再开始修改 UCIe 模型。这样可以避免在接入过程中反复更改公共类型、Flit格式和验证口径。
+下一阶段从连接 UcieLink 与实现存储目标开始；先运行 `make preflight` 验证接入基线。
+`reference/` 不进入主仓库，UCIe 修改通过 `systemc/integration/ucie-model-aou.patch`
+交付，使用方法见同目录 README。不能只交付本地 reference 修改而遗漏补丁。

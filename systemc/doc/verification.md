@@ -3,15 +3,24 @@
 > 对应课题：2026ZTE06-01 研究成果2
 > 数据来源：2026-09-07 仿真运行，原始日志见 `sim/func_*.log` 与 `sim/perf_report.txt`
 
+> 接入前补充：PH/完整250B、Format6字节映射、FIFO适配、入口负向与本地协调复位
+> 已新增独立测试。准确线格式和时序见 [wire_contract.md](wire_contract.md)。
+
 ## 1. 运行方法
 
 ```bash
 cd /home/cfy/workspace/axi2flit/systemc
 
+make preflight       # 接入前完整门禁；根目录也可直接运行，任一子目标失败即停止
 make test-all        # 功能回归：256 / 512 / 1024 三种位宽全跑，任一失败返回非 0
 make golden-all      # 黄金字节向量对拍：与 v0.8 PDF 手工转录的线上字节逐字节比对
 make perf-all        # 性能测量 + 硬门限考核：跌破门限返回非 0
 make report          # 同上，并汇总到 sim/perf_report.txt
+make wire-all        # PH/250B/Format6、全部起点续传、结构错误，三位宽
+make boundary-all    # 三位宽×1/2/4 RP协调复位/背压；三位宽×12个入口负向场景
+make endpoint        # UCIe格式与深度1双向FIFO适配组件；不实例化PHY
+make ucie-unit       # 原参考模型22项单元测试
+make config-check    # 另编x8/PAM4/TAT80ns，检查参数传递及功能
 
 make WIDTH=1024 run  # 单跑某一位宽的功能仿真（生成 sim/waveform.vcd）
 make WIDTH=1024 perf # 单跑某一位宽的性能仿真
@@ -99,9 +108,33 @@ AXI B/R 背压。
 | 1024b | 71 | 71 | 0 | GOLDEN VECTORS MATCH SPEC v0.8 |
 
 覆盖的消息：ReadReq / WriteReq / WriteData / WriteDataFull / ReadData / WriteResp /
-CrdtGrant，以及 Flit 头部的 `FDId`、`MsgStart` 位图与 `MsgCredit` 编码。
+CrdtGrant。这71项仅覆盖消息，不包含 Flit Header；PH 与完整 PLP 由下面的
+`tb_aou_wire.cpp` 独立覆盖，不能把两套检查数量混为一谈。
 每一项都核对三件事：消息总 granule 数、首字节的自描述类型/长度编码、
 以及**整条消息的每一个字节**。
+
+### 3.2 接入前新增验证
+
+| 套件 | 配置/结果 | 核心判据 |
+|---|---|---|
+| wire-all | 256/512/1024：1378/1418/1500 项通过，失败0 | 独立PH黄金字节、48位MsgStart walking-one、16位credit、4个FDId、250个物理字节独立位置 |
+| wire-all 续传 | 七类消息×48个起点；4096条固定种子混合业务流 | 反序列化used_granules=-1仍逐消息逐字节一致；空粒度、纯credit、保留编码和重叠起点 |
+| boundary-all 正常 | 三位宽×1/2/4 RP，9组通过 | 旧AW/AR/W、堵塞R/B、carry、credit、顺序表协调清零；初始credit精确重发；96条随机背压读请求守恒 |
+| boundary-all credit事件 | 同上9组 | 每半包两条CrdtGrant；RP4共80事件超过64深度，连续后续Flit不丢；32gr只允许10条RREQ，再补1gr释放第11条 |
+| boundary-all 负向 | 每位宽12组，共36组通过 | AW/AR分别注入FIXED、WRAP、超SIZE、非对齐、跨4KB；W注入提前/缺失WLAST，必须捕获指定AXI fatal |
+| endpoint | 默认配置4199项通过，失败0 | 全2048物理bit单错检测、250B长度契约、训练门控、深度1双向各256包背压守恒、TX握手沿时间戳 |
+| ucie-unit | 22项通过，失败0 | 原Standard256/Compact68独立单元回归 |
+| config-check | x8/PAM4/TAT80ns组件与本地桥通过 | 速率仍48GB/s，参数重编后功能通过，配置不匹配拒绝 |
+
+功能TC1～TC9现在双向都经过250B编解码。出站仍由独立 `FlitScanner` 解析，
+入站由 DUT 的 `AouStreamDecoder` 解析；两者都不依赖发送端辅助粒度。
+随机测试固定种子且等待有上限。负向用例不能用任意异常或超时替代预期拒绝。
+
+这些结果证明接入组件和桥的边界行为，不证明 UCIe PHY/重放/实际内存端已经联调。
+CRC单错检测验证的是参考模型CCITT行为算法和覆盖区间，非标准DLL合规性测试。
+`ucie-unit` 同时编译参考模型主程序，确保CLI及实际链路构造代码可编译；不启动PHY。
+`report` 失败传播也做过负向检查：用 `MAKE=false` 在临时输出目录模拟子回归失败，
+顶层返回2，不再打印“报告生成成功”掩盖错误。
 
 > TC7/TC8 的一个设计要点：256b 的 granule 数（3/7/8/1）大多能整除 48，**朴素的
 > 激励根本不会产生跨 Flit 消息**，测试会在"没测到"的情况下静默通过。因此 TC7 用
@@ -348,11 +381,10 @@ MSB-first 那个 bug 就是这么漏过去的。现在：
 
 ## 6. 尚需追加的验证
 
-- 长时间随机 ready/valid 背压与随机 credit grant（当前是确定性激励）。
-- 发送 credit 计数器饱和、复位打断事务、非法 RP 注入等异常路径。
-- burst 长度扫描（当前固定 16 beat）与非对齐/窄传输（AoU 只支持 INCR）。
+- 更长时间、多随机种子的并发读写、随机 credit grant 和链路错误组合；当前新增
+  固定种子单请求读背压及双向Flit FIFO压力，不等价于完整并发事务随机验证。
+- 发送 credit 计数器饱和、非法 RP 注入；本地协调复位已覆盖，链路热复位仍未覆盖。
+- burst 长度扫描（性能负载当前固定16 beat）与窄传输的真实内存lane/WSTRB语义。
 - QoS 三模式仲裁实现后的多 RP 带宽隔离与防饿死验证。
-- AXI 合法性负向用例（AxBURST 非 INCR、AxSIZE 超位宽、4KB 边界跨越、非对齐地址）：
-  当前 DUT 只在正向路径上断言，尚未构造非法激励验证其拒绝行为。
 - 与 FDI 侧 UCIe D2D 链路仿真模型的联合测试：届时用真实链路模型替换
   `LinkPacer + RemoteAouModel`，重跑 PERF-1～PERF-4 并与本表对比。

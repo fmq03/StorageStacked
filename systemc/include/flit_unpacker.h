@@ -9,8 +9,8 @@
  *
  * 【跨 Flit 续传的接收侧实现（P0-2）】
  * MsgStart[47:0] 的语义是"granule i 是一条新消息的第一个粒度"。因此：
- *   - 若 MsgStart[0] = 0 且本 Flit 有有效粒度，说明它以上一个 Flit 未发完的
- *     消息续传开头，前若干个粒度要拼接到 carry_msg_ 上；
+ *   - 若上个 Flit 留下未完成消息，本 Flit 的 G0 必须是续传，MsgStart[0]=0；
+ *     若无未完成消息，MsgStart 为 0 的位置只是空粒度，允许整个 Flit 为空；
  *   - 每条新消息的总长度，由它自己的首字节（MSGTYPE + DLENGTH）算出，
  *     而不是靠"相邻两个 MsgStart 位之间的距离"——后者在消息被截断时会算错。
  */
@@ -19,6 +19,7 @@
 
 #include "aou_types.h"
 #include "credit_manager.h"
+#include "aou_stream_decoder.h"
 #include <vector>
 
 // 一拍最多把多少条已解析消息写进下游 FIFO（与 PACK_MSGS_PER_CYCLE 对称）
@@ -50,11 +51,13 @@ private:
     FlitTransfer holding_flit_;
     std::vector<AouMessage> pending_messages_;
     std::size_t pending_index_ = 0;
+    // RP=4 时一个合法 Flit 的多条 CrdtGrant 可产生超过64条 credit 事件。
+    // 不可阻塞 write 后继续保持旧 ready；事件与消息共同占用 holding register。
+    std::vector<CreditUpdate> pending_credits_;
+    std::size_t pending_credit_index_ = 0;
 
     // ---- 跨 Flit 续传状态 ----
-    bool       carry_active_ = false;   // 有一条消息尚未收全
-    AouMessage carry_msg_{};            // 已经收到的部分（granules 为整条长度）
-    int        carry_have_   = 0;       // 已收到的粒度数
+    AouStreamDecoder stream_decoder_; // 仅保存线上消息续传状态，不依赖辅助粒度字段
 
     unsigned long flits_received_    = 0;
     unsigned long granules_received_ = 0;

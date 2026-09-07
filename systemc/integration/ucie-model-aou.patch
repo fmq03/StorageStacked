@@ -1,0 +1,258 @@
+diff --git a/INTERFACE.md b/INTERFACE.md
+index 60cd022..3567bd3 100644
+--- a/INTERFACE.md
++++ b/INTERFACE.md
+@@ -1,5 +1,11 @@
+ # UcieLink SystemC 事务级接口说明
+ 
++> 2026-09-07 AoU 接入扩展：四个 FDI FIFO 端口类型不变；选择 `AouFormat6` 时
++> `payload.size()` 与 `valid_bytes` 必须为250，协议语义全部位于payload中。
++> PH按图4散布，不能从物理byte2连续取250B。状态仍为 `sc_out<unsigned>`。
++> AXI侧连接与适配延迟见 [线格式契约 §5](../../systemc/doc/wire_contract.md)。
++> 以下原有格式的236B/64B约束仅适用于Standard256/Compact68。
++
+ ## 1. 模块边界
+ 
+ `UcieLink` 定义在 `src/ucie_link.h`，是可独立实例化的双向 UCIe 行为级链路：
+diff --git a/MODELING_AND_VERIFICATION.md b/MODELING_AND_VERIFICATION.md
+index 995c8a7..b5ec7fb 100644
+--- a/MODELING_AND_VERIFICATION.md
++++ b/MODELING_AND_VERIFICATION.md
+@@ -1,5 +1,10 @@
+ # UCIe 高速互联模型：需求、建模方法与验证说明
+ 
++> 2026-09-07 补充：AoU 格式位置与全部2048个物理bit单错检测由主项目
++> `make endpoint` 覆盖，原22项单元测试继续保留。新增布局不改变行为CRC算法；
++> AoU 经过真实 PHY/ACK/NAK/replay 的联合验证尚未开展，不沿用原格式报告作为证据。
++> 验证范围见 [AXI2FLIT 验证说明](../../systemc/doc/verification.md)。
++
+ > 文档日期：2026-08-25
+ > 适用目录：`ucie_systemc/`
+ > 实现语言：C++17 + SystemC 2.3.4
+diff --git a/Makefile b/Makefile
+index 943626f..fc4f525 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,12 +2,18 @@ CXX ?= g++
+ CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra
+ LDLIBS ?= -lsystemc
+ 
++# AXI2FLIT 接入扩展：共用 SystemC 安装和 Format 6 字节映射。
++SYSTEMC_HOME ?= $(HOME)/.local/systemc-2.3.4-cxx17
++AOU_INCLUDE ?= ../../systemc/include
++CXXFLAGS += -I$(SYSTEMC_HOME)/include -I$(AOU_INCLUDE)
++LDLIBS += -L$(SYSTEMC_HOME)/lib -Wl,-rpath,$(SYSTEMC_HOME)/lib -lpthread
++
+ BUILD := build
+ BIN := $(BUILD)/ucie_sc_sim
+ UNIT_BIN := $(BUILD)/ucie_unit_tests
+ SRC := src/ucie_systemc_main.cpp
+ UNIT_SRC := src/ucie_unit_tests.cpp
+-HDR := src/ucie_common.h src/ucie_fdi.h src/ucie_phy.h src/ucie_link.h
++HDR := src/ucie_common.h src/ucie_fdi.h src/ucie_phy.h src/ucie_link.h $(AOU_INCLUDE)/aou_format6.h
+ 
+ .PHONY: all run unit-test test sweep validate clean
+ 
+diff --git a/README.md b/README.md
+index d1196d0..6f520d2 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,12 @@
+ # UCIe 双向高速互联仿真模型（SystemC）
+ 
++> AXI2FLIT 接入扩展（2026-09-07）：新增 `--format aou256`，FDI payload 固定250B，
++> 物理布局采用 AoU v0.8 图4散布；Standard256/Compact68 保留。FH/CRC16-CCITT
++> 是行为抽象，非标准 DLL 完整实现。默认 CLI 仍为原配置；AXI2FLIT 使用
++> `make_aou_ucie_config()` 生成 x16/24G/NRZ 配置。构建依赖
++> `../../systemc/include/aou_format6.h`，可用 `AOU_INCLUDE` 覆盖。
++> 详细格式、配置和限制见 [线格式契约](../../systemc/doc/wire_contract.md)。
++
+ 本模型对应项目研究成果 3，使用 SystemC 建模 UCIe D2D Adapter、事务级 FDI、双向业务链路和行为级 PHY。它支持 24 GT/s 及以上速率、Standard 256B/Compact 68B Flit、PAM4/NRZ、串并转换、CRC、ACK/NAK、重传，以及 AWGN、ISI、jitter、lane skew 和 CDR 抽象。
+ 
+ 需求追踪、公式、验证方法和可信范围详见 [`MODELING_AND_VERIFICATION.md`](MODELING_AND_VERIFICATION.md)，源码分工见 [`src/README.md`](src/README.md)。
+diff --git a/TEST_PLAN.md b/TEST_PLAN.md
+index e6f3bb3..237f8e2 100644
+--- a/TEST_PLAN.md
++++ b/TEST_PLAN.md
+@@ -1,5 +1,9 @@
+ # UCIe 独立链路测试计划
+ 
++> AoU 扩展组件测试：在 AXI2FLIT 根目录执行 `make endpoint ucie-unit`。
++> 覆盖精确250B长度、图4散布/收集、FH/PH/payload/CRC逐bit翻转、原格式保护、
++> 深度1双向FIFO适配和训练门控。下一阶段才运行AoU真实链路错误重放与端到端内存测试。
++
+ ## 1. 验证入口
+ 
+ ```bash
+diff --git a/src/README.md b/src/README.md
+index de936c9..11c991d 100644
+--- a/src/README.md
++++ b/src/README.md
+@@ -1,5 +1,10 @@
+ # `src` 目录源码说明
+ 
++> AoU 扩展：ucie_common.h 新增 AouFormat6/aou256，build/check 使用126B半包
++> CRC覆盖；ucie_link.h 的 unpack_fdi 调用 gather 恢复250B逻辑PLP。
++> 字节映射共用 `systemc/include/aou_format6.h`；物理CRC槽为126/127和254/255。
++> 下文 Standard256 连续 payload 与尾部 CRC 表格仅描述原格式，不适用于 AoU。
++
+ 本目录包含可复用的 UCIe SystemC 双向行为级链路模块、测试平台和单元测试。
+ 
+ | 文件 | 主要职责 | SystemC 依赖 |
+diff --git a/src/ucie_common.h b/src/ucie_common.h
+index 3d4fe1c..c3b8923 100644
+--- a/src/ucie_common.h
++++ b/src/ucie_common.h
+@@ -8,12 +8,13 @@
+ #include <stdexcept>
+ #include <string>
+ #include <vector>
++#include "aou_format6.h"
+ 
+ // ---------------------------------------------------------------------------
+ // Modulation / flit format enums
+ // ---------------------------------------------------------------------------
+ enum class Modulation { PAM4, NRZ };
+-enum class FlitFormat { Standard256, Compact68 };
++enum class FlitFormat { Standard256, Compact68, AouFormat6 };
+ 
+ // ---------------------------------------------------------------------------
+ // Configuration
+@@ -76,12 +77,13 @@ struct Config {
+         return modulation == Modulation::PAM4 ? 2U : 1U;
+     }
+     std::uint32_t flit_bytes() const {
+-        return flit_format == FlitFormat::Standard256 ? 256U : 68U;
++        return flit_format == FlitFormat::Compact68 ? 68U : 256U;
+     }
+     std::uint32_t payload_bytes() const {
+         // Standard 256B: 2B flit hdr + 236B TLP + 4B DLLP + 10B reserved + 4B CRC
+         // Compact 68B  : 2B flit hdr + 64B data + 2B CRC
+-        return flit_format == FlitFormat::Standard256 ? 236U : 64U;
++        return flit_format == FlitFormat::AouFormat6 ? 250U :
++               flit_format == FlitFormat::Standard256 ? 236U : 64U;
+     }
+     std::uint32_t flit_bits() const { return flit_bytes() * 8U; }
+     std::uint32_t serialize_ui() const {
+@@ -120,7 +122,7 @@ inline void print_help(const char* prog) {
+         << "  --payload-file PATH  external FDI payloads, one hex payload per line\n"
+         << "  --response-file PATH write returned payloads as transaction_id,vc,hex\n"
+         << "  --memory-delay N     memory-side response latency in UI (default 32)\n"
+-        << "  --format F           flit format: standard256 | compact68 (default standard256)\n"
++        << "  --format F           standard256 | compact68 | aou256 (default standard256)\n"
+         << "  --lanes N            number of mainband lanes (default 16)\n"
+         << "  --rate-gtps X        per-lane rate in GT/s (default 24)\n"
+         << "  --mod M              modulation: pam4 | nrz (default pam4)\n"
+@@ -169,6 +171,7 @@ inline Config parse_args(int argc, char** argv) {
+             const std::string v = need(i);
+             if (v == "standard256") cfg.flit_format = FlitFormat::Standard256;
+             else if (v == "compact68") cfg.flit_format = FlitFormat::Compact68;
++            else if (v == "aou256") cfg.flit_format = FlitFormat::AouFormat6;
+             else throw std::runtime_error("unknown flit format: " + v);
+         }
+         else if (a == "--lanes") cfg.num_lanes = static_cast<std::uint32_t>(std::stoul(need(i)));
+@@ -269,6 +272,21 @@ inline std::vector<std::uint8_t> build_flit(const Config& cfg, std::uint64_t seq
+     if (payload.size() > cfg.payload_bytes()) {
+         throw std::runtime_error("FDI payload exceeds configured flit payload capacity");
+     }
++    if (cfg.flit_format == FlitFormat::AouFormat6) {
++        // AoU FDI 必须提供完整 250B，包括纯 credit Flit；禁止隐式短包补零。
++        if (payload.size() != 250U) throw std::runtime_error("AoU PLP must be exactly 250B");
++        aou_format6::Payload plp{};
++        std::copy(payload.begin(), payload.end(), plp.begin());
++        auto frame = aou_format6::scatter(plp,
++            {static_cast<std::uint8_t>(seq), static_cast<std::uint8_t>(replay ? 1 : 0)});
++        // CRC 沿用参考模型的 CCITT 行为抽象，各保护一个半 Flit 的 126B。
++        // 槽位对齐 AoU 图 4；并非声称实现 UCIe 标准的 CRC/FH 编码。
++        const auto ca = crc16_ccitt(frame.data(), 126);
++        const auto cb = crc16_ccitt(frame.data() + 128, 126);
++        frame[126] = ca >> 8; frame[127] = ca & 255;
++        frame[254] = cb >> 8; frame[255] = cb & 255;
++        return {frame.begin(), frame.end()};
++    }
+     std::vector<std::uint8_t> b(cfg.flit_bytes(), 0U);
+     b[0] = static_cast<std::uint8_t>(seq & 0xFFU);
+     b[1] = replay ? 0x01U : 0x00U;
+@@ -296,7 +314,11 @@ inline FlitCheck check_flit(const Config& cfg, const std::vector<std::uint8_t>&
+     if (b.size() != cfg.flit_bytes()) return r;
+     r.seq8 = b[0];
+     r.replay_flag = (b[1] & 0x01U) != 0U;
+-    if (cfg.flit_format == FlitFormat::Standard256) {
++    if (cfg.flit_format == FlitFormat::AouFormat6) {
++        const auto ca = crc16_ccitt(b.data(), 126);
++        const auto cb = crc16_ccitt(b.data() + 128, 126);
++        r.crc_ok = ca == ((b[126] << 8) | b[127]) && cb == ((b[254] << 8) | b[255]);
++    } else if (cfg.flit_format == FlitFormat::Standard256) {
+         const std::uint16_t ca = crc16_ccitt(b.data(), 128U);
+         const std::uint16_t cb = crc16_ccitt(b.data() + 128U, 124U);
+         const std::uint16_t ga = static_cast<std::uint16_t>((b[252] << 8U) | b[253]);
+diff --git a/src/ucie_link.h b/src/ucie_link.h
+index 838f67b..298d15e 100644
+--- a/src/ucie_link.h
++++ b/src/ucie_link.h
+@@ -17,6 +17,16 @@
+ 
+ namespace ucie_detail {
+ 
++// 公共 FDI 长度契约单独检查，便于接入前单元验证，无需启动完整 PHY。
++inline void require_valid_fdi(const Config& cfg, const FdiFlit& flit) {
++    if (flit.payload.size() != cfg.payload_bytes())
++        throw std::runtime_error("FDI payload is not padded to configured size");
++    if (flit.valid_bytes > flit.payload.size())
++        throw std::runtime_error("FDI valid_bytes exceeds payload");
++    if (cfg.flit_format == FlitFormat::AouFormat6 && flit.valid_bytes != 250U)
++        throw std::runtime_error("AoU FDI valid_bytes must be exactly 250");
++}
++
+ // Internal link frame. This type never crosses a public UcieLink FDI port.
+ struct Frame {
+     std::vector<std::uint8_t> bytes;
+@@ -48,8 +58,17 @@ inline FdiFlit unpack_fdi(const Config& cfg, const Frame& frame) {
+         throw std::runtime_error("received frame is shorter than the configured FDI payload");
+     }
+     FdiFlit flit;
+-    flit.payload.assign(frame.bytes.begin() + 2U,
+-                        frame.bytes.begin() + 2U + cfg.payload_bytes());
++    if (cfg.flit_format == FlitFormat::AouFormat6) {
++        if (frame.bytes.size() != 256U)
++            throw std::runtime_error("AoU physical flit must be exactly 256B");
++        aou_format6::Frame physical{};
++        std::copy(frame.bytes.begin(), frame.bytes.end(), physical.begin());
++        const auto plp = aou_format6::gather(physical);
++        flit.payload.assign(plp.begin(), plp.end());
++    } else {
++        flit.payload.assign(frame.bytes.begin() + 2U,
++                            frame.bytes.begin() + 2U + cfg.payload_bytes());
++    }
+     flit.valid_bytes = frame.valid_bytes;
+     flit.transaction_id = frame.transaction_id;
+     flit.vc = frame.vc;
+@@ -100,13 +119,7 @@ SC_MODULE(TxAdapter) {
+                 if (fdi_in->num_available() > 0 &&
+                     retry_buffer_.size() < cfg_.retry_buffer_size) {
+                     FdiFlit flit = fdi_in->read();
+-                    if (flit.payload.size() != cfg_.payload_bytes()) {
+-                        throw std::runtime_error(direction_ +
+-                                                 " FDI payload is not padded to configured size");
+-                    }
+-                    if (flit.valid_bytes > flit.payload.size()) {
+-                        throw std::runtime_error(direction_ + " FDI valid_bytes exceeds payload");
+-                    }
++                    require_valid_fdi(cfg_, flit);
+                     const std::uint64_t seq = next_seq_++;
+                     retry_buffer_[seq] = Entry{std::move(flit)};
+                     stats_->max_retry_buffer_occupancy = std::max<std::uint64_t>(
+diff --git a/src/ucie_systemc_main.cpp b/src/ucie_systemc_main.cpp
+index d713617..9ef1aa7 100644
+--- a/src/ucie_systemc_main.cpp
++++ b/src/ucie_systemc_main.cpp
+@@ -507,7 +507,8 @@ static void print_summary(const Config& cfg, const Stats& stats, const Summary&
+               << ", transactions=" << cfg.flit_count
+               << ", memory_delay=" << cfg.memory_delay_ui << " UI\n";
+     std::cout << "flit_format="
+-              << (cfg.flit_format == FlitFormat::Standard256 ? "Standard 256B" : "Compact 68B")
++              << (cfg.flit_format == FlitFormat::AouFormat6 ? "AoU Format 6" :
++                  cfg.flit_format == FlitFormat::Standard256 ? "Standard 256B" : "Compact 68B")
+               << ", payload_capacity=" << cfg.payload_bytes() << "B\n";
+     std::cout << "lanes=" << cfg.num_lanes << ", rate=" << cfg.lane_rate_gtps
+               << " GT/s, mod=" << (cfg.modulation == Modulation::PAM4 ? "PAM4" : "NRZ")

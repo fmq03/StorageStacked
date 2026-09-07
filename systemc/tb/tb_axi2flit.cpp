@@ -29,6 +29,7 @@
 #include <vector>
 #include "axi2flit.h"
 #include "tb_common.h"
+#include "aou_wire.h"
 
 static constexpr double   CLK_PERIOD_NS = MODEL_CLK_PERIOD_NS;
 static constexpr unsigned TEST_RP_COUNT = 2;
@@ -127,7 +128,9 @@ SC_MODULE(BridgeTb) {
     // FDI 输入遵循 ready/valid：valid 一旦拉高，在观察到 ready 前保持 Flit 不变。
     void send_inbound_flit(const AouFlit& flit) {
         while (!flit_in_ready.read()) wait();
-        FlitTransfer transfer(flit);
+        // 所有入站激励只经过 250B 内容；used_granules 故意丢弃，覆盖真实
+        // UCIe 接入之后的条件，包括 credit-only、非满包和跨 Flit 的尾片段。
+        FlitTransfer transfer(deserialize_aou(serialize_aou(flit)));
         flit_in.write(transfer);
         do { wait(); } while (!flit_in_ready.read());
         flit_in.write(FlitTransfer{});
@@ -527,7 +530,8 @@ SC_MODULE(BridgeTb) {
             FlitTransfer transfer = flit_out.read();
             if (!transfer.valid || !flit_ready.read()) continue;
             ++accepted_flits;
-            const AouFlit& flit = transfer.flit;
+            // 出站同样穿过线格式边界，再由独立 FlitScanner 核对消息。
+            const AouFlit flit = deserialize_aou(serialize_aou(transfer.flit));
 
             bool had_header_credit = (flit.msg_credit != 0);
             decode_header_credits(flit.msg_credit, TEST_RP_COUNT,

@@ -31,6 +31,7 @@ CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -g \
             -I$(SYSTEMC_HOME)/include \
             -I./include
+CXXFLAGS += $(EXTRA_CXXFLAGS)
 LDFLAGS  := -L$(SYSTEMC_HOME)/lib \
             -lsystemc -lpthread \
             -Wl,-rpath,$(SYSTEMC_HOME)/lib
@@ -59,25 +60,30 @@ TARGET        := $(SIM_DIR)/axi2flit_sim_$(WIDTH)
 PERF_TARGET   := $(SIM_DIR)/axi2flit_perf_$(WIDTH)
 GOLDEN_TARGET := $(SIM_DIR)/axi2flit_golden_$(WIDTH)
 
-.PHONY: all run perf golden wave clean test-all perf-all golden-all report
+.PHONY: all run perf golden wave clean test-all perf-all golden-all report wire-all preflight
+.PHONY: boundary-all endpoint ucie-unit config-check reference-check FORCE
 
 all: $(TARGET)
+
+# 宏配置不体现在源码时间戳中；单项 run/perf/golden 也强制重编，避免修改
+# EXTRA_CXXFLAGS（速率/TAT）后误用同位宽的旧二进制。
+FORCE:
 
 $(SIM_DIR):
 	@mkdir -p $(SIM_DIR)
 
 # ---- 默认位宽的功能仿真 ----
-$(TARGET): $(DUT_SRCS) $(FUNC_TB) $(HDRS) | $(SIM_DIR)
+$(TARGET): $(DUT_SRCS) $(FUNC_TB) $(HDRS) FORCE | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(DUT_SRCS) $(FUNC_TB) -o $@ $(LDFLAGS)
 	@echo "编译成功：$@（AXI_DATA_WIDTH=$(WIDTH)）"
 
 # ---- 默认位宽的性能仿真 ----
-$(PERF_TARGET): $(DUT_SRCS) $(PERF_TB) $(HDRS) | $(SIM_DIR)
+$(PERF_TARGET): $(DUT_SRCS) $(PERF_TB) $(HDRS) FORCE | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(DUT_SRCS) $(PERF_TB) -o $@ $(LDFLAGS)
 	@echo "编译成功：$@（AXI_DATA_WIDTH=$(WIDTH)）"
 
 # ---- 黄金字节向量对拍（不依赖 SystemC 内核，纯静态编译） ----
-$(GOLDEN_TARGET): $(GOLDEN_TB) $(HDRS) | $(SIM_DIR)
+$(GOLDEN_TARGET): $(GOLDEN_TB) $(HDRS) FORCE | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(GOLDEN_TB) -o $@ $(LDFLAGS)
 	@echo "编译成功：$@（AXI_DATA_WIDTH=$(WIDTH)）"
 
@@ -136,13 +142,68 @@ golden-all: | $(SIM_DIR)
 	exit $$fail
 
 report: | $(SIM_DIR)
-	@$(MAKE) --no-print-directory perf-all > $(SIM_DIR)/perf_report.txt 2>&1; \
-	 echo "性能报告已生成：$(SIM_DIR)/perf_report.txt"
+	@$(MAKE) --no-print-directory perf-all > $(SIM_DIR)/perf_report.txt 2>&1
+	@echo "性能报告已生成：$(SIM_DIR)/perf_report.txt"
+
+# 接入前门禁：新增格式/解析回归单列，避免把消息 golden 的 71 项虚报成 PH 覆盖。
+wire-all: | $(SIM_DIR)
+	@set -e; for w in $(WIDTHS); do \
+	  $(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$$w $(TB_DIR)/tb_aou_wire.cpp \
+	    -o $(SIM_DIR)/wire_$$w $(LDFLAGS); \
+	  ./$(SIM_DIR)/wire_$$w; \
+	done
+
+preflight: reference-check
+	$(MAKE) test-all
+	$(MAKE) golden-all
+	$(MAKE) wire-all
+	$(MAKE) boundary-all
+	$(MAKE) endpoint
+	$(MAKE) ucie-unit
+	$(MAKE) config-check
+	$(MAKE) perf-all
+
+# 每种数据位宽测试 1/2/4 RP，并从 DUT 端口驱动 12 个明确的非法 AXI 场景。
+boundary-all: | $(SIM_DIR)
+	@set -e; for w in $(WIDTHS); do \
+	  $(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$$w $(DUT_SRCS) $(TB_DIR)/tb_preintegration.cpp \
+	    -o $(SIM_DIR)/boundary_$$w $(LDFLAGS); \
+	  for rp in 1 2 4; do ./$(SIM_DIR)/boundary_$$w normal $$rp; done; \
+	  for tc in aw_fixed ar_fixed aw_wrap ar_wrap aw_size ar_size aw_align ar_align aw_4k ar_4k w_early w_missing; do \
+	    ./$(SIM_DIR)/boundary_$$w $$tc; \
+	  done; \
+	done
+
+# 组件单测引用 UCIe 公共类型和格式函数，不实例化 UcieLink/PHY。
+UCIE_DIR := ../reference/ucie-model
+ENDPOINT_FLAGS := -I./integration -I$(UCIE_DIR)/src
+endpoint: reference-check | $(SIM_DIR)
+	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) $(TB_DIR)/tb_ucie_endpoint.cpp -o $(SIM_DIR)/endpoint $(LDFLAGS)
+	./$(SIM_DIR)/endpoint
+
+ucie-unit: reference-check
+	$(MAKE) -C $(UCIE_DIR) SYSTEMC_HOME=$(SYSTEMC_HOME) all unit-test
+
+# 参数替换也实际编译并运行：x8 PAM4 仍是 48 GB/s，TAT 改为 80ns。
+# 不复用默认配置的可执行文件，防止 make 未感知宏变化而命中旧缓存。
+config-check: reference-check | $(SIM_DIR)
+	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) -DAOU_LINK_LANES=8 -DAOU_LINK_BITS_PER_SYMBOL=2 \
+	  -DAOU_LINK_TAT_NS=80 $(TB_DIR)/tb_ucie_endpoint.cpp -o $(SIM_DIR)/endpoint_config $(LDFLAGS)
+	./$(SIM_DIR)/endpoint_config
+	$(CXX) $(CXXFLAGS) -DAOU_LINK_LANES=8 -DAOU_LINK_BITS_PER_SYMBOL=2 -DAOU_LINK_TAT_NS=80 \
+	  $(DUT_SRCS) $(TB_DIR)/tb_preintegration.cpp -o $(SIM_DIR)/boundary_config $(LDFLAGS)
+	./$(SIM_DIR)/boundary_config normal 1
+
+# reference 不纳入主仓库。反向检查只读确认交付补丁已安装，缺失时给出操作入口。
+reference-check:
+	@git -C $(UCIE_DIR) apply --reverse --check ../../systemc/integration/ucie-model-aou.patch || \
+	  { echo "UCIe 接入补丁未安装或与本地修改冲突，请按 integration/README.md 检查。"; exit 1; }
 
 wave:
 	gtkwave $(SIM_DIR)/waveform.vcd &
 
 clean:
+	rm -f $(SIM_DIR)/wire_* $(SIM_DIR)/boundary_* $(SIM_DIR)/endpoint*
 	rm -f $(SIM_DIR)/axi2flit_sim_* $(SIM_DIR)/axi2flit_perf_* $(SIM_DIR)/axi2flit_golden_*
 	rm -f $(SIM_DIR)/axi2flit_sim $(SIM_DIR)/axi2flit_perf
 	rm -f $(SIM_DIR)/func_* $(SIM_DIR)/perf_* $(SIM_DIR)/golden_*
