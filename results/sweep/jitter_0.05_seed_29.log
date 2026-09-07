@@ -1,0 +1,31 @@
+
+        SystemC 2.3.4-Accellera --- Apr 22 2024 14:54:19
+        Copyright (c) 1996-2022 by all Contributors,
+        ALL RIGHTS RESERVED
+
+Info: /OSCI/SystemC: Simulation stopped by user.
+=== Bidirectional UCIe SystemC Simulation ===
+workload=internal, transactions=1500, memory_delay=32 UI
+flit_format=Standard 256B, payload_capacity=236B
+lanes=16, rate=24.000000 GT/s, mod=PAM4, UI=41.666667 ps, serialize=64 UI
+
+Requests delivered          : 1500/1500
+Responses delivered         : 1500/1500
+Completed payload bytes     : 354000
+Active link time            : 4010.865591 ns
+Completed payload throughput: 706.082001 Gbps
+One-direction raw capacity  : 768.000000 Gbps
+Bandwidth utilization       : 91.937760 %
+Round-trip Avg/P50/P95/P99   : 12.056513/13.500108/13.500108/13.500108 ns
+Forward/reverse avg latency : 3.416666/7.306503 ns
+
+FWD TX new/replay, ACK/NAK : 1500/0, 1500/0
+FWD CRC/seq fail, PHY frames: 0/0, 1500
+REV TX new/replay, ACK/NAK : 1500/2, 1499/1
+REV CRC/seq fail, PHY frames: 1/1, 1502
+
+Aggregate symbol error rate : 0.000000325
+Aggregate bit error rate    : 0.000000163
+Observed flit fail rate     : 0.000666223
+Forward/reverse integrity   : 0/0
+Total integrity errors      : 0

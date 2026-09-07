@@ -1,0 +1,8 @@
+# 编译产物
+build/
+*.o
+*.d
+
+# SystemC / 仿真临时文件
+*.vcd
+*.wlf
