@@ -1,11 +1,5 @@
 /**
- * @file tb_preintegration.cpp
- * @brief AXI2Flit 接入前系统边界测试：真实端口负向检查、协调复位、随机背压。
- *
- * sc_main 作为主控，时钟上升沿在奇数 ns；主控在偶数 ns 更新并采样信号，
- * 再推进到下一个偶数 ns，避免与 DUT 上升沿线程竞态。所有等待都有周期上限。
- * 正常模式覆盖 1/2/4 RP；负向模式必须捕获指定的 AXI fatal，普通超时或其他
- * SystemC 报错不能充当“期望失败”。复位只验证本地桥与测试对端协调清空。
+ * 桥边界自检。覆盖资源平面配置、协调复位、背压及非法AXI入口请求。
  */
 #include "axi2flit.h"
 #include "aou_wire.h"
@@ -129,7 +123,7 @@ static void reset_and_backpressure(Harness& h) {
                          initial[rp][credit_kind_index(CreditKind::WriteResp)] == RX_WRESP_CREDITS_PER_RP,
                          "initial credit not republished exactly once");
 
-    // 重用相同 ID，但改用另一 RP。未清除 order guard 会立即触发 C-1 违例。
+    // 复位后用相同 ID 访问另一资源平面，确认顺序跟踪状态已清空。
     a.qos = h.rp_count - 1; a.addr = 0x2000;
     h.send_ax(a, false); h.send_ax(a, true); h.send_w(true);
     Harness::require(h.dut.order_violations() == 0, "RP order state survived reset");

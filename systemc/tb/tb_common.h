@@ -1,25 +1,6 @@
 /**
- * @file tb_common.h
- * @brief 功能 TB 与性能 TB 共用的检查器、链路节流器和远端 AoU 模型
- *
- * 本文件里的东西都不是 DUT 的一部分，而是"独立于 DUT 再实现一遍"的参考模型：
- *   - FlitScanner      ：独立的 Flit 消息提取器（含跨 Flit 续传），用来交叉验证
- *                        DUT 打包器的输出确实能被一个第三方解析器还原；
- *   - LinkPacer        ：把 UCIe 链路的真实速率（48GB/s）折算到 2ns 时钟上，
- *                        让 FDI 的 ready 呈现出正确的平均节奏（只管"速率"）；
- *   - FlitDelayLine    ：链路的"飞行时间"（只管"延迟"）。速率与延迟是两件
- *                        独立的事，第一版把它们混在一起，导致文档里出现了
- *                        "往返值含每个 Flit 5.333ns"这种站不住脚的说法；
- *   - RemoteAouModel   ：链路对端（存储控制器一侧）的 AoU 协议模型，负责回
- *                        ReadData / WriteResp，并按 AoU 规则归还 credit；
- *   - LatencyStat / BandwidthStat ：延迟与带宽统计。
- *
- * 【为什么参考模型要独立实现一遍】
- * 如果 TB 直接复用 DUT 的 FlitUnpacker 来检查 FlitPacker，两边共用同一份
- * 边界判定代码，打包/解包同时算错时测试仍然会通过。FlitScanner 因此独立
- * 实现一遍消息定界逻辑，只共用 aou_types.h 中的协议常量。
+ * 测试平台共用工具：独立帧扫描、链路节流、飞行队列、数据图样和简化响应器。
  */
-
 #pragma once
 
 #include "axi2flit.h"
@@ -148,7 +129,7 @@ private:
     unsigned long misc_granules_     = 0;
 };
 
-// 把一串消息按 AoU 规则打成若干 Flit：装不下时截断到下一个 Flit 的 G0 续传。
+// 把一串消息按 桥接消息 规则打成若干 Flit：装不下时截断到下一个 Flit 的 G0 续传。
 // testbench 用它构造"消息跨 Flit"的入站激励，检验 DUT 解包侧的续传重组。
 inline std::vector<AouFlit> pack_messages_into_flits(
         const std::vector<AouMessage>& msgs) {
@@ -208,39 +189,16 @@ private:
 // ============================================================
 //  FlitDelayLine：链路的"飞行时间"
 // ============================================================
-/**
- * LinkPacer 决定"多久能发一包"，本类决定"发出去多久才到"。第一版模型里
- * 没有这一层：Flit 在握手当拍就出现在对端，所以测出来的 10ns 往返其实只有
- * 桥接单元自己的 4ns TX + 4ns RX + 2ns TB 周转，链路飞行时间是 0。
- *
- * 现在把飞行时间显式建模成一条带时间戳的队列：
- *   push(now, x)          —— 进入链路，标记到达时刻 now + delay
- *   pop_ready(now, x)     —— 到达时刻已到才能取走
- *
- * 【容量只是安全阀，不是节流阀】
- * 这条队列建模的是"导线"，不是"缓冲区"。导线不会因为装满而反压发送方——
- * 真正的反压来自 credit。所以容量必须严格大于物理在飞包数
- * （飞行时间 ÷ 每包占用时间），只用来兜住参数配错时的无限增长。
- *
- * 这里踩过一次坑：最初写成 capacity = 1 + floor(delay/flit)，40ns TAT 下
- * 算出来是 4，而稳态在飞包数就是 20/5.333 = 3.75；再加上调用方"先判满、
- * 后出队"的顺序，等效只剩 3 个槽位，于是入站 Flit 间隔被顶到 6ns（= 3 拍），
- * 链路占用率掉到 88.9%。当时差点误判成"credit 深度不够"。
- * 现在留两格余量：一格给"先判满后出队"，一格给取整。
- *
- * 【默认 delay = 0】
- * 默认值保持 0，使基线数据与第一版可比；需要考察真实 TAT 的用例显式设置
- * delay（见 LINK_ONE_WAY_NS_FOR_TAT）。
- */
+
+// 按发送时刻加固定延迟入队，到期后允许取出；背压时保留队头。
 template <typename T>
 class FlitDelayLine {
 public:
-    // 改配置不动已经在飞的包：它们按发出时的飞行时间到达，这才是物理事实。
-    // 想彻底清空另有 clear()。
+    // 配置只影响随后入队的帧；队列中的帧保留到达时刻，clear() 可清空队列。
     void configure(double delay_ns, double flit_ns = FLIT_PERIOD_NS) {
         delay_ns_ = delay_ns;
         // 物理在飞包数 = ceil(飞行时间 / 每包占用时间)，再留 2 格余量，
-        // 保证队列容量永远不会成为速率瓶颈（理由见上面的注释）。
+        // 用于容纳配置飞行时间内的帧及采样相位余量。
         const double in_flight = (flit_ns > 0.0) ? (delay_ns_ / flit_ns) : 0.0;
         capacity_ = 2u + static_cast<unsigned>(std::ceil(in_flight - 1e-9));
     }
@@ -272,23 +230,6 @@ struct TimedFlit {
     double  t_handshake = 0.0;
 };
 
-/**
- * 让往返恰好等于 LINK_TAT_NS 所需要的单向飞行时间。
- *
- *   单向 = LINK_TAT_NS / 2 = 20 ns   →   往返 = 40 ns = LINK_TAT_NS
- *
- * 【为什么不再扣掉一个 Flit 周期】
- * 曾经写成 LINK_TAT_NS/2 - FLIT_PERIOD_NS，理由是"往返里含两次序列化"。
- * 这是错的，而且和 LinkPacer 的注释自相矛盾：空载时预算是攒满的，第一个
- * Flit 一到就能走，不承担任何序列化延迟。序列化只在满载时表现为"相邻
- * Flit 的最小间隔"，不进入单包的空载往返。实测也证实了这一点——扣掉一个
- * Flit 周期后，往返只增加了 30.1ns 而不是 40ns。现在按纯飞行时间设置，
- * 往返增量精确等于 TAT。
- *
- * credit 的归还路径正好走这条往返，因此把飞行时间设成这个值，就能真刀真枪
- * 地检验 aou_types.h 里按 LINK_TAT_NS 反推出来的 FIFO 深度与初始 credit
- * 到底够不够 —— 这是第一版一直没有验证过的核心假设。
- */
 static constexpr double LINK_ONE_WAY_NS_FOR_TAT = LINK_TAT_NS / 2.0;
 
 // ============================================================
@@ -313,22 +254,7 @@ struct LatencyStat {
 // ============================================================
 //  AXI 测试激励构造
 // ============================================================
-/**
- * 【数据图样：每个字节都不一样】
- *
- * 第一版用的是"整条 beat 填同一个种子字节"。那种图样有个致命缺陷：把整条
- * 数据倒序、循环移位、或按 8 字节分组交换之后，逐字节比较的结果依然全部
- * 相等。而 AoU 规范 §5.8 明确要求数据"最高位字节排在前面"，字节序写反了
- * 这类 TB 一个字都发现不了 —— 事实上第一版就是在这种图样下"全绿"地跑过
- * 了一个字节序错误的实现。
- *
- * 现在每个字节混合三个分量：
- *   seed(id, beat)           区分不同事务与不同 beat，防止 beat 之间串位；
- *   递增分量 idx*k           字节倒序 / 错位会立刻不等；
- *   walking-one 1<<(idx&7)   单比特游走图样，位序翻转（LSB-first ↔ MSB-first）
- *                            会在解出来的字节值上直接暴露。
- * 读、写两个方向用不同的常数与不同的 walking 方向，避免读写路径互相掩盖。
- */
+
 inline uint8_t wdata_pattern_byte(uint16_t id, unsigned beat, int idx) {
     const uint8_t seed = static_cast<uint8_t>((id * 37u + beat * 11u + 0xA5u) & 0xFFu);
     return static_cast<uint8_t>(seed ^ static_cast<uint8_t>(idx * 5u)
@@ -354,14 +280,6 @@ inline int check_rdata_pattern(const uint8_t* d, uint16_t id, unsigned beat) {
     return -1;
 }
 
-/**
- * 【地址图样：高 32 位固定标签 + 低 32 位业务地址】
- *
- * AxADDR 是 64bit，在线上按大端排在 byte7..byte14。第一版 TB 只用了低 32 位
- * 地址，高半字恒为 0 —— 高低半字交换、64bit 端序写反这类错误全都测不出来。
- * 现在高半字放一个一眼能认出来的固定标签，远端在不知道具体序号的情况下也能
- * 判定高半字是否完好。
- */
 static constexpr uint64_t TB_ADDR_TAG = 0x0123'4567ULL;
 inline uint64_t tb_addr(uint64_t low32) {
     return (TB_ADDR_TAG << 32) | (low32 & 0xFFFF'FFFFULL);
@@ -373,7 +291,7 @@ inline AxChannel make_ax(uint16_t id, uint64_t addr, uint8_t len, uint8_t qos = 
     ax.addr = addr;
     ax.len  = len;                 // AxLEN，实际 beat 数 = len + 1
     ax.size = AXI_SIZE_CODE;       // 与编译期数据位宽一致
-    ax.burst = 1;                  // INCR，AoU 只支持这一种
+    ax.burst = 1;                  // INCR，本模型只支持这一种
     ax.qos  = qos;
     return ax;
 }
@@ -391,29 +309,11 @@ inline WChannel make_w(uint16_t id, unsigned beat, bool last, bool full_strobe =
 }
 
 // ============================================================
-//  RemoteAouModel：链路对端的 AoU 协议模型
+//  RemoteAouModel：链路对端的 桥接消息 协议模型
 // ============================================================
-/**
- * 扮演"存储控制器一侧"的 AoU 接口：接收 WriteReq / ReadReq / WriteData，
- * 产生 ReadData / WriteResp，并按 AoU 规则做双向 credit 管理。
- *
- * 【时延建模，报告中必须说明】
- *   1. 存储访问时延 proc_delay_ns 可配置，默认 0。默认值下量到的是"桥接单元 +
- *      协议本身"引入的时延，存储器件时延是可加的独立项；需要看端到端数字时
- *      把它设成器件实测值即可。
- *   2. 接收缓冲释放时延 credit_release_ns 可配置，默认 0。第一版把它写死为
- *      "收到即释放"，于是 credit 归还几乎不耗时，按 LINK_TAT_NS = 40ns 反推
- *      出来的 FIFO 深度与初始 credit 从来没有被真正考验过。
- *   3. 只实现 initiator→target 这一个方向的事务发起；反向（对端做 AXI Manager）
- *      属于 P2 范围，尚未建模。
- *
- * 【请求字段自检】
- * 远端会顺手校验收到的 AxADDR 高半字标签、AxSIZE、AxBURST。这些字段一旦在
- * 线上格式里错位，"数据对得上"是发现不了的（数据走的是另一段字段），必须单独盯。
- *
- * 它是普通 C++ 类而不是 SC_MODULE：由 testbench 线程在时钟沿显式调用，
- * 行为完全确定，便于复现问题。
- */
+
+// 根据请求 ID 和拍号生成模式数据并核对写数据，不保存按地址访问的内存。
+// 与节流器、延迟队列共同用于桥性能基线，不能代替全链路存储功能验证。
 class RemoteAouModel {
 public:
     explicit RemoteAouModel(unsigned rp_count = DEFAULT_RESOURCE_PLANES)
@@ -439,12 +339,6 @@ public:
         data_mismatch_ = proto_errors_ = req_field_errors_ = 0;
     }
 
-    /**
-     * 配置对端时延。
-     * @param proc_ns            存储访问时延：从收到请求到第一个响应可以产生
-     * @param credit_release_ns  接收缓冲释放时延：从收到消息到该 credit 可归还
-     * 两者默认都是 0，与第一版的"理想对端"完全一致，基线数据可比。
-     */
     void set_delays(double proc_ns, double credit_release_ns) {
         proc_delay_ns_     = proc_ns;
         credit_release_ns_ = credit_release_ns;
@@ -493,7 +387,7 @@ public:
 
         // (c) 协议头捎带 credit。数据流空闲时这就是唯一的 credit 回传途径，
         //     此时发出的是"只有 header 有效"的空 Flit —— 反向链路本来就闲着，
-        //     这是 AoU 里合法且常见的做法。
+        //     本测试对端通过这种帧在无业务时归还额度。
         flit.msg_credit = credits_.take_header_grant();
         return flit.used_granules > 0 || flit.msg_credit != 0;
     }
@@ -550,8 +444,6 @@ private:
         }
         if (msg.rp >= rp_count_) { ++proto_errors_; return; }
 
-        // 接收缓冲释放 → credit 可归还。释放时延默认 0（与第一版一致），
-        // 非 0 时排进 pending_credit_，到点才真正进入待归还队列。
         CreditReturn ret{msg.rp, msgtype_to_credit_kind(msg.type),
                          static_cast<unsigned>(msg.granules)};
         if (credit_release_ns_ <= 0.0) credits_.return_rx_credit(ret);
@@ -583,7 +475,7 @@ private:
                 WChannel w;
                 if (!MsgDecoder::decode_write_data(msg, w)) { ++proto_errors_; return; }
                 ++wdata_beats_;
-                // AXI4 的 W 没有 ID，写数据严格按 AW 顺序归属；这正是 AoU
+                // AXI4 的 W 没有 ID，写数据严格按 AW 顺序归属；这正是 桥接消息
                 // 接收侧必须靠 AWLEN 重建 WLAST 的原因。
                 if (write_jobs_[msg.rp].empty()) { ++proto_errors_; return; }
                 WriteJob& job = write_jobs_[msg.rp].front();
@@ -659,7 +551,7 @@ private:
      * 只查那些"TB 一侧确知应该是什么"的字段：
      *   - AxADDR 高 32 位必须是 TB_ADDR_TAG，任何 64bit 端序/半字交换都会破坏它；
      *   - AxSIZE 必须等于本次编译的数据位宽编码；
-     *   - AxBURST 必须是 INCR（AoU 只支持 INCR，解码器固定填 1，这里做冗余确认）。
+     *   - AxBURST 必须是 INCR（本模型只支持 INCR，解码器固定填 1，这里做冗余确认）。
      * ID / LEN / USER 由响应回路对账，不在这里重复。
      */
     void check_req_fields(const AxChannel& ax) {
@@ -675,7 +567,6 @@ private:
     FlitScanner   scanner_;
     CreditManager credits_;
 
-    // 时延配置（默认 0 = 理想对端，与第一版基线可比）
     double proc_delay_ns_     = 0.0;
     double credit_release_ns_ = 0.0;
     double now_ns_            = 0.0;

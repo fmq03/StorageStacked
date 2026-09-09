@@ -1,13 +1,5 @@
 /**
- * @file aou_wire.h
- * @brief AoU v0.8 图 5 的 Protocol Header 编码及固定 250B PLP 容器。
- *
- * 工程边界统一采用 [PH B0..B9][G0..G47] 的逻辑顺序。这是 FDI 软件容器，
- * 在物理 256B Format 6 中还需按图 4 散布，不能从物理 byte 2 连续复制。
- * 图 5 中每字节右侧的 0..7 是该字节的 bit 编号；不要把消息内部的数据
- * MSB-first 规则再次套到整个 PH 上做字节或 bit 翻转。
- * used_granules、AouFlit::valid 均不序列化；传输有效性由 ready/valid 或 FIFO
- * 的一次成功读写表达。反序列化不推测有效粒度，交给有续传状态的解析器。
+ * 固定250字节协议内容的编解码。只传输消息头和载荷，不传输本地统计字段。
  */
 #pragma once
 

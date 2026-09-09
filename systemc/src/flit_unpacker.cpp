@@ -1,8 +1,6 @@
 /**
- * @file flit_unpacker.cpp
- * @brief FlitUnpacker 实现：Flit 接收、跨 Flit 消息重组、credit 上报与消息分流
+ * 接收暂存、消息解析、额度事件发送与响应队列分流的实现。
  */
-
 #include "flit_unpacker.h"
 #include <algorithm>
 #include <iostream>
@@ -116,7 +114,7 @@ void FlitUnpacker::dispatch_message(const AouMessage& msg) {
     if (msg.type == MsgType::ReadData || msg.type == MsgType::WriteResp) {
         pending_messages_.push_back(msg);
     } else {
-        // 当前模块是 initiator 侧桥，只实现从链路接收 R/B；按照 AoU 非对称
+        // 当前模块是 initiator 侧桥，只实现从链路接收 R/B；按照 桥接消息 非对称
         // 接口规则，本端对 WREQ/RREQ/WDATA 公布的接收 credit 均为 0。
         SC_REPORT_WARNING("FlitUnpacker", "收到本端未实现的消息类型，已丢弃");
     }

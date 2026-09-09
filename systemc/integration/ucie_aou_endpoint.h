@@ -1,16 +1,6 @@
 /**
- * @file ucie_aou_endpoint.h
- * @brief UCIe 一侧的双向 ready/valid ↔ FDI FIFO 接入模块。
- *
- * AXI2Flit 端口保持不变：出站 flit_out/ready 接 tx/tx_ready，入站接 rx/rx_ready。
- * fifo_tx/fifo_rx 分别连接 UcieLink 的本端输入/输出 FIFO；一个 slot 恰好 250B。
- * TX 在 AXI 时钟沿握手后立即 nb_write，不另加流水寄存器；RX 有一个 holding
- * register，FIFO 取出后下一 AXI 采样沿才能被接收，至少一个 AXI 周期。
- * FIFO 自身的 delta 可见性、跨时钟等待和训练时间另计，不能承诺整体零延迟。
- *
- * 首次进入 Active 后允许工作；Degraded 仍由链路管理纠错/重放。启动训练阶段
- * 不接受新 Flit。一次已经公布的 ready 必须兑现，即使同拍状态发生变化。
- * 当前链路无 reset 端口，只允许协调启动/全系统重建；不能单独热复位本模块。
+ * 桥帧握手与链路FIFO之间的双向适配器，负责250字节编解码和训练门控。
+ * 发送沿兑现已公布的就绪信号；接收数据暂存至下一个可交付的时钟沿。
  */
 #pragma once
 

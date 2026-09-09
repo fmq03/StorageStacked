@@ -1,30 +1,52 @@
-# AoU 线格式与 UCIe 接入边界
+# 字节格式与链路接口
 
-日期：2026-09-07。本文定义接入代码可直接依赖的接口；协议字节位置依据本地
-AoU v0.8 PDF 图 4、图 5，消息字段依据该规范对应表格。测试方法见
-[verification.md](verification.md)，阶段交付记录见
-[接入前整改与验证](../../doc/review/2026-09-07-UCIe接入前整改与验证.md)。
+本文定义项目使用的消息字段、250 字节逻辑内容、256 字节物理帧以及模块接线。字段值和位序以项目编码器及独立黄金向量为准，运行方法见[验证文档](verification.md)。
 
-## 1. 类型和职责
+## 1. 类型与表示
 
-| 类型/模块 | 职责 | 是否跨链路 |
-|---|---|---|
-| `AouFlit` | 桥内部组包对象，含统计辅助字段 | 不按对象内存发送 |
-| `AouWireFlit` | 固定 `std::array<uint8_t,250>` | 全部 250B 进入 FDI payload |
-| `serialize_aou` / `deserialize_aou` | PH 与 240B payload 编解码 | 无状态、无额外仿真时间 |
-| `AouStreamDecoder` | 根据 MsgStart/首字节重组跨 Flit 消息 | 每个接收方向独立一个实例 |
-| `aou_format6::scatter/gather` | 250B 逻辑顺序与 256B 物理布局转换 | 链路侧调用 |
-| `UcieAouEndpoint` | ready/valid 与 FDI FIFO 相连 | 位于 UCIe 一侧 |
+| 类型或函数 | 用途 |
+|---|---|
+| `AouMessage` | 编码后的单条消息及本地辅助信息 |
+| `AouFlit` / `FlitTransfer` | 桥内部帧及有效信号表示 |
+| `AouWireFlit` | 固定 `std::array<uint8_t,250>`，只包含需要传输的字节 |
+| `serialize_aou` / `deserialize_aou` | 帧头及 240 字节载荷的无状态编解码 |
+| `AouStreamDecoder` | 根据起点和首字节重组跨帧消息 |
+| `aou_format6::scatter/gather` | 250 字节逻辑内容与物理帧散布布局的转换 |
 
-逻辑 250B 唯一排列为 `[PH B0..B9][G0..G47]`。数组元素就是一个线上字节，
-不能使用 `reinterpret_cast`、`sizeof(AouFlit)` 或直接结构体 memcpy 代替编码。
-`AouFlit::valid` 不传输，外层握手/FIFO 读写表示有效；`used_granules` 不传输，
-反序列化后置为 -1，使误用容易暴露。发送侧仍可用它组包和计数。
+逻辑字节顺序固定为 `[PH B0..B9][G0..G47]`，每个粒度 G 包含 5 字节。不得用结构体内存布局、`sizeof(AouFlit)` 或结构体直接复制代替序列化。
 
-## 2. Protocol Header
+`AouFlit::valid` 由外层握手或 FIFO 操作表达，不进入字节流；`used_granules` 仅供发送组包和统计使用，反序列化后设为 -1。消息 ID、地址等辅助字段也不能作为接收定界依据。
 
-下表 bit 编号采用每字节 bit0 为最低有效位，按图 5 直接对应。消息数据中的
-MSB-first 是另一层编码规则，不能用于反转此表。
+## 2. 消息字段
+
+消息按下表从左到右写入，标量字段先写最高有效位，写入当前字节的高位。`0(n)` 表示 n 个零保留位。数据数组以字节通道 0 为低下标，线上先写最高下标的字节；解码时还原该顺序。
+
+| 消息 | 顺序及位数 |
+|---|---|
+| 写请求 / 读请求 | 类型(4)、RP(2)、0(1)、LOCK(1)、USER(16)、ID(10)、SIZE(3)、PROT(3)、LEN(8)、CACHE(4)、QOS(4)、ADDR(64) |
+| 写数据 | 类型(4)、RP(2)、DLENGTH(2)、USER(16)、DATA、STRB 位图、补零 |
+| 全字节有效写数据 | 类型(4)、RP(2)、DLENGTH(2)、USER(16)、DATA、补零 |
+| 读数据 | 类型(4)、RP(2)、DLENGTH(2)、USER(16)、ID(10)、RESP(2)、LAST(1)、0(3)、DATA、补零 |
+| 写响应 | 类型(4)、RP(2)、0(2)、USER(16)、ID(10)、RESP(2)、0(4) |
+
+USER 在消息中占 16 位，也称 FLEX。请求的 64 位地址占消息字节 7～14，最高地址字节先写。请求不传输 BURST，接收端恢复为 INCR；写数据不传输 WLAST，响应端根据写请求 LEN 组装整笔突发。写端入口会核对实际 WLAST。
+
+类型编码分别为 Misc=0、写请求=1、读请求=2、写数据=3、读数据=4、写响应=5、全字节有效写数据=6。数据消息的 DLENGTH 为 0/1/2，分别表示 256/512/1024 位，编码 3 保留。接收数据宽度须与本地编译配置一致。
+
+| 消息 | 256 位粒度数 | 512 位粒度数 | 1024 位粒度数 |
+|---|---:|---:|---:|
+| 写请求 / 读请求 | 3 | 3 | 3 |
+| 写数据 | 8 | 15 | 30 |
+| 全字节有效写数据 | 7 | 14 | 27 |
+| 读数据 | 8 | 14 | 27 |
+| 写响应 | 1 | 1 | 1 |
+| 专用额度消息 | 2 | 2 | 2 |
+
+STRB 位图的字节 i 中 bit j 对应数据字节 `i×8+j`，位图本身也按高字节先写。只有全部总线字节的选通均有效时才能选择全字节有效写数据格式；窄访问仍保留完整总线宽度的数据数组。
+
+## 3. 帧头 PH
+
+下表的 bit0 均表示当前字节最低有效位；PH 的字节映射独立于消息字段的写入顺序。
 
 | PH byte | 位映射 |
 |---|---|
@@ -45,10 +67,28 @@ MSB-first 是另一层编码规则，不能用于反转此表。
 42 65 70 98 34 12 A0 CB D0 FE
 ```
 
-编码拒绝 FDId 超 2 bit、MsgStart 超 48 bit；解码拒绝非零 PH 保留位。
-线格式支持四个 FDId；当前单桥 `FlitUnpacker` 只接收 FDId=0。
+编码拒绝超出 2 位的 FDId 和超出 48 位的 MsgStart；解码拒绝非零 PH 保留位。字节格式可表达四个 FDId，桥接收端及存储响应端只接受 FDId=0。
 
-## 3. Format 6 物理布局
+## 4. 额度编码
+
+每个 3 位编码分别代表 `{0,1,4,8,16,32,64,128}` 个粒度。WRESP 只用 2 位，最大可表示 8 粒度。剩余额度留在待归还计数中，分次发布，不向上取整授予容量。
+
+帧头 `MsgCredit` 使用以下位段：
+
+| 位段 | 内容 |
+|---|---|
+| 2:0 | WREQ 额度编码 |
+| 5:3 | RREQ 额度编码 |
+| 8:6 | WDATA 额度编码 |
+| 11:9 | RDATA 额度编码 |
+| 13:12 | WRESP 额度编码 |
+| 15:14 | RP |
+
+专用 `CrdtGrant` 消息依次写 Misc 类型 4 位、操作码 `100` 共 3 位，再按 WREQ、RREQ、WDATA、RDATA 类型顺序，分别写 RP0～RP3 的 3 位额度字段；之后写 RP0～RP3 的 2 位 WRESP 字段，末尾补 17 个零位，共 80 位。未启用 RP 的字段为零。
+
+操作码 `000` 的激活消息长度可被解析器识别为 1 粒度，但桥与响应端不执行激活状态机。额度初始值、消耗与回收时刻见[设计文档](design.md)。
+
+## 5. 物理帧布局
 
 | 物理 byte | 内容 |
 |---|---|
@@ -66,29 +106,19 @@ MSB-first 是另一层编码规则，不能用于反转此表。
 物理 256B = FH 2B + CRC 4B + PH 10B + 数据区 240B。250B PLP 在物理帧中
 分散排列，不能从 byte2 连续复制 250B。
 
-参考链路新增 `FlitFormat::AouFormat6`，CLI 名称 `aou256`；保留原 `Standard256`
-和 `Compact68`。AoU FDI payload 必须恰好 250B，包括纯 credit Flit。
+链路选择 `FlitFormat::AouFormat6`，命令行名称为 `aou256`。FDI 的 `payload.size()` 与 `valid_bytes` 都必须为 250，包括只有额度信息的帧。
 
-字节位置符合 AoU 图 4；FH 仍使用参考模型的 seq/replay 抽象，CRC 仍采用该模型的
-CRC16-CCITT（初值 FFFF，多项式 1021）。C0 覆盖 byte0..125，C1 覆盖 byte128..253，
-高字节在前。**这是行为链路的明确约定，不是完整 UCIe DLL/FH/CRC 标准实现声明。**
-后续替换标准 CRC 算法不应改变 250B FDI 类型和 PH/载荷的位置。
+FH 字节 0 保存序号低 8 位，字节 1 的 bit0 表示重放标志。两段校验使用 CRC16-CCITT，初值 `FFFF`、多项式 `1021`；C0 覆盖物理字节 0～125，C1 覆盖 128～253，校验值高字节先写。这里描述的是链路行为模型的帧头和校验实现。
 
-## 4. 接收定界与错误行为
+## 6. 定界与接收错误
 
-每个方向保存一条未完成消息及已收粒度数。接收时先补 G0 续传，再扫描 MsgStart。
-消息长度由首字节推导；其余 MsgStart 为 0 的粒度可为空，不检查空闲字节的值。
-无 carry 且 MsgStart=0 表示无 payload 消息，有 carry 则表示续传；纯 credit Flit
-不能插在必须连续续传的两个片段之间。
+`MsgStart[i]=1` 表示粒度 i 是一条新消息的起点，长度由该消息首字节确定。每个接收方向单独保存一条未完成消息及已接收粒度数。存在续传时先从下一帧 G0 补齐，不在 G0 设置新起点，再扫描后续起点。
 
-解析器拒绝重叠起点、保留 DLENGTH=3、未知 MSGTYPE/MISCOP；检查成功才提交
-续传状态。`FlitUnpacker` 在完整结构检查后再处理 header credit 和响应。
-credit事件采用待发送队列和非阻塞FIFO写；事件未发完时仍占用holding并撤销ready，
-覆盖RP4合法多CrdtGrant一次产生80条事件、超过内部64项FIFO深度的情况。
-错误采用异常/`SC_REPORT_FATAL` 定位，CRC/重放由链路负责，不由协议层猜测恢复。
-激活消息格式可识别，但当前桥不执行 ACTIVATE/DEACTIVATE 状态机。
+不存在续传且 MsgStart 为零时，载荷没有消息；空粒度的字节值可以非零。存在续传时不能插入纯额度帧来中断消息，额度可随续传帧的帧头传递。
 
-## 5. 接线和时序
+解析器检查重叠起点、保留长度编码及未知类型或操作码，通过结构检查后才提交续传状态。桥解包器在完整结构检查后处理额度和响应；额度事件队列未排空时保持帧占用并撤销接收就绪。解析异常由计数、异常或致命报告定位；链路 CRC 和重放由链路处理。
+
+## 7. 信号与 FIFO 连接
 
 | AXI2Flit/链路信号 | Endpoint 端口 | 通道类型 |
 |---|---|---|
@@ -101,36 +131,17 @@ credit事件采用待发送队列和非阻塞FIFO写；事件未发完时仍占�
 | `UcieLink.link_state` | `link_state` | `sc_signal<unsigned>`，编码为 LinkState |
 | AXI 时钟与复位 | `clk/rst_n` | `sc_signal<bool>` / `sc_clock` |
 
-TX 按寄存 ready 预约 FIFO 空位，在握手沿直接写入，无新增 TX 流水周期。RX 在
-时钟沿从 FIFO 取出，使用一个 holding register，最快下一 AXI 上升沿握手。
-因此 RX 有一个 AXI 周期，另加 FIFO/时钟相位等待；不能把整个适配器称为零延迟。
-ready 一旦公布必须兑现；链路状态同拍改变时最多还有一次已预约的 TX 握手。
+发送端按寄存就绪信号预约 FIFO 槽位，在握手沿直接写入；接收端从 FIFO 取出后保持至最快下一个 AXI 上升沿。发送就绪一旦公布须兑现，链路状态切换时可能完成一次已预约的传输。
 
-Reset/Training 不接受新 Flit；Active/Degraded 允许传输。启动时先保持桥复位，
-训练完成后释放，随后发布初始 credit。`transaction_id` 单调递增，仅用于跟踪，
-VC=0；入站不依赖 ID/VC/kind 元数据解析协议。全部协议语义来自 250B payload。
+存储侧直接绑定以下接口：
 
-## 6. 参数、复位与存储端契约
+| 响应端端口 | 连接对象 | 公共类型 |
+|---|---|---|
+| `link_rx` | `UcieLink.mem_rx_out` | `sc_fifo<FdiFlit>` |
+| `link_tx` | `UcieLink.mem_tx_in` | `sc_fifo<FdiFlit>` |
+| `mem_req` | `SimpleBurstMemory.request` 或后端请求入口 | `sc_fifo<SimpleMemRequest>` |
+| `mem_rsp` | `SimpleBurstMemory.response` 或后端响应出口 | `sc_fifo<SimpleMemResponse>` |
 
-`link_config.h` 是速率配置源，默认 x16、24G、NRZ、48 GB/s、TAT=40ns。
-支持 `AOU_LINK_LANES`、`AOU_LINK_RATE_GTPS`、`AOU_LINK_BITS_PER_SYMBOL`、
-`AOU_LINK_TAT_NS` 编译参数。`make_aou_ucie_config()` 生成对应运行期配置，
-`require_aou_ucie_config()` 拒绝不匹配的格式、lane、速率和调制。
-修改宏必须重编桥与适配器；`preflight` 的回归目标每次重新编译。
+这些 FIFO 本身表达接受和背压。成功写入仅表示该项被队列接收；内存响应才表示操作完成。后端保持同方向、同 RP、同 ID 的完成顺序，读响应聚合整笔突发。
 
-AoU credit 按接收消息 FIFO 容量计粒度，FDI FIFO 按 Flit 计数，retry buffer
-按未确认 Flit 计数，三者独立。默认 credit 环路预算为 40ns+3×5.333ns=56ns。
-联调需测量真实 credit 往返和排队时间，再校准预算；ACK feedback_ui 不是 AoU TAT。
-
-本地复位清空五类消息 FIFO、写路由、credit 事件、顺序表和 packer/unpacker
-局部状态，重新发布初始容量。测试对端同步丢弃旧事务后可恢复；由于 UcieLink
-无 reset 端口，接上链路后仍不支持单端热复位或运行期速率切换。
-
-AXI 请求在握手入口检查 INCR、SIZE 上限、按 SIZE 对齐和 4KB 边界；WLAST
-必须与 AWLEN 一致。违例 fail-fast，不继续使用错误写路由。窄传输保留原 lane
-和 strobe，不做 beat 压缩，其内存语义由下一阶段目标端验证。
-
-存储接口定义在 `simple_mem_if.h`：`SimpleMemRequest` 包含方向、RP、完整地址
-属性和整 burst 写数据；`SimpleMemResponse` 包含 ID/RP、B 状态或逐 beat R 数据。
-单请求最大 256 beat，同时受 4KB 约束；存储端仍须限制 outstanding 数与总缓存。
-存储解包、实际读写模型、WREQ/WDATA 配对和 WLAST/RLAST 重建属于下一阶段实现。
+链路状态为 Reset/Training 时停止接受新帧，Active/Degraded 时允许传输。启动时训练完成后释放桥和响应端复位。链路不提供运行期间的统一复位接口，因而不支持单端热复位。配置、对外 AXI 字段和存储语义见[设计文档](design.md)，交付路径设置见[接入说明](../integration/README.md)。

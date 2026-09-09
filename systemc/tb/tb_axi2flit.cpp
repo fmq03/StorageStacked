@@ -1,26 +1,6 @@
 /**
- * @file tb_axi2flit.cpp
- * @brief 双向 Axi2Flit 的功能自检查测试（正确性，不测性能）
- *
- * 测试采用 RP_COUNT=2，覆盖参数化实现的非默认配置；产品场景使用默认构造函数
- * 即为单 RP。Testbench 同时扮演 AXI Master 和 AoU 链路对端，通过运行期检查
- * 输出 ERROR 数量决定测试是否通过。
- *
- * 【用例清单】
- *   TC1  复位后初始 credit 公布（分多个 CrdtGrant 累加发满）
- *   TC2  AxQOS → RP 映射，W beat 通过 AW 顺序队列继承 RP
- *   TC3  FDI ready/valid 背压期间 Flit 内容保持稳定，且只被接收一次
- *   TC4  credit 耗尽时本地排队；多 RP 互不阻塞
- *   TC5  入站 Flit 拆分到 AXI B/R，握手后 credit 回填
- *   TC6  业务 Flit 的 MsgCredit 捎带回填
- *   TC7  发送方向：消息跨 Flit 续传（P0-2 发送侧）
- *   TC8  接收方向：跨 Flit 消息重组（P0-2 接收侧）
- *
- * 本文件用 -DAXI_DATA_WIDTH_CFG 控制数据位宽，256b / 1024b 两种配置都要跑通：
- * 两者的消息粒度数不同（WriteDataFull 7 vs 27），跨 Flit 边界落点完全不一样，
- * 是对续传逻辑最有效的两组激励。
+ * 桥功能自检。覆盖额度初始化、资源平面路由、背压、响应还原、跨帧续传和顺序检查。
  */
-
 #include <systemc.h>
 #include <algorithm>
 #include <functional>
@@ -215,7 +195,6 @@ SC_MODULE(BridgeTb) {
                   << ", ReadData=" << CFG_RDATA_GRANULES << "gr"
                   << ", WriteDataFull=" << CFG_WDATAFULL_GRANULES << "gr" << std::endl;
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC1: 启动 credit 公布与 RP 参数化 =====" << std::endl;
         // 单个 credit 字段一次最多编码 128 granule，接收容量（1024b 下 486 granule）
         // 必须分多个 CrdtGrant 累加发满，因此这里检查的是"累计值"而非"一次到位"。
@@ -255,7 +234,6 @@ SC_MODULE(BridgeTb) {
             build_crdt_grant_message(peer_initial, TEST_RP_COUNT)));
         send_inbound_flit(peer_grant);
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC2: AW/W 路由到 RP1 =====" << std::endl;
         send_aw(0x10, tb_addr(0x2000'0000), 1);
         send_w_burst(0x10, 1);
@@ -264,7 +242,6 @@ SC_MODULE(BridgeTb) {
                    app_msg_count[1][credit_kind_index(CreditKind::WriteData)] == 1;
         }, 20), "AW 的 QOS 映射到 RP1，W beat 继承同一 RP");
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC3: FDI ready/valid 背压保持 =====" << std::endl;
         flit_ready.write(false);
         unsigned before_accept = accepted_flits;
@@ -282,7 +259,6 @@ SC_MODULE(BridgeTb) {
             return app_msg_count[0][credit_kind_index(CreditKind::ReadReq)] == 1;
         }, 8), "解除背压后 Flit 仅被接收一次");
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC4: credit 耗尽及多 RP 独立前进 =====" << std::endl;
         send_ar(0x02, tb_addr(0x1000'0100), 0); // RP0 只剩 1 granule，不够 3，应等待
         send_ar(0x03, tb_addr(0x1000'0200), 1); // RP1 尚未获得 RREQ credit，也应等待
@@ -303,7 +279,6 @@ SC_MODULE(BridgeTb) {
             return app_msg_count[0][credit_kind_index(CreditKind::ReadReq)] == 2;
         }, 15), "RP0 补充 credit 后恢复发送");
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC5: Flit 解包、AXI B/R 保持及 credit 回填 =====" << std::endl;
         b_ready.write(false);
         r_ready.write(false);
@@ -335,7 +310,6 @@ SC_MODULE(BridgeTb) {
                        RX_WRESP_CREDITS_PER_RP + unsigned(WRESP_GRANULES);
         }, 40), "释放的 RDATA/WRESP granule 通过 credit 通道完整归还");
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC6: MsgCredit 捎带回填 =====" << std::endl;
         // 制造"业务消息与待归还 credit 同时存在"的时刻：先背压 FDI 让 DUT 攒住
         // 一个待发 Flit，同时让 R/B 完成 AXI 握手产生待归还 credit，然后放开背压。
@@ -356,7 +330,6 @@ SC_MODULE(BridgeTb) {
             return business_flits_with_credit > piggyback_before;
         }, 25), "业务 Flit 的 MsgCredit 字段成功捎带 credit 回传");
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC7: 发送方向消息跨 Flit 续传 =====" << std::endl;
         // 6 个单 beat 写突发 = 6×(WriteReq 3gr + WriteDataFull Ngr)。
         //   256b ：18 + 7×N → 第 5 个 WriteDataFull 落在 46 granule 处被截断
@@ -384,7 +357,6 @@ SC_MODULE(BridgeTb) {
         check(tx_scanner.errors() == 0,
               "独立解析器在整个发送流上没有发现定界错误");
 
-        // -----------------------------------------------------
         std::cout << "\n===== TC8: 接收方向跨 Flit 消息重组 =====" << std::endl;
         // 构造 1 条 WriteResp + 6 条 ReadData。1 granule 的错位使得后面的
         // ReadData 必然横跨 Flit 边界（256b：49 granule；1024b：163 granule）。
@@ -411,10 +383,7 @@ SC_MODULE(BridgeTb) {
         if (rx_ok) {
             for (unsigned i = 0; i < 6 && rx_ok; ++i) {
                 const RChannel& r = r_beats[r_before + i];
-                // 逐字节比对：图样里每个字节都不同（递增 ⊕ 走一位），
-                // 字节序整体翻转或某一位错位都会立刻暴露。旧写法只查首尾
-                // 两个字节，而当时的图样又是"整拍同一个字节值"，翻转前后
-                // 完全一样 —— MSB-first 那个 bug 就是这么漏过去的。
+                // 逐字节核对随字节位置变化的图样，检测字节顺序颠倒和位错位。
                 rx_ok = (r.id == 0x50 + i) && (r.user == 0x100 + i) &&
                         (r.last == (i == 5)) &&
                         (check_rdata_pattern(r.data, static_cast<uint16_t>(0x50 + i), i) < 0);
@@ -422,8 +391,7 @@ SC_MODULE(BridgeTb) {
         }
         check(rx_ok, "重组后的 R beat 顺序、ID、USER、RLAST 与数据内容全部正确");
 
-        // -----------------------------------------------------
-        std::cout << "\n===== TC9: 同 ID 跨 RP 顺序约束（约束 C-1）=====" << std::endl;
+        std::cout << "\n===== TC9: 同 ID 跨 RP 顺序约束（资源平面顺序约束）=====" << std::endl;
         /*
          * 这里分两步：
          *   ① 先确认前面 8 个用例（都遵守约束：每个 ID 只用一个 QoS）没有
@@ -464,7 +432,6 @@ SC_MODULE(BridgeTb) {
                   "ID 按 AXI_ID_MASK 截断后落到同一表项，跨 RP 仍能检出");
         }
 
-        // -----------------------------------------------------
         wait_cycles(5);
         std::cout << "\n===== 测试汇总 =====" << std::endl;
         std::cout << "AXI_DATA_WIDTH      : " << AXI_DATA_WIDTH << "b" << std::endl;
@@ -481,19 +448,6 @@ SC_MODULE(BridgeTb) {
         sc_stop();
     }
 
-    /**
-     * @brief 出站请求消息的端到端字段核对
-     *
-     * 之前只统计"消息条数对不对"，字段本身从来没有在链路侧被查过：
-     * 只要 MsgBuilder 和 MsgDecoder 保持自洽，地址高低半字交换、AxSIZE 挪位
-     * 这类系统性错误可以一路畅通无阻。
-     *
-     * 这里用独立解析器把 AW/AR 消息拆回来，核对三件本 TB 完全可预期的事：
-     *   - AxADDR 的高 32 位必须等于 TB_ADDR_TAG（激励地址全部由 tb_addr() 生成）；
-     *     地址如果被按 32bit 折断、或高低半字交换，这一条立刻失败；
-     *   - AxSIZE 必须等于本位宽对应的编码；
-     *   - AxBURST 只允许 INCR。
-     */
     void check_req_fields_on_wire(const AouMessage& msg) {
         if (msg.type != MsgType::ReadReq && msg.type != MsgType::WriteReq) return;
         AxChannel ax;

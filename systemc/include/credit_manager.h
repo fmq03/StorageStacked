@@ -1,13 +1,6 @@
 /**
- * @file credit_manager.h
- * @brief AoU per-message-type、per-RP credit 计数与编码工具
- *
- * AoU v0.8 规定，一个 credit 表示接收端为“某一消息类型的一个 5B granule”
- * 预留了空间。credit 因而不是 FIFO entry 数，也不能在不同消息类型或不同 RP
- * 之间借用。本文件把协议规则集中在 CreditManager 中，避免 Packer、Unpacker
- * 和 AXI 通道线程分别维护一套容易失配的计数逻辑。
+ * 按资源平面和消息类型维护发送额度、接收容量与待归还额度。每个额度表示一个5字节粒度。
  */
-
 #pragma once
 
 #include "aou_types.h"
@@ -16,7 +9,6 @@
 #include <cstdint>
 #include <ostream>
 
-// AoU 需要独立流控的五种消息资源；Misc 按规范不消耗 credit。
 enum class CreditKind : uint8_t {
     WriteReq  = 0,
     ReadReq   = 1,
@@ -75,7 +67,6 @@ inline unsigned credit_kind_index(CreditKind kind) {
     return static_cast<unsigned>(kind);
 }
 
-// Table 17：3bit *CRED 编码不是二进制数，而是离散的 grant 数量。
 inline unsigned decode_credit_encoding(uint8_t encoding) {
     static constexpr unsigned VALUES[8] = {0, 1, 4, 8, 16, 32, 64, 128};
     return VALUES[encoding & 0x7];
@@ -92,10 +83,10 @@ inline uint8_t encode_credit_amount(unsigned pending, unsigned max_encoding = 7)
 }
 
 /**
- * CreditManager 不是独立 SC_MODULE，而是 FlitPacker 的状态组件：
+ * CreditManager 是打包器、响应端及测试对端共用的额度状态组件：
  *   - tx_available：对端已授予、尚未被本端消息消耗的 credit；
  *   - rx_capacity：本端接收 FIFO 可向对端承诺的初始容量；
- *   - rx_pending_return：R/B 被 AXI 消费后，等待回填给对端的 credit。
+ *   - rx_pending_return：本端接收空间释放后，等待回填给对端的额度。
  */
 class CreditManager {
 public:
@@ -125,17 +116,7 @@ public:
         next_header_rp_ = 0;
     }
 
-    /**
-     * @brief 复位后把全部接收容量放进"待归还"队列，交由常规 credit 发放路径分批公布
-     *
-     * 【为什么不能用一条 CrdtGrant 一次性公布】
-     * credit 字段是 3bit 离散编码，单个字段一次最多表示 128 个 granule。
-     * 1024b 配置下 RDATA 容量是 18 条 × 27 granule = 486 granule，若只发一条
-     * CrdtGrant，对端只会拿到 128，"在飞字节数"仅 682B ≈ 14ns 链路时间，
-     * 覆盖不住 40ns 的 TAT —— 读带宽会被 credit 往返卡死（约 17GB/s），
-     * 而这跟协议效率毫无关系，纯粹是初始公布方式的问题。
-     * 因此改为放进 pending，由后续若干个 CrdtGrant / MsgCredit 累加发满。
-     */
+    // 将全部接收容量排入待发布量；编码器分次扣除并发送可表示的额度。
     void publish_initial_capacity() {
         rx_pending_return_ = rx_capacity_;
     }
@@ -254,41 +235,18 @@ private:
     }
 };
 
-// -----------------------------------------------------------------------------
-// CrdtGrant 消息编解码
-// -----------------------------------------------------------------------------
-// 布局基线：《AoU 规范 v0.8》Table 18（字段与宽度）+ Figure 21（字节级排布）。
-// 80bit = 10B = 2 granule，按 MSB-first 自左向右依次是：
-//     MSGTYPE   4    = 'b0000（Misc）
-//     MISCOP    3    = 'b100 （CrdtGrant）
-//     WREQCRED0..3   4 × 3bit
-//     RREQCRED0..3   4 × 3bit
-//     WDATACRED0..3  4 × 3bit
-//     RDATACRED0..3  4 × 3bit
-//     WRESPCRED0..3  4 × 2bit
-//     RsvdZero  17
-//   合计 4 + 3 + 48 + 8 + 17 = 80bit
-//
-// 【历史修正】v1 照抄参考 RTL 的 st_misc_grantcredit_packet，在最前面多放了
-// 1bit Rsvd、尾部只留 16bit，导致每个 credit 字段整体偏移 1bit。规范里没有这
-// 个前导保留位（Figure 21：byte0 = MSGTYPE[7:4] | MISCOP[3:1] | WREQCRED0 的
-// 最高位）。规范 §11 明确要求 CrdtGrant 的格式与操作码编码 "shall remain
-// exactly as defined"，即使自定义 Profile 也不得改动，因此这是硬互操作项：
-// 偏 1bit 时本模型收发自洽、测试全过，接上真实对端却完全对不上。
-
 inline AouMessage build_crdt_grant_message(const CreditMatrix& grants,
                                            unsigned rp_count) {
     AouMessage msg;
     msg.type = MsgType::Misc;
     msg.rp = 0;  // CrdtGrant 自身包含全部 RP 的字段，不使用普通消息的 RP 字段。
-    msg.granules = MISC_CRDTGRANT_GRANULES;   // 2 granule
-    msg.byte_len = MISC_CRDTGRANT_GRANULES * GRANULE_BYTES;  // 10B
+    msg.granules = MISC_CRDTGRANT_GRANULES;
+    msg.byte_len = MISC_CRDTGRANT_GRANULES * GRANULE_BYTES;
 
     BitWriter bw(msg.data);
-    bw.put(static_cast<unsigned>(MsgType::Misc), 4);       // MSGTYPE = 'b0000
-    bw.put(MISCOP_CRDT_GRANT, 3);                          // MISCOP  = 'b100
+    bw.put(static_cast<unsigned>(MsgType::Misc), 4);
+    bw.put(MISCOP_CRDT_GRANT, 3);
 
-    // 按消息类型分组，每组依次放 RP0～RP3（Table 18 的字段顺序）
     for (CreditKind kind : {CreditKind::WriteReq, CreditKind::ReadReq,
                             CreditKind::WriteData, CreditKind::ReadData}) {
         for (unsigned rp = 0; rp < MAX_RESOURCE_PLANES; ++rp) {
@@ -302,7 +260,7 @@ inline AouMessage build_crdt_grant_message(const CreditMatrix& grants,
             ? grants[rp][credit_kind_index(CreditKind::WriteResp)] : 0;
         bw.put(encode_credit_amount(amount, 3), 2);
     }
-    bw.skip(17);                                           // RsvdZero（Table 18）
+    bw.skip(17);
     assert(bw.bits() == 80);
     return msg;
 }
@@ -315,8 +273,8 @@ inline bool decode_crdt_grant_message(const AouMessage& msg,
         msg.byte_len < MISC_CRDTGRANT_GRANULES * GRANULE_BYTES) return false;
 
     BitReader br(msg.data);
-    unsigned msgtype = static_cast<unsigned>(br.get(4));   // MSGTYPE
-    unsigned opcode  = static_cast<unsigned>(br.get(3));   // MISCOP
+    unsigned msgtype = static_cast<unsigned>(br.get(4));
+    unsigned opcode  = static_cast<unsigned>(br.get(3));
     if (msgtype != static_cast<unsigned>(MsgType::Misc) || opcode != MISCOP_CRDT_GRANT)
         return false;
 
@@ -332,21 +290,10 @@ inline bool decode_crdt_grant_message(const AouMessage& msg,
         if (rp < rp_count)
             grants[rp][credit_kind_index(CreditKind::WriteResp)] = amount;
     }
-    br.skip(17);                                           // RsvdZero
+    br.skip(17);
     return br.bits() == 80;
 }
 
-// -----------------------------------------------------------------------------
-// Protocol Header 中 MsgCredit[15:0] 的解码
-// -----------------------------------------------------------------------------
-// 布局基线：《AoU 规范 v0.8》Table 16（MsgCredit Encoding），从 LSB 起：
-//     bit  2:0   WReqCred    (3)
-//     bit  5:3   RReqCred    (3)
-//     bit  8:6   WDataCred   (3)
-//     bit 11:9   RDataCred   (3)
-//     bit 13:12  WRespCred   (2)
-//     bit 15:14  RP          (2)   —— 一个 header 只能为一个 RP 发放 credit
-// 拆成最多五次更新交给 emit，因而既可写 sc_fifo，也可在 testbench 中直接累计检查。
 template <typename Emit>
 inline void decode_header_credits(uint16_t field, unsigned rp_count, Emit emit) {
     uint8_t rp = static_cast<uint8_t>((field >> 14) & 0x3);

@@ -1,8 +1,6 @@
 /**
- * @file flit_packer.cpp
- * @brief FlitPacker 的调度、credit 消耗/回填、跨 Flit 续传及 FDI 背压实现
+ * 发送调度、额度消耗、跨帧续传与输出保持的实现。
  */
-
 #include "flit_packer.h"
 #include <iomanip>
 #include <iostream>
@@ -35,8 +33,8 @@ void FlitPacker::packing_thread() {
     cur_flit_.clear();
     credits_.reset();
     // 复位后立刻把本端 R/B 接收容量转成"待归还 credit"，由下面的常规
-    // CrdtGrant 路径分批公布（单个 credit 字段一次最多只能表示 128 granule，
-    // 详见 CreditManager::publish_initial_capacity 的注释）。
+    // CrdtGrant 路径分批公布；单个三位额度字段最多表示 128 粒度，
+    // 写响应的两位额度字段最多表示 8 粒度。
     credits_.publish_initial_capacity();
     timeout_cnt_ = 0;
     // 让复位后的第一个空闲拍就发出 CrdtGrant，尽快让对端可以开始发数据。
@@ -72,9 +70,6 @@ void FlitPacker::packing_thread() {
             }
         }
 
-        // ---- 3) 打包 ----
-        // 注意：这一步不受 output_active_ 限制。输出寄存器被链路背压时继续填
-        // cur_flit_，等价于参考 RTL 的 2 entry TX ring buffer，消除发包空泡。
         bool exhausted = pack_cycle();
 
         // ---- 4) 发包判决 ----
@@ -159,7 +154,7 @@ bool FlitPacker::pack_cycle() {
             spill_active_ = false;
             spill_done_   = 0;
         } else {
-            return false;   // 整个新 Flit 都被续传占满（1024b 消息可能连跨两包）
+            return false;   // 续传占满整帧时等待输出，再处理后续片段。
         }
     }
 
@@ -189,7 +184,7 @@ FlitPacker::Candidate FlitPacker::select_from(
 }
 
 FlitPacker::Candidate FlitPacker::select_candidate() {
-    // 保留现有 ReadReq > WriteReq > WriteData 优先级；每一类内部按 RP 轮转。
+    // 优先级为读请求、写请求、写数据；每一类内部按资源平面轮转。
     Candidate candidate = select_from(staged_rreq_);
     if (!candidate.message) candidate = select_from(staged_wreq_);
     if (!candidate.message) candidate = select_from(staged_wdata_);
@@ -200,7 +195,7 @@ void FlitPacker::consume_candidate(const Candidate& candidate) {
     AouMessage msg = *candidate.message;
 
     // credit 按整条消息一次性扣除，即使消息会被拆到两个 Flit 里发送。
-    // 这与 AoU 的语义一致：credit 描述的是对端接收缓冲能容纳的粒度数，
+    // 额度描述对端接收缓冲能容纳的粒度数，
     // 与它被切成几个 Flit 传输无关。
     credits_.consume(static_cast<uint8_t>(candidate.rp), msg.type, msg.granules);
 

@@ -1,11 +1,5 @@
 /**
- * @file axi_contract.h
- * @brief 桥接支持范围的入口检查：在消息和路由入队之前报告非法 AXI 请求。
- *
- * 支持 INCR、按 AxSIZE 对齐、SIZE 不超过本地数据总线、burst 不跨 4KB。
- * 窄传输保留 AXI 字节 lane 与 WSTRB 语义；完整内存端验证留给联调阶段。
- * 这里返回错误文字，便于独立负向测试；DUT 对错误采用 fail-fast，而不是
- * 吞掉已经握手的请求或构造没有规范依据的响应。WLAST 按 AWLEN 严格核对。
+ * AXI入口检查。只接受递增、按传输大小对齐、不跨4KB的突发，并核对写末拍标志。
  */
 #pragma once
 #include "axi_if.h"

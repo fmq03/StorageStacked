@@ -1,10 +1,5 @@
 /**
- * @file tb_ucie_endpoint.cpp
- * @brief 接入组件单测：Format 6 构造/收集/CRC，以及双向 FIFO 适配器。
- *
- * 用深度 1 的 FIFO 和固定种子背压独立检验适配器，不实例化 PHY 或 UcieLink。
- * 全部 2048 个物理 bit 逐个翻转，必须被参考模型的行为 CRC 拒绝。
- * 这里检查错误检测与字节覆盖，不代表标准 UCIe CRC 多项式合规性验证。
+ * 链路适配组件自检。覆盖帧映射、逐位错误检测、深度1的双向FIFO与训练门控。
  */
 #include "ucie_aou_endpoint.h"
 #include "ucie_link.h"
@@ -53,7 +48,7 @@ static void format_unit(const Config& cfg) {
     rejects([&] { ucie_detail::require_valid_fdi(cfg, invalid); }, "AoU valid_bytes=249 拒绝");
     invalid.valid_bytes = 250; invalid.payload.resize(249);
     rejects([&] { ucie_detail::require_valid_fdi(cfg, invalid); }, "AoU FDI 数组短包拒绝");
-    // 标准 CCITT 独立校验串，用来约束参考行为算法的实现。
+    // 使用独立的 CCITT 校验串检查链路校验算法。
     const uint8_t canonical[] = {'1','2','3','4','5','6','7','8','9'};
     check(crc16_ccitt(canonical, 9) == 0x29B1, "CRC 行为算法独立黄金值");
     for (auto format : {FlitFormat::Standard256, FlitFormat::Compact68}) {

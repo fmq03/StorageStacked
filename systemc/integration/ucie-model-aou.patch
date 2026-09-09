@@ -1,43 +1,12 @@
-diff --git a/INTERFACE.md b/INTERFACE.md
-index 60cd022..3567bd3 100644
---- a/INTERFACE.md
-+++ b/INTERFACE.md
-@@ -1,5 +1,11 @@
- # UcieLink SystemC 事务级接口说明
- 
-+> 2026-09-07 AoU 接入扩展：四个 FDI FIFO 端口类型不变；选择 `AouFormat6` 时
-+> `payload.size()` 与 `valid_bytes` 必须为250，协议语义全部位于payload中。
-+> PH按图4散布，不能从物理byte2连续取250B。状态仍为 `sc_out<unsigned>`。
-+> AXI侧连接与适配延迟见 [线格式契约 §5](../../systemc/doc/wire_contract.md)。
-+> 以下原有格式的236B/64B约束仅适用于Standard256/Compact68。
-+
- ## 1. 模块边界
- 
- `UcieLink` 定义在 `src/ucie_link.h`，是可独立实例化的双向 UCIe 行为级链路：
-diff --git a/MODELING_AND_VERIFICATION.md b/MODELING_AND_VERIFICATION.md
-index 995c8a7..b5ec7fb 100644
---- a/MODELING_AND_VERIFICATION.md
-+++ b/MODELING_AND_VERIFICATION.md
-@@ -1,5 +1,10 @@
- # UCIe 高速互联模型：需求、建模方法与验证说明
- 
-+> 2026-09-07 补充：AoU 格式位置与全部2048个物理bit单错检测由主项目
-+> `make endpoint` 覆盖，原22项单元测试继续保留。新增布局不改变行为CRC算法；
-+> AoU 经过真实 PHY/ACK/NAK/replay 的联合验证尚未开展，不沿用原格式报告作为证据。
-+> 验证范围见 [AXI2FLIT 验证说明](../../systemc/doc/verification.md)。
-+
- > 文档日期：2026-08-25
- > 适用目录：`ucie_systemc/`
- > 实现语言：C++17 + SystemC 2.3.4
 diff --git a/Makefile b/Makefile
-index 943626f..fc4f525 100644
+index 943626f..15c71de 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -2,12 +2,18 @@ CXX ?= g++
  CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra
  LDLIBS ?= -lsystemc
  
-+# AXI2FLIT 接入扩展：共用 SystemC 安装和 Format 6 字节映射。
++# 与协议桥共用 SystemC 安装和物理帧字节映射。
 +SYSTEMC_HOME ?= $(HOME)/.local/systemc-2.3.4-cxx17
 +AOU_INCLUDE ?= ../../systemc/include
 +CXXFLAGS += -I$(SYSTEMC_HOME)/include -I$(AOU_INCLUDE)
@@ -53,54 +22,8 @@ index 943626f..fc4f525 100644
  
  .PHONY: all run unit-test test sweep validate clean
  
-diff --git a/README.md b/README.md
-index d1196d0..6f520d2 100644
---- a/README.md
-+++ b/README.md
-@@ -1,5 +1,12 @@
- # UCIe 双向高速互联仿真模型（SystemC）
- 
-+> AXI2FLIT 接入扩展（2026-09-07）：新增 `--format aou256`，FDI payload 固定250B，
-+> 物理布局采用 AoU v0.8 图4散布；Standard256/Compact68 保留。FH/CRC16-CCITT
-+> 是行为抽象，非标准 DLL 完整实现。默认 CLI 仍为原配置；AXI2FLIT 使用
-+> `make_aou_ucie_config()` 生成 x16/24G/NRZ 配置。构建依赖
-+> `../../systemc/include/aou_format6.h`，可用 `AOU_INCLUDE` 覆盖。
-+> 详细格式、配置和限制见 [线格式契约](../../systemc/doc/wire_contract.md)。
-+
- 本模型对应项目研究成果 3，使用 SystemC 建模 UCIe D2D Adapter、事务级 FDI、双向业务链路和行为级 PHY。它支持 24 GT/s 及以上速率、Standard 256B/Compact 68B Flit、PAM4/NRZ、串并转换、CRC、ACK/NAK、重传，以及 AWGN、ISI、jitter、lane skew 和 CDR 抽象。
- 
- 需求追踪、公式、验证方法和可信范围详见 [`MODELING_AND_VERIFICATION.md`](MODELING_AND_VERIFICATION.md)，源码分工见 [`src/README.md`](src/README.md)。
-diff --git a/TEST_PLAN.md b/TEST_PLAN.md
-index e6f3bb3..237f8e2 100644
---- a/TEST_PLAN.md
-+++ b/TEST_PLAN.md
-@@ -1,5 +1,9 @@
- # UCIe 独立链路测试计划
- 
-+> AoU 扩展组件测试：在 AXI2FLIT 根目录执行 `make endpoint ucie-unit`。
-+> 覆盖精确250B长度、图4散布/收集、FH/PH/payload/CRC逐bit翻转、原格式保护、
-+> 深度1双向FIFO适配和训练门控。下一阶段才运行AoU真实链路错误重放与端到端内存测试。
-+
- ## 1. 验证入口
- 
- ```bash
-diff --git a/src/README.md b/src/README.md
-index de936c9..11c991d 100644
---- a/src/README.md
-+++ b/src/README.md
-@@ -1,5 +1,10 @@
- # `src` 目录源码说明
- 
-+> AoU 扩展：ucie_common.h 新增 AouFormat6/aou256，build/check 使用126B半包
-+> CRC覆盖；ucie_link.h 的 unpack_fdi 调用 gather 恢复250B逻辑PLP。
-+> 字节映射共用 `systemc/include/aou_format6.h`；物理CRC槽为126/127和254/255。
-+> 下文 Standard256 连续 payload 与尾部 CRC 表格仅描述原格式，不适用于 AoU。
-+
- 本目录包含可复用的 UCIe SystemC 双向行为级链路模块、测试平台和单元测试。
- 
- | 文件 | 主要职责 | SystemC 依赖 |
 diff --git a/src/ucie_common.h b/src/ucie_common.h
-index 3d4fe1c..c3b8923 100644
+index 3d4fe1c..668121b 100644
 --- a/src/ucie_common.h
 +++ b/src/ucie_common.h
 @@ -8,12 +8,13 @@
@@ -156,14 +79,14 @@ index 3d4fe1c..c3b8923 100644
          throw std::runtime_error("FDI payload exceeds configured flit payload capacity");
      }
 +    if (cfg.flit_format == FlitFormat::AouFormat6) {
-+        // AoU FDI 必须提供完整 250B，包括纯 credit Flit；禁止隐式短包补零。
++        // FDI 必须提供完整 250 字节，包括纯额度帧；不接受隐式短包补零。
 +        if (payload.size() != 250U) throw std::runtime_error("AoU PLP must be exactly 250B");
 +        aou_format6::Payload plp{};
 +        std::copy(payload.begin(), payload.end(), plp.begin());
 +        auto frame = aou_format6::scatter(plp,
 +            {static_cast<std::uint8_t>(seq), static_cast<std::uint8_t>(replay ? 1 : 0)});
-+        // CRC 沿用参考模型的 CCITT 行为抽象，各保护一个半 Flit 的 126B。
-+        // 槽位对齐 AoU 图 4；并非声称实现 UCIe 标准的 CRC/FH 编码。
++        // 两段 CRC16-CCITT 分别保护半帧中的 126 字节，校验值高字节先写。
++        // 校验槽位为 126/127 和 254/255，帧头保存序号及重放标志。
 +        const auto ca = crc16_ccitt(frame.data(), 126);
 +        const auto cb = crc16_ccitt(frame.data() + 128, 126);
 +        frame[126] = ca >> 8; frame[127] = ca & 255;
@@ -187,14 +110,14 @@ index 3d4fe1c..c3b8923 100644
          const std::uint16_t cb = crc16_ccitt(b.data() + 128U, 124U);
          const std::uint16_t ga = static_cast<std::uint16_t>((b[252] << 8U) | b[253]);
 diff --git a/src/ucie_link.h b/src/ucie_link.h
-index 838f67b..298d15e 100644
+index 838f67b..efc804c 100644
 --- a/src/ucie_link.h
 +++ b/src/ucie_link.h
 @@ -17,6 +17,16 @@
  
  namespace ucie_detail {
  
-+// 公共 FDI 长度契约单独检查，便于接入前单元验证，无需启动完整 PHY。
++// 检查公开 FDI 接口的载荷长度，供链路接收入口与组件测试共用。
 +inline void require_valid_fdi(const Config& cfg, const FdiFlit& flit) {
 +    if (flit.payload.size() != cfg.payload_bytes())
 +        throw std::runtime_error("FDI payload is not padded to configured size");

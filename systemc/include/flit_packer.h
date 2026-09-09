@@ -1,32 +1,7 @@
 /**
- * @file flit_packer.h
- * @brief 带 AoU credit 流控、跨 Flit 续传和 FDI ready/valid 保持语义的 Flit 打包模块
- *
- * 每个 Resource Plane 都有独立的 RREQ/WREQ/WDATA 输入 FIFO 端口。Packer
- * 只有在相应 [RP][消息类型] credit 足够时才会开始一条消息，并在开始时一次性
- * 扣除整条消息所需的 granule credit。Misc/CrdtGrant 按规范不消耗 credit。
- *
- * 输出端采用标准 ready/valid 语义：valid 拉高后，如果 flit_ready 为低，完整
- * Flit 必须保持不变；只有在某个时钟沿 valid && ready 后才允许撤销或发送下一包。
- *
- * 【本版本的三处关键改动】
- * 1. 跨 Flit 续传（P0-2）
- *    一条消息装不进当前 Flit 尾部时，不再"整条推迟到下一包"，而是先把能装下的
- *    粒度填满当前 Flit，剩余部分接在下一个 Flit 的 G0。这是 512b/1024b 数据宽度
- *    可用的硬前提：WriteData1024 = 30 granule，若不许跨包，48 粒度的 Flit 只能装
- *    一条，占用率立刻掉到 30/48 = 62.5%。
- *
- * 2. 一拍可打多条消息（P0-4）
- *    原实现每拍只打一条，256b WriteData 只有 8 granule，填满一个 Flit 要 6 拍，
- *    打包本身就成了瓶颈。现在一拍最多起 PACK_MSGS_PER_CYCLE 条新消息。
- *
- * 3. 输出寄存器 + 在建 Flit 构成两级缓冲（P0-4/P0-5）
- *    输出被链路背压时仍继续填 cur_flit_，链路一旦取走上一包，下一包可以同拍发出，
- *    中间没有空泡。等价于参考 RTL 的 2 entry TX ring buffer。
- *    配合 flush_timeout_cycles_ = 0（无候选立即发包），把原来固定 4 拍的
- *    攒包等待（@500MHz = 8ns）从时延路径上彻底去掉。
+ * 带发送额度控制的帧打包器。支持每拍多消息、跨帧续传和输出背压保持。
+ * 输出寄存器与在建帧分别保存状态，已公布的数据保持至握手完成。
  */
-
 #pragma once
 
 #include "aou_types.h"

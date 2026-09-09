@@ -1,11 +1,5 @@
 /**
- * @file link_config.h
- * @brief 桥与链路接入代码共用的编译期速率、调制和 credit TAT 配置。
- *
- * GT/s 在本工程中表示每 lane 的符号速率；NRZ 每符号 1 bit，PAM4 为 2 bit。
- * 默认 x16 / 24G / NRZ 对应 48 GB/s。改变参数会同时改变桥的 FIFO 容量；
- * UCIe 运行期 Config 必须由这份配置生成，不能继续使用其默认 PAM4。
- * TAT 是 credit 飞行及对端处理预算，不是 ACK/NAK feedback 延迟。
+ * 桥与链路共用的速率、调制和额度环路预算。默认16通道、每通道24G符号率、每符号1bit。
  */
 #pragma once
 

@@ -1,291 +1,129 @@
-# AXI2FLIT SystemC 模型设计
+# AXI2FLIT 设计
 
-> 对应课题：2026ZTE06-01「定制堆叠存储器链路性能建模和协议桥接单元技术」研究成果2
-> 最近更新：2026-09-07（补齐 UCIe 接入前线格式、边界适配、复位及负向检查）
+## 1. 范围与模型形式
 
-## 1. 设计范围
-
-本模型是 AoU（AXI over UCIe）initiator 侧的双向协议桥：
+项目实现请求发起侧桥 `Axi2Flit`、链路适配器 `UcieAouEndpoint`、存储侧响应端 `AouTarget` 和简单突发内存 `SimpleBurstMemory`。全链路测试由 `tb_full_link.cpp` 实例化这些模块及 UcieLink。
 
 ```text
-发送：AXI AW/W/AR → AoU WriteReq / WriteData(Full) / ReadReq → FDI
-接收：FDI → AoU WriteResp / ReadData → AXI B/R
+SoC AXI 主机 / 测试激励
+          ⇅ AXI 五通道
+      Axi2Flit
+          ⇅ 帧有效/就绪信号
+   UcieAouEndpoint
+          ⇅ sc_fifo<FdiFlit>
+       UcieLink
+          ⇅ sc_fifo<FdiFlit>
+       AouTarget
+          ⇅ SimpleMemRequest / SimpleMemResponse FIFO
+   SimpleBurstMemory / 存储后端适配器
 ```
 
-已实现：消息打包/解包、跨 Flit 消息续传、per-RP × per-message-type credit 流控、
-FDI 双向 ready/valid 背压、AXI 数据位宽 256/512/1024 参数化、按链路 TAT 反推的
-缓冲与 credit 深度。
+桥与响应端按时钟推进，测试默认周期为 2ns。UcieLink 按配置的时间单位处理链路事件，简单内存按整笔突发等待访问延迟。所有模块运行在同一个 SystemC 时间轴上；信号级握手与事务队列共同表达背压。接口时序可按时钟观察，内部实现属于行为模型，不用于推导 RTL 综合时序。
 
-接入前扩展已实现：固定 250B 编解码、Format 6 散布/收集、无辅助字段接收定界、
-UCIe 侧双向 FIFO 适配器、共享链路参数、协调本地复位及 AXI 入口检查。
-具体字节表、接线和时序以 [wire_contract.md](wire_contract.md) 为准。
+## 2. SoC 对外接口
 
-不在本阶段范围：链路激活状态机（Activation/CSR）、responder 侧（入站 WREQ/RREQ/
-WDATA）、QoS 三模式仲裁、Flit2DFI（由存储控制器侧同事合并对齐）。
+`Axi2Flit` 对主机表现为 AXI 从端。AW/W/AR 的有效信号和数据由主机驱动，桥返回就绪信号；B/R 的有效信号和数据由桥驱动，主机返回就绪信号。
 
-## 2. 模块与数据流
-
-```text
-                              Axi2Flit
- ┌──────────────────────────────────────────────────────────────────────┐
- │ AW 线程 ─┐                                                            │
- │ AR 线程 ─┼→ per-RP TX FIFO ─→ FlitPacker ─→ flit_out / flit_ready    │
- │ W  线程 ─┘   (route fifo)         ↑ credit_update                     │
- │                                   ↓ credit_return                     │
- │ flit_in / flit_in_ready ─→ FlitUnpacker ─→ per-RP RX FIFO ─→ B/R 线程 │
- └──────────────────────────────────────────────────────────────────────┘
-```
-
-### 2.1 FlitPacker
-
-打包侧是带宽的决定性模块，本版本有四个关键机制：
-
-1. **跨 Flit 续传**（`pack_fragment`）
-   一条消息装不进当前 Flit 尾部时，先填满当前 Flit，剩余部分接在下一个 Flit 的
-   **G0** 且不置 MsgStart 位。这是 1024b 可用的硬前提：WriteDataFull1024 占 27
-   granule，若不许跨包，48 granule 的 Flit 只能装 1 条，填充率立刻掉到 56%。
-
-2. **一拍打多条消息**（`PACK_MSGS_PER_CYCLE = 8`）
-   256b 的 WriteDataFull 只有 7 granule，一拍一条要 7 拍才填满一个 Flit，打包器
-   自身就会成为瓶颈。8 条 × 7 granule = 56 > 48，保证单拍可填满一个 Flit。
-
-3. **输出寄存器 + 在建 Flit 的两级缓冲**
-   输出被链路背压时继续填 `cur_flit_`，链路一取走上一包，下一包同拍就能发出，
-   中间无空泡。等价于参考 RTL 的 2-entry TX ring buffer。
-
-4. **flush 策略：无候选即发**（`DEFAULT_FLUSH_TIMEOUT_CYCLES = 0`）
-   原先固定攒 4 拍（@500MHz = 8ns）直接加在时延路径上。改为"本拍没有可打的消息
-   就立刻发出"，代价是链路空闲时会发半满 Flit —— 但那种情况下链路本来就有余量。
-
-调度：`ReadReq > WriteReq > WriteData`，同优先级内按 RP 轮转。`sc_fifo` 无 peek
-接口，因此每个 `[RP][类型]` 设一个 staging slot：先取出队头，再按消息实际 granule
-数检查 credit，credit 不足时消息留在 slot 中等待，不阻塞其他 RP。
-
-### 2.2 FlitUnpacker
-
-- 一个 Flit holding register 解耦 FDI 接收与内部 FIFO 时序，`flit_in_ready` 为
-  寄存输出（`flit_in_ready = !holding_valid_`）。
-- 按 `MsgStart[47:0]` 切分消息。**消息长度由首字节自描述**
-  （`message_granules_from_header`），不能靠两个 MsgStart 位之间的距离推断——
-  消息被截断到下一个 Flit 时，它后面根本没有第二个 MsgStart 位。
-- 维护跨 Flit 续传状态：有 carry 时 G0 为续传；无 carry 时 MsgStart=0 的位置为空。
-- 解析 header 的 `MsgCredit[15:0]` 与 Misc/CrdtGrant，把对端 grant 送入 Packer。
-- credit 事件也受 holding register 保护，内部事件 FIFO 满时 `nb_write` 重试并
-  撤销入站 ready；RP=4、每半包两条 CrdtGrant 可产生80条事件，超过内部64深度。
-- initiator 侧未实现的入站 WREQ/RREQ/WDATA 按协议异常计数。
-
-### 2.3 AXI 五通道线程
-
-- AW/AR：`AxQOS % RP_COUNT` 映射 RP，去气泡握手，可达 1 beat/cycle。
-- W：AXI4 无 WID，通过 AW 顺序路由队列继承 RP，并校验 AWLEN/WLAST 一致性。
-  AW 与 W 是**独立线程**，AW 的开销不会串行化进 W 数据流。
-- B/R：解码后保持 valid 与数据直到 AXI `valid && ready`；**握手后**才释放对应
-  granule credit —— credit 必须代表"接收缓冲真的空出来了"。
-
-## 3. Credit 模型
-
-### 3.1 计数维度
-
-```text
-[RP][WREQ | RREQ | WDATA | RDATA | WRESP]
-```
-
-1 credit = 该类型的 1 个 5B granule 接收空间。Misc 不消耗 credit。
-`WriteData` 与 `WriteDataFull` 共用 WDATA credit pool。
-
-### 3.2 缓冲深度按 credit 环路反推（不是按链路 TAT）
-
-接收 credit 的本质是"我保证还能收下 N 个 granule"。本端把 credit 还给对端后，
-数据要经过一整个环路才会到达；这段时间里链路持续灌数据。若接收 FIFO 装不下
-`环路时间 × 链路带宽`，credit 会先于链路耗尽 —— 此时测出来的带宽反映的是
-FIFO 太小，而不是协议效率。
-
-**关键点：这里要用的"环路时间"不是 `LINK_TAT_NS`。** `LINK_TAT_NS`（40 ns）
-只涵盖"credit 已经上了链路"之后的飞行与对端处理。credit 从"接收缓冲腾出来"
-到"真的上了链路"，还要额外经过三段，而且每段都以 Flit 为粒度发生：
-
-| 段 | 内容 | 代价 |
+| 通道 | 数据端口及类型 | 握手端口 |
 |---|---|---|
-| ① | 消息离开接收 FIFO、送上 AXI 之后，credit 才变成"待归还" | ≈ 接收流水线 2 拍 |
-| ② | 待归还量要攒够一个可编码档位（编码只有 {1,4,8,16,32,64,128} 七档，凑不满的余数只能等下一轮） | ≈ 1～2 个 Flit 周期 |
-| ③ | 归还量要搭上一个出站 Flit 的头部，或单独发一条 CrdtGrant | ≈ 1 个 Flit 周期 |
+| 写地址 | `aw_ch: AxChannel` | `aw_valid`、`aw_ready` |
+| 写数据 | `w_ch: WChannel` | `w_valid`、`w_ready` |
+| 写响应 | `b_ch: BChannel` | `b_valid`、`b_ready` |
+| 读地址 | `ar_ch: AxChannel` | `ar_valid`、`ar_ready` |
+| 读数据 | `r_ch: RChannel` | `r_valid`、`r_ready` |
 
-三段合计按 3 个 Flit 周期计入：
+还有 `clk` 和低有效 `rst_n`。只有上升沿的独立 `valid && ready` 表示接受一次传输，结构体内同名字段不控制顶层握手。发送方在背压期间保持有效信号及完整数据稳定。
+
+地址为 64 位字节地址，ID 有效宽度 10 位，USER 为 16 位。数据宽度由 `AXI_DATA_WIDTH_CFG` 选择 256/512/1024 位，每个数据数组元素对应一个字节通道；WSTRB 在 C++ 中每字节占一个数组元素，零表示屏蔽，非零表示有效。编码和顺序跟踪使用 ID 的低 10 位，主机应在这个范围内分配 ID。
+
+AXI 请求须为 INCR，`SIZE <= log2(总线字节数)`，地址按 SIZE 对齐，整个突发不能跨 4KB。`LEN+1` 表示拍数，范围 1～256。W 按 AW 接受顺序配对，WLAST 必须与 AWLEN 一致。入口违例会触发致命报告。
+
+RP 表示资源平面，共支持 1～4 个，默认 1 个。AW/AR 通过 `QOS % RP_COUNT` 路由；W 从 AW 顺序队列继承 RP。同方向、同 ID 尚有未完成事务时必须保持 RP 不变，违例由顺序检查器计数。读写间没有隐含全局完成顺序，需要写后读依赖时应等待 B 响应。
+
+## 3. 桥内处理
+
+### 发送路径
+
+AW、AR、W 分别由时钟线程接收，经 `MsgBuilder` 生成消息，进入每 RP 的发送 FIFO。请求和写数据 FIFO 每类每 RP 均为 16 项；写路由队列保存 RP 和剩余拍数。
+
+`FlitPacker` 每个 RP、每类消息有一个队头暂存槽，按消息所需粒度检查额度。调度优先级为读请求、写请求、写数据，同类消息在 RP 间轮询。某个 RP 缺额度时可继续选择其他 RP；固定类型优先级不提供任意负载下的公平带宽保证。
+
+每拍最多装入 8 条新消息。输出寄存器和在建帧分别保存状态，背压期间输出保持不变，在建帧仍可继续填充。消息放不下时，剩余粒度在下一帧 G0 续传，该片段不设置新消息起点。无可选消息时发送已部分填充的帧，默认不额外等待攒包。
+
+### 接收路径
+
+`FlitUnpacker` 用一个接收暂存寄存器保持入站帧，`AouStreamDecoder` 根据消息起点及首字节推导消息长度，并保存跨帧续传状态。解析只依赖传输字节，不依赖发送对象中的 `used_granules`、ID 跟踪字段或内存布局。
+
+解析完成后，响应进入对应 RP 的 RDATA/WRESP FIFO，额度更新送往打包器。额度事件使用待发送队列和非阻塞 FIFO 写入；消息或事件尚未排空时保持接收占用并撤销就绪信号。RP=4 时一帧可产生 80 条合法额度事件，内部事件 FIFO 深度为 64，须允许跨周期排出。
+
+B/R 线程解码响应并保持输出至 AXI 握手。只有响应被主机接受后，才归还相应接收额度。请求消息应交给存储侧响应端；发起侧解包器将不支持的入站业务类型计为解析错误。
+
+## 4. 额度与容量
+
+额度按 `[RP][WREQ/RREQ/WDATA/RDATA/WRESP]` 分开管理，1 额度表示 1 个 5 字节粒度。两种写数据格式共用 WDATA 额度，管理消息不消耗业务额度。发送额度不足时暂停对应消息，不能将 FIFO 可写等同于对端还有消息容量。
+
+复位后接收容量进入待发布状态，分批发送直至累计公布完整容量。平时优先用业务帧头捎带额度；桥发送路径空闲且有待归还量时，等待两个周期后发送专用额度消息。单字段编码支持的数量见[字节格式](wire_contract.md)。
+
+默认链路为 16 通道、24GT/s、每符号 1 位，聚合裸带宽 48B/ns，256 字节帧周期约 5.333ns。容量预算为：
 
 ```text
-CREDIT_LOOP_NS = LINK_TAT_NS(40) + 3 × FLIT_PERIOD_NS(5.333) = 56 ns
-在飞字节数 = CREDIT_LOOP_NS(56ns) × LINK_BYTES_PER_NS(48B/ns) = 2688 B
-一条 N granule 消息的链路裸字节 = N × 5B × 256/240
+额度环路预算 = LINK_TAT_NS + 3 × 帧周期 = 40ns + 16ns = 56ns
+消息折算裸字节数 = 消息粒度数 × 5 × 256 / 240
+RDATA FIFO 深度 = floor(环路预算 × 裸带宽 / 消息折算裸字节数) + 1 + 4
+WRESP FIFO 深度 = floor(环路预算 / 2ns) + 4
 ```
 
-| AXI 位宽 | ReadData granule | 每条裸字节 | RDATA FIFO 深度/RP | RDATA credit/RP | WRESP FIFO 深度/RP | WRESP credit/RP |
-|---:|---:|---:|---:|---:|---:|---:|
-| 256b  |  8 | 42.7 B | 68 | 544 | 32 | 32 |
-| 512b  | 14 | 74.7 B | 41 | 574 | 32 | 32 |
-| 1024b | 27 | 144 B  | 23 | 621 | 32 | 32 |
+`messages_in_flight()` 使用取整数后加一的保守计算，整除时也保留一项余量。
 
-深度 = `ceil(2688B ÷ 每条裸字节) + FIFO_MARGIN_ENTRIES(4)`。三种位宽的"在飞
-字节数"是一样的（2688B），只是每条消息更大、条数更少。WriteResp 的源头是本端
-发出的写请求，速率上限是 AXI AW 的 1 条/拍而非链路带宽，因此按环路**周期数**
-定深度：`CREDIT_LOOP_CYCLES(28) + 4 = 32` 条。
+| 数据宽度 | 每条读数据粒度 | RDATA FIFO 项/RP | RDATA 额度/RP | WRESP FIFO 项及额度/RP |
+|---:|---:|---:|---:|---:|
+| 256 | 8 | 68 | 544 | 32 |
+| 512 | 14 | 41 | 574 | 32 |
+| 1024 | 27 | 23 | 621 | 32 |
 
-> **这三个 Flit 周期是实测出来的，不是拍脑袋加的余量。** 第一版只按
-> `LINK_TAT_NS` 反推深度，零飞行时间下一切正常；PERF-5 把单向飞行时间设成真实的
-> 20 ns 之后，读吞吐只能保持基线的 **90.10%**，数据方向的 Flit 平均填充从 100%
-> 掉到 90% —— 对端不是没数据可发，是没 credit 可用。补上这三段之后保持率回到
-> 100.00%。**这条经验对 RTL 实现同样成立**：按链路 TAT 反推缓冲深度是不够的，
-> 而且这种损失在零延迟仿真里完全看不到。
+这是本模型的容量预算，实际链路排队和后端时延需要在联合环境中测量。消息额度、FDI FIFO 槽位和链路重试缓冲分别以粒度、帧和未确认帧计数，彼此独立。
 
-### 3.3 Credit 分发
+## 5. 链路边界
 
-1. **复位后分批公布初始容量**。credit 字段是 3bit 离散编码
-   （`{0,1,4,8,16,32,64,128}`），单个字段一次最多表示 128 granule。1024b 的
-   RDATA 容量 621 granule 若只发一条 CrdtGrant，对端只拿到 128，"在飞字节数"
-   仅 682B ≈ 14ns，覆盖不住 40ns 的 TAT，读带宽会被 credit 往返卡死在 ~17GB/s
-   —— 这与协议效率无关，纯粹是公布方式的问题。因此复位时把全部容量放进
-   pending，由后续若干个 CrdtGrant / MsgCredit **累加发满**。
-2. 平时优先在业务 Flit 的 `MsgCredit[15:0]` 中捎带归还。一个 header 只服务一个
-   RP，多 RP 间轮转。
-3. 无业务 Flit 可捎带时（`!output_active_ && !cur_flit_.valid`），2 周期后发
-   dedicated `CrdtGrant`。**这条路径只使用空闲的链路槽位**：PERF-4 读写混合场景
-   实测 credit 粒度占该方向容量 0.00%～0.02%，即业务一满，credit 全部转为捎带，
-   不与数据抢带宽。
-4. WriteResp 字段只有 2bit（最大编码 3 → 8 granule），其余字段 3bit。
-   `encode_credit_amount` 取"不超过 pending 的最大合法值"，因此 pending=32 时
-   一次只发 8（WriteResp 字段 2bit 的上限），剩余留到后续继续发放。
+`UcieAouEndpoint` 将桥的帧信号转换为完整 250 字节 `FdiFlit`，并连接链路 SoC 侧的两个 FIFO。发送端以寄存就绪信号预约 FIFO 空位，在握手沿写入；接收端从 FIFO 取出后保持一拍，最快在下一 AXI 上升沿交付。因此适配器的接收路径包含一个 AXI 周期及可能的相位等待。
 
-## 4. 参数化
+链路 Reset/Training 状态不接受新传输，Active/Degraded 允许传输。已公布的发送就绪必须兑现，状态改变时可能完成一次已经预约的握手。启动流程先保持桥和响应端复位，链路训练完成后再释放。
 
-### 4.1 AXI 数据位宽
+逻辑内容固定为 10 字节帧头加 240 字节载荷。链路将其散布到 256 字节物理帧，填写序号、重放标志和两段 CRC。`transaction_id`、VC 和业务类型元数据用于链路跟踪，不用于恢复 AXI 消息语义。完整字段和连接表见[字节格式与接口](wire_contract.md)。
 
-```bash
-make WIDTH=1024 run      # 或 make test-all / make perf-all 跑全部三种
-```
+## 6. 存储侧响应端
 
-`-DAXI_DATA_WIDTH_CFG=256|512|1024` 同时决定：AoU DLENGTH、三类数据消息的
-granule 数（**三张表互不相同**：WriteData 8/15/30、WriteDataFull 7/14/27、
-ReadData 8/14/27）、以及上表的 FIFO/credit 深度。位宽改变会同时动到这几处，
-是最容易出回归的维度，`make test-all` 必须三种全跑。
+`AouTarget` 直接连接链路存储侧的收发 FIFO，无需额外的帧握手适配器。它解包请求、组装写突发、提交后端，并将写状态和逐拍读数据重新打包。
 
-### 4.2 Resource Plane
+每 RP 分别有 4 个读请求槽、4 个写请求槽和 64 粒度的写数据接收空间。每笔写请求预留其完整突发所需空间，最大 256 拍。写数据按 RP 内写请求顺序配对，搬入突发组装区后归还 WDATA 额度。完整请求提交成功后归还请求额度，长突发可分批穿过有限写数据窗口。
 
-```cpp
-Axi2Flit single_rp("bridge");     // 默认 RP_COUNT=1
-Axi2Flit qos_bridge("bridge", 2); // 启用 RP0/RP1
-```
+全局最多保留 8 笔已提交、响应尚未全部序列化的事务。每拍最多提交一笔内存请求，在读写方向和 RP 间轮询。响应按方向、RP、ID 匹配最早未完成请求；后端须保持同组完成顺序，不同 ID 可以乱序完成。发送优先选择写响应，然后选择读响应，各 RP 轮询。末条响应跨帧时，须等续传全部写入发送 FIFO 后才释放未完成事务槽。
 
-`RP_COUNT` 范围 1～4（AoU 的 RP 字段是 2bit）。RP 不是读/写通道编号；RP0 内部
-仍有五套独立 credit，读写消息不会因共用 RP0 而共用同一 credit pool。单一 HBM
-交互场景 RP_COUNT=1 即可。
+内存只执行被请求的访问，因此这里只需要响应端；响应端仍会主动发送初始额度和归还额度。
 
-> **集成约束 C-1（RP_COUNT > 1 时必须满足）**
->
-> 同一个 AXI ID 在同一方向上未完成的事务，必须全部映射到同一个 RP。
->
-> 原因：AXI4 要求同 ID 同方向的响应保序，而 AoU 的多个 Resource Plane 是
-> **相互独立的流控平面** —— 各有各的 credit、各有各的接收 FIFO、发送侧按
-> round-robin 轮询。两笔落在不同 RP 上的事务，响应回来的先后顺序是不确定的。
-> 本模型默认按 `AxQOS % RP_COUNT` 分流，如果 SoC 侧对同一个 AxID 发出了不同
-> 的 AxQOS，这条约束就被破坏了。
->
-> 充分条件（满足任意一条即可）：`RP_COUNT = 1`；或同一 AxID 只用一个 AxQOS；
-> 或按 ID 空间静态划分（如用 `AxID[9:8]` 直接当 RP 号）。
->
-> 模型侧的处理：**不做跨 RP 重排序缓冲**，而是加运行时断言。理由见
-> `include/rp_order_guard.h` 的文件头注释 —— 重排序缓冲的面积随 outstanding
-> 深度增长，且会把快 RP 拖到慢 RP 的节奏上，反而抵消了分平面的意义，AoU 规范
-> 本身也没有要求桥接单元承担这件事。违例计数可通过
-> `Axi2Flit::order_violations()` 读出，TC9 会检查它为 0。
+## 7. 存储对外接口
 
-## 5. 文件划分
+定义位于 `simple_mem_if.h`。`AouTarget.mem_req` 为 `sc_fifo_out<SimpleMemRequest>`，`mem_rsp` 为 `sc_fifo_in<SimpleMemResponse>`；内存模型分别绑定同一请求/响应 FIFO 的另一端。
 
-| 文件 | 职责 |
+| 类型 | 字段与含义 |
 |---|---|
-| `include/aou_types.h` | AoU 消息/Flit 结构、协议常量、链路参数、深度反推 |
-| `include/credit_manager.h` | credit counter、MsgCredit/CrdtGrant 编解码 |
-| `include/msg_builder.h` / `msg_decoder.h` | AXI ↔ AoU 消息互转 |
-| `include/axi_if.h` | AXI4 通道结构（`AXI_USER_WIDTH = 16`，对齐 FLEX[15:0]） |
-| `include/rp_order_guard.h` | 「同一 AXI ID 只能映射到固定 RP」的约束检查（约束 C-1） |
-| `src/flit_packer.*` | 多 RP 调度、打包、跨 Flit 续传、credit 消耗、FDI 发送 |
-| `src/flit_unpacker.*` | FDI 接收、header 解析、续传重组、R/B 分流 |
-| `src/axi2flit.*` | 顶层连接与 AXI 五通道握手 |
-| `tb/tb_common.h` | 独立参考模型（FlitScanner / LinkPacer / FlitDelayLine / RemoteAouModel）与数据图样 |
-| `tb/tb_axi2flit.cpp` | 功能自检测试 TC1～TC9 + 波形 |
-| `tb/tb_axi2flit_perf.cpp` | 延迟/带宽性能测量 PERF-1～PERF-5 + 硬门限考核 |
-| `tb/tb_golden_vectors.cpp` | 黄金字节向量对拍：与 v0.8 PDF 手工转录的线上字节逐字节比对 |
+| `SimpleMemRequest` | `write` 方向、`rp`、`address` 地址及 AXI 属性、`write_beats` 整笔写数据 |
+| `SimpleMemWriteBeat` | 完整总线宽度的 `data`、逐字节 `strobe`、`user` |
+| `SimpleMemResponse` | `write`、`rp`、`id`、写 `resp/user`、整笔 `read_beats` |
+| `SimpleMemReadBeat` | 完整总线宽度的 `data`、本拍 `resp/user` |
 
-## 6. 位域布局的来源：以 v0.8 PDF 为唯一基线
+FIFO 成功写入表示接受排队，返回响应表示操作完成，不使用事务结构体内的 valid/ready 握手。读请求不携带写数据；写响应不携带读数据；读响应须恰好有 LEN+1 拍。后端接口是整笔完成形式，逐拍回调模型需要在适配器中聚合响应。
 
-**协议基线 = `doc/AXI over UCIe Protocol Specification v0.8.pdf`。**
-所有 granule 常量、字段位置、字节序一律以该 PDF 的字段表为准；参考 RTL
-只作架构与命名参考，**不再作为位域依据**。
+简单内存的默认地址窗口从 `0x1234567800000000` 开始，大小 128KiB，启动全零。一次串行服务一笔，等待 `20ns + 2ns × 拍数` 后访问数据，再向响应 FIFO 写入；响应背压会延长下一笔的开始时间。压力场景固定访问项为 80ns。
 
-### 6.1 为什么不能拿参考 RTL 当基线
+窄访问保留总线字节通道，未参与读取的字节返回零。写入只更新有效选通字节；越界访问返回 DECERR，不执行部分写入；LOCK 请求和访问范围外的有效选通返回 SLVERR。该内存先检查整笔写事务再更新数据，多个错误同时出现时以代码中的检查顺序决定状态。地址 USER 回送 BUSER/RUSER，WUSER 被传递到后端但简单内存不使用它。
 
-参考 RTL（`reference/tt-oca-harness-aou/`）比 v0.8 更早。v0.8 的 changelog
-第 189 行明确写着：
+接入其他主机时替换 AXI 激励，并根据主机接口转换为这五个信号通道。接入存储时序模型时替换简单内存，用适配器完成突发拆分、选通合并、数据存储与完成聚合；模型拒绝请求时保留事务，完成时返回匹配的方向、RP 和 ID。时间推进和请求粒度应由适配器统一。
 
-> "Repurposed PROF/PROFEXTLEN fields as FLEX fields, defined use of FLEX fields
-> as USER bits in the Basic Profile."
+## 8. 配置与限制
 
-也就是说 RTL 里的 `PROF` / `PROFEXTLEN` 两个字段在 v0.8 已经被合并重定义成
-`FLEX`，并规定在 Basic Profile 下承载 AXI 的 USER 位。照 RTL 实现会得到一个
-**与 v0.8 不兼容**的线上格式。本模型据此把 `AXI_USER_WIDTH` 定为 **16**
-（FLEX[15:0]），删掉了 PROF/PROFEXTLEN。
+`link_config.h` 提供 `AOU_LINK_LANES`、`AOU_LINK_RATE_GTPS`、`AOU_LINK_BITS_PER_SYMBOL`、`AOU_LINK_TAT_NS`。`make_aou_ucie_config()` 构造匹配配置，`require_aou_ucie_config()` 检查链路格式、通道数、速率与调制。修改编译参数须重编全部关联模块。
 
-同类问题还有两处，都已按 PDF 纠正：
+桥本地复位清空消息队列、写路由、额度事件、顺序表及打包/解包状态，随后重新发布容量。本地复位测试要求对端同步清理事务；全链路只支持启动协调，运行期间复位需要重建完整链路。
 
-| 项 | 按 RTL 的旧实现 | 按 v0.8 PDF 纠正后 |
-|---|---|---|
-| USER 位 | PROF(4) + PROFEXTLEN(8)，`AXI_USER_WIDTH = 12` | FLEX[15:0]，`AXI_USER_WIDTH = 16` |
-| CrdtGrant | 带前导 rsvd 字段、尾部多 17 bit | 按 PDF 字段表精确对齐，无多余位 |
-| 位序 | 序列化按 LSB-first | 按 §5.8「Bytes count up · Bits count down · MSB-first」全面改为 MSB-first |
-
-granule 常量本身与 RTL 一致（`AW_G=3 / AR_G=3 / B_G=1`，WriteData 8/15/30，
-WriteDataFull 7/14/27，ReadData 8/14/27），已与 PDF 的表逐项核对通过。
-注意这是**三张互不相同的表**，`WriteData` / `WriteDataFull` / `ReadData`
-的 granule 数不能互相套用。
-
-### 6.2 位序规则（最容易错、也最难测出来的一条）
-
-规范 §5.8 的原话是 **"Bytes count up • Bits count down • MSB-first bit ordering"**。
-消息内部的数据序列化因此是 MSB-first：字节地址递增、每字节内 bit7→bit0。
-Protocol Header 则按图 5 独立逐位映射，不能整体套用消息字段顺序。
-
-这个错误当初能长期存在，是因为**测试激励掩盖了它**：早期数据图样是"一整拍同一个
-字节值"，地址也只用低 32 位，字节序整体翻转前后**完全一样**。现在的防线有两道：
-
-1. **黄金字节向量对拍**（`tb_golden_vectors.cpp`）：期望字节序列是**从 PDF 字段表
-   手工转录**的常量，不经过任何本模型的代码路径。三种位宽各 71 个检查项，
-   覆盖全部 7 种消息；PH/完整 PLP 由独立的 `tb_aou_wire.cpp` 覆盖，
-   每项都核对总 granule 数、首字节自描述编码、以及**整条消息的每个字节**。
-2. **可辨识的激励**：数据图样改为「递增 ⊕ 走一位」（每字节都不同）并逐字节比对；
-   地址高 32 位固定为 `TB_ADDR_TAG`，在链路上解回来核对。
-
-> 只靠"MsgBuilder 编码后 MsgDecoder 能解回来"是无效验证 —— 两者共用同一份
-> 位域理解，同时错时测试全绿。这是黄金向量套件存在的唯一理由。
-
-### 6.3 参考 RTL 的定位与合规
-
-参考 RTL 为 Apache-2.0 第三方代码（Tenstorrent / BOS Semiconductors），
-且自身标注为 pre-release / evaluation 质量。本模型**只参考其架构划分与
-参数命名，不复制任何实现代码**；位域与常量以 PDF 为准。RTL 实现阶段仍须按
-冻结版 AoU 规范再逐 bit 复核一次。
-
-## 7. 已知边界与后续计划
-
-| 项 | 状态 |
-|---|---|
-| responder 侧（入站 WREQ/RREQ/WDATA） | 未实现，由 testbench 的 RemoteAouModel 扮演 |
-| **约束 C-1 的 SoC 侧落实**（同 AxID 固定 RP） | 模型内已加运行时断言（TC9 考核），但**约束本身要由 SoC 的 ID/QoS 规划保证**，桥接单元只能检出、不能修复 |
-| **AXI 合法性检查**（非 INCR / 超位宽 SIZE / 跨 4KB / 非对齐 / WLAST） | 已实现；入口 fail-fast，`boundary-all` 从真实 AW/AR/W 端口验证 |
-| QoS 三模式仲裁 + 防饿死超时（P1-11） | 待做，当前为固定优先级 + RP 轮转 |
-| WLAST 重建（P1-12） | 随 responder 侧一起做（AoU 的 WriteData 不含 WLAST） |
-| 时钟频率决策（P1-13） | 当前 500MHz；1024b 下 AXI 侧上限 64GB/s，已不是瓶颈 |
-| Activation/CSR、Aggregator/Splitter、FDI cancel/stall、Early BRESP | P2，本阶段不做 |
-| Flit2DFI | 与存储控制器侧同事合并对齐 |
-| FDI 侧 UCIe D2D 链路仿真模型联合测试 | 待对方模型就绪 |
-
-> 带宽口径已定案为**口径B**（应用字节 ÷ 数据方向 Flit 数 × 240B），不再讨论。
-> 三个口径的定义、为什么合同指标只能按口径B 考核、以及口径A 在 1024b 下
-> 88.9% 的规范天花板，见 `doc/verification.md` §4.2。
+项目未实现接口激活状态机、运行期间速率切换、完整 QoS 策略、DRAM 控制器及引脚时序。简单内存不执行独占语义。验证范围、性能判据及结果适用条件见[验证文档](verification.md)。

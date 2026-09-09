@@ -1,16 +1,7 @@
 /**
- * @file axi2flit.h
- * @brief 双向 AXI initiator-side AoU 协议桥顶层
- *
- * 发送方向：AXI AW/W/AR -> per-RP FIFO -> FlitPacker -> FDI
- * 接收方向：FDI -> FlitUnpacker -> per-RP FIFO -> AXI B/R
- *
- * RP_COUNT 是构造参数，默认值为 1，合法范围为 1～4。工程只连接一个 HBM
- * 控制器时通常使用 RP0 即可；需要把不同端口或 QoS 类隔离时，再增加 RP 数量。
- * 本模型采用 AxQOS % RP_COUNT 作为实现定义的简单映射，W beat 通过 AW 顺序队列
- * 继承所属 RP，避免 AXI4 W 通道没有 WID 所导致的路由歧义。
+ * 请求发起侧双向协议桥。AXI请求经消息队列打包发送，返回消息解码为B/R通道。
+ * 资源平面按QOS取模映射，写数据按写地址接收顺序继承路由。
  */
-
 #pragma once
 
 #include "axi_if.h"
@@ -23,7 +14,7 @@
 #include "rp_order_guard.h"
 #include "axi_contract.h"
 
-// FIFO / credit 深度常量定义在 aou_types.h（按链路 TAT 反推，见该文件注释）。
+// FIFO / credit 深度常量定义在 aou_types.h（按额度环路时间预算计算，见该文件注释）。
 
 // AXI4 W 不携带 ID/RP，需要按 AW 接收顺序保存写 burst 的路由信息。
 struct WriteRoute {
@@ -72,7 +63,7 @@ public:
     unsigned rp_count() const { return rp_count_; }
 
     /**
-     * 同 ID 跨 RP 的顺序违例计数（约束 C-1，见 rp_order_guard.h）。
+     * 同 ID 跨 RP 的顺序违例计数（资源平面顺序约束，见 rp_order_guard.h）。
      * testbench 应在仿真结束时检查它为 0；不为 0 说明激励或 SoC 侧的
      * QoS/ID 规划违反了集成约束，桥接单元无法保证 AXI 响应顺序。
      */

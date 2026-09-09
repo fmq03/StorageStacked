@@ -1,11 +1,5 @@
 /**
- * @file tb_aou_wire.cpp
- * @brief 接入前线格式验证：独立 PH 黄金字节、物理偏移、无辅助字段续传。
- *
- * PH 期望值直接由 v0.8 图 5 转录，不调用被测映射产生期望值。物理测试单独
- * 列出图 4 的偏移；续传测试比较原始消息每个字节，在全部 48 个起点拆分。
- * 固定种子压力测试用于发现多消息跨包状态泄漏；非法结构测试要求拒绝且不
- * 污染已保存的续传状态。这些测试不实例化 UcieLink，不运行 PHY/重放联调。
+ * 固定字节映射、跨帧解析与非法输入自检。期望字节独立于被测编解码器。
  */
 #include "aou_wire.h"
 #include "aou_format6.h"
@@ -48,7 +42,6 @@ static void header_golden() {
     f.used_granules = 48; f.valid = false;
     check(serialize_aou(f) == expected, "辅助字段绝不影响线格式");
 
-    // 图 5 独立转录：各 MsgStart 位对应 PH 的 byte/bit，不复用 DUT 常量。
     const unsigned byte[48] = {
         0,0,0,0, 1,1,1,1,1,1,1,1, 2,2,2,2, 3,3,3,3,3,3,3,3,
         6,6,6,6, 7,7,7,7,7,7,7,7, 8,8,8,8, 9,9,9,9,9,9,9,9};
@@ -207,7 +200,7 @@ static void axi_negative() {
 }
 
 int sc_main(int, char**) {
-    // 编译并实例化下阶段的 FIFO 公共类型，确保不仅是文档中的伪接口。
+    // 实例化存储请求和响应 FIFO，检查公共事务类型的读写。
     sc_fifo<SimpleMemRequest> requests("memory_requests", 1);
     sc_fifo<SimpleMemResponse> responses("memory_responses", 1);
     header_golden(); physical_mapping(); stream_boundaries(); axi_negative();

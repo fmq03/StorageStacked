@@ -1,8 +1,6 @@
 /**
- * @file axi2flit.cpp
- * @brief Axi2Flit 顶层构造、端口连接以及 AXI 五通道处理线程
+ * 连接桥内队列与打包、解包模块，按时钟沿处理AXI五通道握手及复位。
  */
-
 #include "axi2flit.h"
 #include <iostream>
 
@@ -105,25 +103,6 @@ void Axi2Flit::reset_queues_and_order() {
     while (sig_write_route_fifo.nb_read(route)) {}
 }
 
-/**
- * 【P0-3：AXI 通道去气泡】
- *
- * 旧实现的写法是：
- *      ready.write(true);  wait();  ready.write(false);
- * 也就是每完成一次握手就强制把 ready 拉低一拍。结果是 AXI 侧最快只能
- * 2 拍传 1 拍数据，吞吐直接腰斩（@500MHz、256b 数据 → 8GB/s）。
- *
- * 新实现改成标准的"寄存器化 ready"：
- *      本拍看到 (valid && ready_reg) 就接收数据；
- *      然后只根据下游 FIFO 是否还有空间来决定下一拍的 ready。
- * ready 与是否刚刚发生握手无关，因此源端 valid 常拉高时可以做到
- * 1 beat/cycle 连续传输。
- *
- * ready_reg 在拉高之前必须保证"下一拍真的能收下"，所以判据是
- * num_free() > 0（本拍最多只会有一个写入者，因此 1 个空位即足够）。
- * AW/AR 的目标 RP 由 QoS 决定，在数据到来前无法预知，因此采取保守判据：
- * 所有已启用 RP 的对应 FIFO 都有空位才拉高 ready。
- */
 void Axi2Flit::aw_channel_thread() {
     aw_ready.write(false);
     bool ready_reg = false;
@@ -137,7 +116,7 @@ void Axi2Flit::aw_channel_thread() {
                 return;
             }
             uint8_t rp = map_qos_to_rp(aw.qos);
-            // 约束 C-1 检查：同一 AWID 的未完成事务必须落在同一个 RP，
+            // 资源平面顺序约束 检查：同一 AWID 的未完成事务必须落在同一个 RP，
             // 否则 B 响应可能跨 RP 乱序返回（详见 rp_order_guard.h）。
             wr_order_guard_.bind(aw.id, rp);
             // AW 消息和 W 路由信息必须原子入队，两个队列的空间已在
@@ -226,7 +205,7 @@ void Axi2Flit::ar_channel_thread() {
                 return;
             }
             uint8_t rp = map_qos_to_rp(ar.qos);
-            // 约束 C-1 检查，理由同 aw_channel_thread
+            // 资源平面顺序约束 检查，理由同 aw_channel_thread
             rd_order_guard_.bind(ar.id, rp);
             AouMessage msg = MsgBuilder::build_read_req(ar, rp);
             bool written = sig_rreq_fifo[rp].nb_write(msg);
@@ -250,20 +229,12 @@ void Axi2Flit::ar_channel_thread() {
     }
 }
 
-/**
- * B/R 通道同样去掉了原来的"每拍先 wait 再判断"结构：
- * 握手完成的当拍就去取下一条消息并驱动 valid，因此在响应流连续时
- * 可以做到 1 beat/cycle，不再每条之间插一个空泡。
- *
- * credit 归还发生在响应真正被 AXI 主设备取走的那一拍——这才是接收缓冲
- * 真正被释放的时刻，早归还会导致对端超发、接收 FIFO 溢出。
- */
 void Axi2Flit::b_channel_thread() {
     b_valid.write(false);
     b_ch.write(BChannel{});
     bool active = false;
     AouMessage active_msg;
-    uint16_t active_id = 0;      // 当前在 b_ch 上的 BID，握手后用于销账（约束 C-1）
+    uint16_t active_id = 0;      // 当前在 b_ch 上的 BID，握手后用于销账资源平面顺序约束
     unsigned next_rp = 0;
     wait();
     while (true) {

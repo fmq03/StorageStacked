@@ -1,30 +1,4 @@
-# ======================================================
-#  AXI2FLIT SystemC 模型 Makefile
-#
-#  常用目标：
-#    make            编译默认配置（256b）的功能仿真
-#    make run        运行功能仿真（生成 sim/waveform.vcd）
-#    make perf       运行默认配置的性能仿真（延迟/带宽报告）
-#    make golden     运行规范一致性对拍（逐字节比对 AoU v0.8 黄金向量）
-#    make test-all   编译并运行 256/512/1024 三种位宽的功能仿真
-#    make perf-all   运行 256/512/1024 三种位宽的性能仿真
-#    make golden-all 三种位宽的规范一致性对拍
-#    make report     跑完 perf-all 并把报告汇总到 sim/perf_report.txt
-#    make wave       用 GTKWave 打开波形
-#    make clean      清除所有编译产物
-#
-#  AXI 数据位宽由 -DAXI_DATA_WIDTH_CFG 控制。位宽会同时影响：
-#    - AoU DLENGTH 与三类数据消息的粒度数（8/14/27 等）
-#    - 按 TAT 反推出的接收 FIFO 深度与初始 credit
-#  因此每种位宽都必须单独编译一个可执行文件，不能共用 .o。
-#
-#  【可执行文件名必须带位宽】
-#  曾经的写法是 sim/axi2flit_sim（不带位宽）。这样 make WIDTH=256 之后再
-#  make WIDTH=1024，make 看到目标比依赖新就直接回答 "Nothing to be done"，
-#  于是跑的还是上一次那个 256b 的二进制 —— 测量结果与标称位宽不符且毫无提示。
-#  现在目标名一律带 $(WIDTH)，换位宽必然触发重新编译。
-# ======================================================
-
+# AXI2FLIT 的构建与回归入口；各位宽分别编译，参数通过命令行覆盖。
 SYSTEMC_HOME ?= $(HOME)/.local/systemc-2.3.4-cxx17
 
 CXX      := g++
@@ -82,7 +56,7 @@ $(PERF_TARGET): $(DUT_SRCS) $(PERF_TB) $(HDRS) FORCE | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(DUT_SRCS) $(PERF_TB) -o $@ $(LDFLAGS)
 	@echo "编译成功：$@（AXI_DATA_WIDTH=$(WIDTH)）"
 
-# ---- 黄金字节向量对拍（不依赖 SystemC 内核，纯静态编译） ----
+# ---- 黄金字节向量对拍（直接调用编码器，不推进仿真时间） ----
 $(GOLDEN_TARGET): $(GOLDEN_TB) $(HDRS) FORCE | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(GOLDEN_TB) -o $@ $(LDFLAGS)
 	@echo "编译成功：$@（AXI_DATA_WIDTH=$(WIDTH)）"
@@ -128,13 +102,12 @@ perf-all: | $(SIM_DIR)
 	done; \
 	exit $$fail
 
-# ---- 三种位宽的规范一致性对拍 ----
-# 与 test-all/perf-all 不同，本目标把消息逐字节和《AoU v0.8》表/图手工
-# 展开的黄金向量比对，任何位域挪动都会立即暴露。
+# ---- 三种位宽的消息黄金向量对拍 ----
+# 将消息逐字节与独立固定向量比较，检查位域和数据排列。
 golden-all: | $(SIM_DIR)
 	@fail=0; \
 	for w in $(WIDTHS); do \
-	  echo "=============== 规范一致性对拍 AXI_DATA_WIDTH=$$w ==============="; \
+	  echo "=============== 消息黄金向量对拍 AXI_DATA_WIDTH=$$w ==============="; \
 	  $(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$$w $(GOLDEN_TB) \
 	      -o $(SIM_DIR)/golden_$$w $(LDFLAGS) || { fail=1; continue; }; \
 	  ./$(SIM_DIR)/golden_$$w || fail=1; \
@@ -145,7 +118,7 @@ report: | $(SIM_DIR)
 	@$(MAKE) --no-print-directory perf-all > $(SIM_DIR)/perf_report.txt 2>&1
 	@echo "性能报告已生成：$(SIM_DIR)/perf_report.txt"
 
-# 接入前门禁：新增格式/解析回归单列，避免把消息 golden 的 71 项虚报成 PH 覆盖。
+# 帧头、字节映射与流解析回归，与消息黄金向量分别统计。
 wire-all: | $(SIM_DIR)
 	@set -e; for w in $(WIDTHS); do \
 	  $(CXX) $(CXXFLAGS) -DAXI_DATA_WIDTH_CFG=$$w $(TB_DIR)/tb_aou_wire.cpp \
@@ -174,17 +147,55 @@ boundary-all: | $(SIM_DIR)
 	  done; \
 	done
 
-# 组件单测引用 UCIe 公共类型和格式函数，不实例化 UcieLink/PHY。
-UCIE_DIR := ../reference/ucie-model
-ENDPOINT_FLAGS := -I./integration -I$(UCIE_DIR)/src
+# 链路模型目录可独立配置；UCIE_DIR 的相对路径以 systemc/ 为基准。
+AXI2FLIT_SYSTEMC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+UCIE_DIR ?= ../reference/ucie-model
+UCIE_PATCH := $(AXI2FLIT_SYSTEMC_DIR)/integration/ucie-model-aou.patch
+ENDPOINT_FLAGS := -I./integration -I"$(UCIE_DIR)/src"
+FULL_LINK_ARGS ?=
+FULL_LINK_TARGET := $(SIM_DIR)/full_link_$(WIDTH)
+.PHONY: full-link full-link-all full-link-negative full-link-wave
+$(FULL_LINK_TARGET) $(SIM_DIR)/full_link_negative_$(WIDTH): $(DUT_SRCS) $(TB_DIR)/tb_full_link.cpp $(HDRS) $(wildcard integration/*.h) $(wildcard $(UCIE_DIR)/src/*.h) FORCE | $(SIM_DIR)
+	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(DUT_SRCS) $(TB_DIR)/tb_full_link.cpp -o $@ $(LDFLAGS)
+
+full-link: reference-check $(FULL_LINK_TARGET)
+	./$(FULL_LINK_TARGET) $(FULL_LINK_ARGS)
+
+# 将已有 VCD 转换为可独立打开的波形页面。
+FULL_LINK_VCD ?= $(SIM_DIR)/full_link_$(WIDTH)_rp1.vcd
+full-link-wave:
+	python3 scripts/full_link_wave.py $(FULL_LINK_VCD)
+
+# 每个位宽编译一次，各场景使用独立的波形、事务记录和日志路径。
+full-link-all: reference-check | $(SIM_DIR)
+	@set -e; for w in $(WIDTHS); do \
+	  $(MAKE) --no-print-directory WIDTH=$$w $(SIM_DIR)/full_link_$$w; \
+	  for rp in 1 2 4; do \
+	    log=$(SIM_DIR)/full_link_$${w}_rp$${rp}.log; \
+	    ./$(SIM_DIR)/full_link_$$w --rp $$rp > $$log 2>&1 || { tail -30 $$log; exit 1; }; \
+	    tail -5 $$log; \
+	  done; \
+	  log=$(SIM_DIR)/full_link_$${w}_rp2_stress_replay.log; \
+	  ./$(SIM_DIR)/full_link_$$w --rp 2 --stress --replay > $$log 2>&1 || { tail -30 $$log; exit 1; }; \
+	  tail -5 $$log; \
+	done
+
+# 负向自检仅破坏记分板期望值；必须同时检出数据错误和失败退出状态。
+full-link-negative: reference-check $(SIM_DIR)/full_link_negative_$(WIDTH)
+	@rc=0; ./$(SIM_DIR)/full_link_negative_$(WIDTH) --negative-scoreboard > $(SIM_DIR)/full_link_negative.log 2>&1 || rc=$$?; \
+	  test $$rc -eq 1 && grep -q 'R data mismatch' $(SIM_DIR)/full_link_negative.log && \
+	  grep -q 'FULL-LINK TESTS FAILED' $(SIM_DIR)/full_link_negative.log && \
+	  echo 'PASS: scoreboard negative control detected corrupted expectation'
+
 endpoint: reference-check | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) $(TB_DIR)/tb_ucie_endpoint.cpp -o $(SIM_DIR)/endpoint $(LDFLAGS)
 	./$(SIM_DIR)/endpoint
 
 ucie-unit: reference-check
-	$(MAKE) -C $(UCIE_DIR) SYSTEMC_HOME=$(SYSTEMC_HOME) all unit-test
+	$(MAKE) -C "$(UCIE_DIR)" SYSTEMC_HOME="$(SYSTEMC_HOME)" \
+	  AOU_INCLUDE="$(AXI2FLIT_SYSTEMC_DIR)/include" all unit-test
 
-# 参数替换也实际编译并运行：x8 PAM4 仍是 48 GB/s，TAT 改为 80ns。
+# 参数化回归：x8、PAM4、48 GB/s、TAT=80ns。
 # 不复用默认配置的可执行文件，防止 make 未感知宏变化而命中旧缓存。
 config-check: reference-check | $(SIM_DIR)
 	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) -DAOU_LINK_LANES=8 -DAOU_LINK_BITS_PER_SYMBOL=2 \
@@ -196,13 +207,14 @@ config-check: reference-check | $(SIM_DIR)
 
 # reference 不纳入主仓库。反向检查只读确认交付补丁已安装，缺失时给出操作入口。
 reference-check:
-	@git -C $(UCIE_DIR) apply --reverse --check ../../systemc/integration/ucie-model-aou.patch || \
+	@git -C "$(UCIE_DIR)" apply --reverse --check "$(UCIE_PATCH)" || \
 	  { echo "UCIe 接入补丁未安装或与本地修改冲突，请按 integration/README.md 检查。"; exit 1; }
 
 wave:
 	gtkwave $(SIM_DIR)/waveform.vcd &
 
 clean:
+	rm -f $(SIM_DIR)/full_link*
 	rm -f $(SIM_DIR)/wire_* $(SIM_DIR)/boundary_* $(SIM_DIR)/endpoint*
 	rm -f $(SIM_DIR)/axi2flit_sim_* $(SIM_DIR)/axi2flit_perf_* $(SIM_DIR)/axi2flit_golden_*
 	rm -f $(SIM_DIR)/axi2flit_sim $(SIM_DIR)/axi2flit_perf

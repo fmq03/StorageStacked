@@ -1,27 +1,7 @@
 /**
- * @file aou_types.h
- * @brief AoU（AXI over UCIe）协议核心数据类型定义
- *
- * 本文件定义了 AoU Protocol Specification v0.8 中规定的所有消息类型、
- * 字段编码和 Flit 数据结构，是整个桥接模型的基础类型库。
- *
- * 关键概念：
- *   - 一个 Flit = 256B（UCIe Latency-Optimized Format 6）
- *   - 协议层使用其中 250B：10B 协议头 + 240B 载荷
- *   - 载荷分成 48 个 5B 粒度（granule），每条消息占整数个粒度
- *   - 消息类型由 MSGTYPE 字段（4bit）区分
- *   - 一条消息允许跨 Flit 续传，但续传部分必须落在下一个 Flit 的 G0
- *
- * 【粒度常量与位域布局的来源】
- *   权威基线为 doc/AXI over UCIe Protocol Specification v0.8.pdf。
- *   reference/tt-oca-harness-aou/RTL/packet_def_pkg.sv 仅作历史交叉参考：
- *     - AW_G / W*_G / WF*_G / B_G / AR_G / R*_G 可核对粒度数；
- *     - st_*_packet_tmp 与 st_*_packet 分别是打包与内部寄存器格式，勿混用；
- *     - FLEX16、CrdtGrant 和 MSB-first 等以 v0.8 为准，不能照搬旧 RTL。
- *   注意：参考 RTL 为 Apache-2.0 第三方代码，本模型只对齐"参数与字段定义"，
- *        不复制其任何实现代码。
+ * 桥接模型共用的数据类型、消息编码、粒度常量和容量计算。
+ * 帧长256字节，协议内容250字节，载荷由48个5字节粒度构成。
  */
-
 #pragma once
 
 #include <systemc.h>
@@ -54,7 +34,7 @@ static constexpr int GRANULE_BYTES      = 5;
 // 粒度总数：240 / 5 = 48
 static constexpr int GRANULE_COUNT      = 48;
 
-// AoU 协议中的 RP 字段宽度为 2bit，因此协议最多支持 4 个 Resource Plane。
+// 本模型的 RP 字段宽度为 2bit，因此协议最多支持 4 个 Resource Plane。
 // 具体工程可以只启用其中一部分；本模型默认只启用 RP0。
 static constexpr unsigned MAX_RESOURCE_PLANES     = 4;
 static constexpr unsigned DEFAULT_RESOURCE_PLANES = 1;
@@ -62,36 +42,16 @@ static constexpr unsigned DEFAULT_RESOURCE_PLANES = 1;
 // ============================================================
 //  链路参数（用于 FIFO/credit 容量反推，以及 testbench 的速率节流）
 // ============================================================
-// 指标要求：单通道 >= 24GT/s；这里按 UCIe x16 模块计算聚合裸带宽。
+// 默认按 16 条通道、每通道 24GT/s 计算聚合裸带宽。
 // 裸链路字节速率（B/ns）：16 lane × 24 Gbps ÷ 8 = 48 GB/s = 48 B/ns
 // 参数和 NRZ/PAM4 位数统一定义在 link_config.h；上式是默认 NRZ 配置。
 // 一个 256B Flit 在链路上占用的时间（ns）：256 / 48 ≈ 5.333ns
 static constexpr double FLIT_PERIOD_NS     = FLIT_TOTAL_BYTES / LINK_BYTES_PER_NS;
 
-// 链路环回时间 TAT（Turn-Around Time，ns）：
-// 从本端发出 credit 返还，到对端据此发出的数据回到本端所经历的总时延，
-// 含两侧 D2D adaptor + PHY + 对端协议层。参考 RTL 的 MAS 按 40 周期 @1GHz
-// 取值，本模型沿用 40ns 这一量级。FIFO/credit 深度必须覆盖这段时间内
-// 链路可能灌入的数据量，否则 credit 往返本身就会成为带宽瓶颈。
-// LINK_TAT_NS 默认 40ns，可通过 AOU_LINK_TAT_NS 编译参数覆盖。
-
-// credit 环路时间（ns）：反推接收 FIFO 深度真正该用的是它，而不是 LINK_TAT_NS。
-//
-// LINK_TAT_NS 只涵盖"credit 已经上了链路"之后的飞行与对端处理。credit 从
-// "接收缓冲腾出来"到"真的上了链路"，还要额外经过三段，全都以 Flit 为粒度发生：
-//   ① 消息离开接收 FIFO、送上 AXI 之后，credit 才变成"待归还"   ≈ 接收流水线 2 拍
-//   ② 待归还量要攒够一个可编码的档位才发得出去 —— 归还量的编码
-//      只有 {1,4,8,16,32,64,128} 七档，凑不满档的余数只能等下一轮 ≈ 1~2 个 Flit 周期
-//   ③ 归还量要搭上一个出站 Flit 的头部，或单独发一条 CrdtGrant    ≈ 1 个 Flit 周期
-// 三段合计按 3 个 Flit 周期计入。
-//
-// 【这是 PERF-5 实测出来的】第一版只按 LINK_TAT_NS 反推深度，零飞行时间时
-// 一切正常；把单向飞行时间设成真实的 20ns 之后，读吞吐只能保持基线的 90%，
-// 数据方向的 Flit 平均填充从 100% 掉到 90% —— 对端不是没数据可发，是没 credit
-// 可用。补上这三段之后才恢复。
+// 额度回传的排队、编码与发送等待按三个帧周期计入容量预算。
 static constexpr double CREDIT_RETURN_OVERHEAD_FLITS = 3.0;
 static constexpr double CREDIT_LOOP_NS =
-    LINK_TAT_NS + CREDIT_RETURN_OVERHEAD_FLITS * FLIT_PERIOD_NS;   // 40 + 16 = 56 ns
+    LINK_TAT_NS + CREDIT_RETURN_OVERHEAD_FLITS * FLIT_PERIOD_NS;
 
 // 深度反推的固定余量（条），用于吸收流水线级数与仲裁抖动
 static constexpr unsigned FIFO_MARGIN_ENTRIES = 4;
@@ -103,10 +63,6 @@ static constexpr unsigned FIFO_MARGIN_ENTRIES = 4;
 // 打印会淹没输出也拖慢仿真，因此由 testbench 统一关闭。
 inline bool g_aou_verbose = true;
 
-// ============================================================
-//  消息类型编码（AoU Spec Table 1，MSGTYPE 4-bit 字段）
-//  与参考 RTL packet_def_pkg.sv L29~L35 的 MSG_* 参数一致
-// ============================================================
 enum class MsgType : uint8_t {
     Misc          = 0x0,   // 流控 / 接口管理（Misc）
     WriteReq      = 0x1,   // 写请求（对应 AXI AW 通道）
@@ -155,23 +111,15 @@ constexpr int dlength_to_bytes(DataLength dl) {
     }
 }
 
-// ============================================================
-//  各消息类型的粒度数
-//  【重要】三类数据消息的粒度表互不相同，不能共用一张表：
-//    WriteData     （带 WSTRB） 8 / 15 / 30
-//    WriteDataFull （无 WSTRB） 7 / 14 / 27
-//    ReadData      （带 RLAST） 8 / 14 / 27
-//  来源：packet_def_pkg.sv L37~L48
-// ============================================================
-static constexpr int WREQ_GRANULES   = 3;   // AW_G，15B
-static constexpr int RREQ_GRANULES   = 3;   // AR_G，15B
-static constexpr int WRESP_GRANULES  = 1;   // B_G ，5B
+static constexpr int WREQ_GRANULES   = 3;
+static constexpr int RREQ_GRANULES   = 3;
+static constexpr int WRESP_GRANULES  = 1;
 
 // Misc 消息长度随 MISCOP 变化
-static constexpr int MISC_ACTIVATION_GRANULES = 1;   // st_misc_activation_packet = 40bit
-static constexpr int MISC_CRDTGRANT_GRANULES  = 2;   // st_misc_grantcredit_packet = 80bit
+static constexpr int MISC_ACTIVATION_GRANULES = 1;
+static constexpr int MISC_CRDTGRANT_GRANULES  = 2;
 
-// WriteData（带 WSTRB）：W256b_G / W512b_G / W1024b_G
+// 带字节选通的写数据消息，按总线宽度确定粒度数。
 constexpr int wdata_granules(DataLength dl) {
     switch (dl) {
         case DataLength::B256:  return 8;
@@ -181,7 +129,7 @@ constexpr int wdata_granules(DataLength dl) {
     }
 }
 
-// WriteDataFull（全 strobe，省去 WSTRB）：WF256b_G / WF512b_G / WF1024b_G
+// 全字节有效的写数据消息，省去选通位图。
 constexpr int wdatafull_granules(DataLength dl) {
     switch (dl) {
         case DataLength::B256:  return 7;
@@ -191,7 +139,6 @@ constexpr int wdatafull_granules(DataLength dl) {
     }
 }
 
-// ReadData：R256b_G / R512b_G / R1024b_G
 constexpr int rdata_granules(DataLength dl) {
     switch (dl) {
         case DataLength::B256:  return 8;
@@ -201,19 +148,6 @@ constexpr int rdata_granules(DataLength dl) {
     }
 }
 
-// ============================================================
-//  消息首字节的通用字段布局
-//
-//  参考 RTL 的所有 st_*_packet_tmp 结构，最低有效位一侧的排布是统一的
-//  （packed struct 中最后声明的字段是 LSB，线上格式按小端字节序落到 byte0）：
-//      bit[7:4] = MSGTYPE      —— 所有消息通用
-//      bit[3:2] = RP           —— 除 Misc 外通用
-//      bit[1:0] = DLENGTH      —— 仅数据类消息（WriteData/WriteDataFull/ReadData）
-//      Misc 特例：bit[3:1] = MISCOP，bit[0] = Rsvd
-//
-//  接收侧解包时，只要拿到消息的第一个字节就能算出整条消息占几个粒度，
-//  这正是跨 Flit 续传能够正确定界的前提。
-// ============================================================
 constexpr MsgType    msg_type_of(uint8_t b0)    { return static_cast<MsgType>((b0 >> 4) & 0xF); }
 constexpr uint8_t    msg_rp_of(uint8_t b0)      { return static_cast<uint8_t>((b0 >> 2) & 0x3); }
 constexpr DataLength msg_dlength_of(uint8_t b0) { return static_cast<DataLength>(b0 & 0x3); }
@@ -263,30 +197,13 @@ static constexpr int CFG_WDATAFULL_GRANULES = wdatafull_granules(CFG_DLENGTH);
 // 一个 beat 承载的应用数据字节数（32 / 64 / 128）
 static constexpr int CFG_DATA_BYTES         = dlength_to_bytes(CFG_DLENGTH);
 
-// ============================================================
-//  FIFO / credit 深度：按链路 TAT 反推，而不是拍脑袋取整数
-//
-//  【为什么必须这么算】
-//  接收 credit 的本质是"我保证还能收下 N 个粒度"。本端把 credit 还给对端后，
-//  对端要经过一整个 TAT（credit 上行 + 对端调度 + 数据下行）数据才会到达。
-//  在这段时间里链路会持续灌数据，如果接收 FIFO 装不下 TAT × 链路带宽 的量，
-//  credit 就会先于链路耗尽——此时测出来的带宽反映的是 FIFO 太小，
-//  而不是协议本身的效率。参考 RTL 的 MAS 也是按同一套方法定 FIFO 深度的。
-//
-//  记号：
-//    LINK_BYTES_PER_NS  = 48 B/ns（UCIe x16 @24GT/s）
-//    LINK_TAT_NS        = 40 ns
-//    一条消息在链路上占用的"裸字节" = granule×5B × (256/240)
-//      （因为 240B 载荷里的每个字节，都要摊到 256B 的物理 flit 上）
-// ============================================================
-
 // 一条 N granule 的消息在链路上实际占用的裸字节数
 constexpr double message_wire_bytes(int granules) {
     return granules * GRANULE_BYTES *
            static_cast<double>(FLIT_TOTAL_BYTES) / PAYLOAD_BYTES;
 }
 
-// 一个 credit 环路时间内链路最多能灌进来多少条这样的消息（向上取整）
+// 额度环路内的消息数预算：商取整数后加一，整除时也保留一条余量。
 constexpr unsigned messages_in_flight(int granules) {
     return static_cast<unsigned>(
                CREDIT_LOOP_NS * LINK_BYTES_PER_NS / message_wire_bytes(granules)) + 1u;
@@ -300,11 +217,11 @@ static constexpr unsigned CREDIT_LOOP_CYCLES =
 // ---- 接收侧（决定我们发给对端的初始 credit）----
 // ReadData：受链路灌入速率约束，深度必须随数据位宽变化。
 // 环路内的在飞字节数 = CREDIT_LOOP_NS × 48B/ns = 56 × 48 = 2688 B
-//   256b （ 8 granule/条）：2688B ÷ ( 8×5×256/240=42.7B) = 63 条，向上取整 64，+4 = 68 条
-//   512b （14 granule/条）：2688B ÷ (14×5×256/240=74.7B) = 36 条，向上取整 37，+4 = 41 条
-//   1024b（27 granule/条）：2688B ÷ (27×5×256/240= 144B) = 18 条，向上取整 19，+4 = 23 条
+//   256b （ 8 granule/条）：商取整数 63，+1+4 = 68 条
+//   512b （14 granule/条）：商取整数 36，+1+4 = 41 条
+//   1024b（27 granule/条）：商取整数 18，+1+4 = 23 条
 // 三者对应的"在飞字节数"是一样的（≈2688B），只是每条消息更大、条数更少。
-// 注意 messages_in_flight() 内部已含 +1 的向上取整，别把它漏算成 63/36/18。
+// messages_in_flight() 包含加一的余量，FIFO 另加四条固定余量。
 static constexpr unsigned RX_RDATA_FIFO_DEPTH_PER_RP =
     messages_in_flight(CFG_RDATA_GRANULES) + FIFO_MARGIN_ENTRIES;
 
@@ -326,28 +243,6 @@ static constexpr unsigned RX_WRESP_CREDITS_PER_RP =
 static constexpr unsigned TX_REQ_FIFO_DEPTH_PER_RP   = 16;
 static constexpr unsigned TX_WDATA_FIFO_DEPTH_PER_RP = 16;
 
-// ============================================================
-//  比特级打包 / 解包工具
-//
-//  【比特序：MSB-first，直接对应规范 §5.8 的图】
-//  《AXI over UCIe Protocol Specification v0.8》§5.8 明确规定线上格式遵循
-//  PCIe 约定：
-//      Bytes count up            字节序号递增
-//      Bits count down           每字节内 bit7 → bit0
-//      Fields are arranged from left to right with MSB-first bit ordering
-//
-//  因此本工具按 MSB-first 排布：第一个 put() 的字段占 byte0 的高位，字段内
-//  部也是高位在前。好处是代码里的 put() 顺序 = 规范表格/图里字段从左到右的
-//  顺序，逐行对照即可复核，不需要在脑子里做任何翻转。
-//
-//  由此自动获得两个规范要求的性质：
-//    - put(addr, 64) 得到大端字节序（byte7 = AWADDR[63:56]），与 Figure 6 一致；
-//    - 3bit 的 credit 字段跨字节边界时自然衔接，与 Figure 21 一致。
-//
-//  历史注记：v1 曾按参考 RTL 的 st_*_packet_tmp 用小端比特序实现。该 RTL 在
-//  PROF/PROFEXTLEN→FLEX 一项上停留在 v0.8 之前的版本，且 CrdtGrant 多出一个
-//  前导保留位，与规范不符。现以 PDF 为唯一基线，RTL 仅作参数参考。
-// ============================================================
 class BitWriter {
 public:
     explicit BitWriter(uint8_t* dst) : dst_(dst) {}
@@ -369,9 +264,7 @@ public:
         bit_ += n * 8;
     }
 
-    // 倒序写入一段字节：src[n-1] 先出。
-    // 用于 WDATA/RDATA/WSTRB —— 模型里这些数组是 data[0] = 最低有效字节，
-    // 而规范把 WDATA[1023:1016] 这样的最高位字节排在最前面（见 Figure 8~16）。
+    // 数据数组的低下标表示低字节通道；编码时从最高下标开始写入。
     void put_bytes_msb_first(const uint8_t* src, unsigned n) {
         sc_assert((bit_ & 7) == 0);
         uint8_t* d = dst_ + (bit_ >> 3);
@@ -423,7 +316,7 @@ private:
 };
 
 // ============================================================
-//  AoU 消息结构体
+//  桥接消息 消息结构体
 //  采用"字节数组 + 元信息"的表示方式，方便后续直接填入 Flit 载荷
 // ============================================================
 
@@ -466,7 +359,7 @@ inline void sc_trace(sc_trace_file* tf, const AouMessage& m, const std::string& 
     sc_trace(tf, m.granules,       nm + ".granules");
     sc_trace(tf, m.axi_id,         nm + ".axi_id");
 }
-}  // namespace sc_core
+}
 
 // ============================================================
 //  UCIe Flit 结构体
@@ -484,7 +377,6 @@ struct AouFlit {
     // MsgCredit[15:0]：随业务 flit 捎带回传的 credit，由 CreditManager 生成
     uint16_t msg_credit  = 0;
 
-    // ---- Protocol Payload（240B，48 × 5B granule）----
     uint8_t  payload[PAYLOAD_BYTES] = {};
 
     // ---- 模型辅助字段（不对应 Flit 实际 bit）----
@@ -594,4 +486,4 @@ inline void sc_trace(sc_trace_file* tf, const FlitTransfer& ft, const std::strin
     sc_trace(tf, ft.flit.msg_credit,    name + ".msg_credit");
     sc_trace(tf, ft.flit.fdid,          name + ".fdid");
 }
-}  // namespace sc_core
+}

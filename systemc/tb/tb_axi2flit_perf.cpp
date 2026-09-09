@@ -1,41 +1,7 @@
 /**
- * @file tb_axi2flit_perf.cpp
- * @brief 延迟 / 带宽性能仿真：真实链路速率下的 AXI2FLIT 桥接性能测量
- *
- * 与功能 TB 的根本区别在于 FDI 两个方向都按 UCIe 的真实速率节流：
- *   UCIe x16 @24GT/s = 48 B/ns，一个 256B Flit 占 5.333ns。
- * 功能 TB 里 flit_ready 恒为 1，等于假设链路无限快，测出来的"带宽"没有意义。
- *
- * 链路对端由 tb_common.h 的 RemoteAouModel 扮演：它按 AoU 规则解请求、回
- * ReadData/WriteResp、做双向 credit 管理，并校验写数据内容。存储器件本身的
- * 访问时延建模为 0，因此本文件测到的是"桥接单元 + AoU 协议"引入的延迟与
- * 能达到的链路效率，存储时延是可加的独立项。
- *
- * 【测量场景】
- *   PERF-1 读带宽   ：持续压满的读突发，测数据方向链路效率
- *   PERF-2 写带宽   ：持续压满的写突发（全 strobe → WriteDataFull）
- *   PERF-3 空载延迟 ：链路空闲时单个事务的往返延迟，拆分成发送侧/接收侧
- *   PERF-4 读写混合 ：两个方向同时压满，credit 回传要和数据抢 Flit 槽位
- *   PERF-5 真实 TAT ：把链路飞行时间设成让往返恰好等于 LINK_TAT_NS = 40ns，
- *                     检验按该 TAT 反推出来的 FIFO 深度与初始 credit 够不够。
- *                     PERF-1~4 的链路飞行时间为 0，只量桥接单元自身。
- *
- * 【带宽口径 —— 已定案】
- *   口径A = 应用数据字节 / (数据方向 Flit 数 × 256B)   —— 对整个物理 Flit
- *   口径B = 应用数据字节 / (数据方向 Flit 数 × 240B)   —— 对协议层载荷 ★合同口径
- *   口径C = 应用数据字节 / (双向业务粒度折算裸字节)     —— 最保守，收发合算
- * 三个口径同时打印，但**考核以口径B 为准**：UCIe Flit 的 6B 链路开销 +
- * 10B 协议头是 UCIe 规范定义的物理层格式，不由 AXI2FLIT 决定；本课题能优化的
- * 只有 240B 载荷区里的排布。口径A = 口径B × 0.9375，规范 Table 23 自己给出
- * 的 1024b 上限就是 88.9%（口径A），所以"≥90%"只能在口径B 下讨论。
- *
- * 协议本身的理论上限（1024b、burst=16）：口径A 88.9%，口径B 94.8%。
- *
- * 【性能门限】
- * 文件末尾按位宽设定硬门限，跌破即 perf_errors++ 并以非零码退出，
- * 让 make perf-all 能直接当回归用，而不是"打印一堆数字靠人看"。
+ * 桥性能基线测试。采用速率节流、飞行延迟和模式数据响应器，不实例化完整链路。
+ * 分别测量持续读写吞吐、桥内延迟、载荷效率及额度环路时间的影响。
  */
-
 #include <systemc.h>
 #include <cmath>
 #include <deque>
@@ -63,7 +29,7 @@ static constexpr unsigned LATENCY_SAMPLES = 20;
 /**
  * 门限取"实测值留一点余量"，目的是抓回归而不是刷指标：
  *   - 256b/512b 是 AXI 侧受限（16 / 32 GB/s 就是天花板），门限贴着上限给；
- *   - 1024b 是链路侧受限，门限贴着 AoU 协议效率上限给；
+ *   - 1024b 是链路侧受限，门限贴着 桥接消息 协议效率上限给；
  *   - 口径B 门限只在链路受限（1024b）时才有意义 —— 位宽不够时 Flit 装不满，
  *     口径A/B 低是物理事实，不是实现缺陷，对它们设门限只会误报。
  *   - 延迟门限用"桥内 TX + RX"，这是本交付物真正拥有的部分；链路飞行时间
@@ -76,16 +42,7 @@ struct PerfThresholds {
     double lat_tx_max_ns;     // 桥内发送侧延迟上限
     double lat_rx_max_ns;     // 桥内接收侧延迟上限
 };
-/*
- * 【这里必须用 AXI_DATA_WIDTH_CFG，不能用 AXI_DATA_WIDTH】
- * AXI_DATA_WIDTH 是 axi_if.h 里的 constexpr int，不是宏。预处理器遇到它
- * 不认识的标识符时，会按 C 标准把它替换成 0 再求值 —— 不报错、不告警。
- * 于是 `#if AXI_DATA_WIDTH == 1024` 恒为假，三种位宽全都落进 #else，
- * 1024b 用的其实是 256b 的门限：读带宽只要 >= 15.8 GB/s 就算过，
- * 口径B 下限被当成 0（打印 "[SKIP] 不考核"）。测出来 42.66 GB/s 当然
- * 一路 PASS，但门限根本没有起到把关作用，口径B 这个合同指标实际处于失守状态。
- * AXI_DATA_WIDTH_CFG 是 -D 传进来的真宏，预处理阶段就有值。
- */
+
 #if   AXI_DATA_WIDTH_CFG == 1024
 static constexpr PerfThresholds PERF_LIMITS{42.0, 41.5, 0.93, 12.0, 8.0};
 #elif AXI_DATA_WIDTH_CFG == 512
@@ -146,9 +103,7 @@ SC_MODULE(PerfTb) {
 
     // ---- 链路对端与速率节流 ----
     RemoteAouModel remote{PERF_RP_COUNT};
-    // 入站方向（对端 → DUT）的独立解析器。DUT 出站流已经由 remote 内部的
-    // scanner 交叉验证过，这里给入站流补上同样的第三方校验，同时统计
-    // "业务消息粒度"与"纯 credit 粒度"，用于分离协议开销来源。
+
     FlitScanner rx_scanner_{PERF_RP_COUNT};
     LinkPacer      tx_pacer;      // DUT → 对端（速率）
     LinkPacer      rx_pacer;      // 对端 → DUT（速率）
@@ -170,7 +125,7 @@ SC_MODULE(PerfTb) {
     // ---- 链路计数 ----
     unsigned long tx_flits_ = 0, tx_granules_ = 0;
     unsigned long rx_flits_ = 0, rx_granules_ = 0;
-    // 只统计"带业务载荷"的 Flit，纯 credit Flit 单列，便于分析开销来源
+
     unsigned long tx_empty_flits_ = 0, rx_empty_flits_ = 0;
 
     // ---- AXI 计数 ----
@@ -180,19 +135,9 @@ SC_MODULE(PerfTb) {
     // ---- 激励控制（由 ctrl_thread 设置，激励线程只读）----
     unsigned long ar_todo_ = 0;     // 还要发多少个读突发
     unsigned long wr_todo_ = 0;     // 还要发多少个写突发
-    uint8_t       burst_len_ = 0;   // AxLEN
+    uint8_t       burst_len_ = 0;
     unsigned long aw_issued_ = 0;   // 已发出的 AW 个数（只用于生成地址/ID）
 
-    /*
-     * 【W 的长度必须跟着它自己的 AW 走，不能现读 burst_len_】
-     * 曾经的写法是 aw_thread 和 w_thread 各自现读 burst_len_，靠
-     * "w_bursts_done_ < aw_issued_" 配对。ctrl_thread 在切换测试用例时改
-     * burst_len_（16 beat ↔ 1 beat），只要此刻还有 AW 已发出、W 未跟上，
-     * W 就会按新长度发数据，与 AW 里的 AWLEN 对不上 —— DUT 报
-     * "AWLEN 与 WLAST 不一致"，远端写数据比对也跟着错。
-     * 现在 AW 握手成功时把 {ID, beat 数} 压进队列，W 从队列里取，
-     * 二者天然一致，burst_len_ 怎么改都不会串。
-     */
     std::deque<std::pair<uint16_t, unsigned>> w_pending_;   // {id, beat 数}
 
     /*
@@ -249,7 +194,7 @@ SC_MODULE(PerfTb) {
         flit_in.write(FlitTransfer{});
         bool rx_valid_held = false;
         AouFlit rx_flit;
-        set_link_one_way_ns(0.0);      // 默认零飞行时间，与第一版基线可比
+        set_link_one_way_ns(0.0);
 
         while (!rst_n.read()) wait();
 
@@ -504,7 +449,7 @@ SC_MODULE(PerfTb) {
         unsigned long rev_crd   = is_read ? (b.tx_crd_gran - a.tx_crd_gran)
                                           : (b.rx_crd_gran - a.rx_crd_gran);
 
-        double gbps = app_bytes / span_ns;                      // B/ns == GB/s
+        double gbps = app_bytes / span_ns;
         double effA = dat_flits ? app_bytes / (dat_flits * 256.0) : 0.0;
         double effB = dat_flits ? app_bytes / (dat_flits * 240.0) : 0.0;
         // 口径C：把反方向的业务粒度（AXI 请求/响应信息）也折算成物理链路字节，
@@ -575,7 +520,7 @@ SC_MODULE(PerfTb) {
         } else if (dat_occ > 0.95) {
             std::cout << "  >> 瓶颈判定             : 链路侧（数据方向槽位已 100% 占满，"
                          "Flit 平均填充 " << std::setprecision(1) << (dat_fill * 100)
-                      << "%，已达 AoU 协议效率上限）。" << std::endl;
+                      << "%，效率按本模型消息粒度统计）。" << std::endl;
         } else {
             std::cout << "  >> 瓶颈判定             : 两侧均未跑满，瓶颈在桥接内部"
                          "（credit 深度 / FIFO / 打包吞吐），需要进一步定位。" << std::endl;
@@ -666,13 +611,7 @@ SC_MODULE(PerfTb) {
         line("WLAST→Flit 上链路 (TX)",  lat_write_tx_);
         line("入站Flit→BVALID  (RX)",    lat_write_rx_);
         line("WLAST→BVALID     (往返)",  lat_write_total_);
-        // 【第一版这里写错过，务必看清楚】
-        // 原文是"往返值含链路传输（每个 Flit 占 5.333ns）"。这句话是错的：
-        // 5.333ns 是稳态满载时相邻 Flit 的**发送间隔**，不是空载单包的延迟。
-        // LinkPacer 的时间预算在空闲时是攒满的，空载链路上第一个 Flit 一到就
-        // 能走，序列化开销为 0 —— 实测往返 10ns < 2×5.333ns 本身就是反证。
-        // 现在链路飞行时间由 FlitDelayLine 显式建模，PERF-1~4 设为 0，
-        // 所以下面这些数字就是桥接单元自身的延迟，不含任何链路成分。
+
         std::cout << "  说明：链路飞行时间本场景设为 " << std::setprecision(2)
                   << tx_flight_.delay_ns() << " ns，对端存储访问时延设为 "
                   << remote.proc_delay_ns() << " ns；" << std::endl;
@@ -702,7 +641,7 @@ SC_MODULE(PerfTb) {
         std::cout << "\n================ 性能仿真配置 ================" << std::endl;
         std::cout << "  AXI 数据位宽    : " << AXI_DATA_WIDTH << " bit ("
                   << AXI_DATA_BYTES << "B/beat)" << std::endl;
-        std::cout << "  AoU DLENGTH     : ReadData " << CFG_RDATA_GRANULES
+        std::cout << "  消息粒度        : ReadData " << CFG_RDATA_GRANULES
                   << " gr / WriteDataFull " << CFG_WDATAFULL_GRANULES
                   << " gr / WriteData " << CFG_WDATA_GRANULES << " gr" << std::endl;
         std::cout << "  模型时钟        : " << CLK_PERIOD_NS << " ns ("
@@ -789,18 +728,7 @@ SC_MODULE(PerfTb) {
         // -----------------------------------------------------
         //  PERF-5 真实 TAT：检验按 LINK_TAT_NS 反推的 FIFO 深度与初始 credit
         // -----------------------------------------------------
-        /*
-         * 到这里为止链路飞行时间都是 0，credit 一发出去下一拍就回来了，
-         * 于是 aou_types.h 里"按 40ns TAT 反推 FIFO 深度和初始 credit"这个
-         * 核心设计假设，从来没有被真正考验过 —— 这是第一版最大的验证空洞。
-         *
-         * 现在把单向飞行时间设成 LINK_ONE_WAY_NS_FOR_TAT = TAT/2 = 20ns，使
-         *     往返 = 2 × 20 = 40 ns = LINK_TAT_NS
-         * 然后重跑读带宽。判据：
-         *   (a) 空载往返应当比零飞行时间时正好多出 40ns（验证延迟模型本身对不对）；
-         *   (b) 压满时的吞吐不应显著下降 —— 如果 credit 不够，发送侧会在等 credit
-         *       归还时停下来，带宽会立刻塌下去。带宽稳住，才说明深度算对了。
-         */
+
         std::cout << "\n--- PERF-5 真实 TAT（往返 " << std::fixed << std::setprecision(1)
                   << LINK_TAT_NS << " ns，检验 credit 深度）---" << std::endl;
         std::cout << "  单向飞行时间设为 " << std::setprecision(3)
@@ -874,7 +802,6 @@ SC_MODULE(PerfTb) {
                     read_gbps_base > 0 ? read_gbps_tat / read_gbps_base * 100 : 0.0,
                     95.0, "%");
 
-        // -----------------------------------------------------
         std::cout << "\n================ 正确性自检 ================" << std::endl;
         std::cout << "  AXI R beat / W beat / B beat : " << r_beats_ << " / "
                   << w_beats_ << " / " << b_beats_ << std::endl;

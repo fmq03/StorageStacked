@@ -1,11 +1,5 @@
 /**
- * @file aou_format6.h
- * @brief AoU v0.8 图 4 的逻辑 250B 与物理 256B 字节散布/收集。
- *
- * 本文件不依赖 SystemC，供桥侧单测和 UCIe 参考模型共同使用。
- * 这里只负责标准规定的字节位置；FH 内容、CRC 多项式及计算由链路提供。
- * 当前参考链路沿用自身的序号/replay 头和 CRC16-CCITT 行为抽象，不能据此
- * 宣称实现了完整 UCIe DLL 规范。CRC 槽分别为 126/127、254/255。
+ * 逻辑250字节与物理256字节帧的散布和收集。映射固定，校验字节由链路侧填写。
  */
 #pragma once
 
@@ -41,4 +35,4 @@ inline Payload gather(const Frame& frame) {
         std::copy_n(frame.begin() + block * 64 + 2, 60, plp.begin() + 10 + block * 60);
     return plp;
 }
-} // namespace aou_format6
+}
