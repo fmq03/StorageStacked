@@ -105,6 +105,8 @@ WRESP FIFO 深度 = floor(环路预算 / 2ns) + 4
 
 定义位于 `simple_mem_if.h`。`AouTarget.mem_req` 为 `sc_fifo_out<SimpleMemRequest>`，`mem_rsp` 为 `sc_fifo_in<SimpleMemResponse>`；内存模型分别绑定同一请求/响应 FIFO 的另一端。
 
+逐字段类型、功能、与外部存储 Request/Response 的映射及精简方案见[存储侧接口对接表](../../doc/存储侧接口对接表.md)。当前接口为整笔突发 FIFO；精简字节事务接口需要新增适配器。
+
 | 类型 | 字段与含义 |
 |---|---|
 | `SimpleMemRequest` | `write` 方向、`rp`、`address` 地址及 AXI 属性、`write_beats` 整笔写数据 |
@@ -113,6 +115,8 @@ WRESP FIFO 深度 = floor(环路预算 / 2ns) + 4
 | `SimpleMemReadBeat` | 完整总线宽度的 `data`、本拍 `resp/user` |
 
 FIFO 成功写入表示接受排队，返回响应表示操作完成，不使用事务结构体内的 valid/ready 握手。读请求不携带写数据；写响应不携带读数据；读响应须恰好有 LEN+1 拍。后端接口是整笔完成形式，逐拍回调模型需要在适配器中聚合响应。
+
+RP 表示链路资源平面，不代表独立存储器。单 RP 配置下请求及响应使用 RP0；外部存储模型可以通过适配器隐藏 RP、AXI ID 和 USER，但适配器仍须恢复响应的 RP、ID 和约定的 USER，不能直接丢弃这些信息。
 
 简单内存的默认地址窗口从 `0x1234567800000000` 开始，大小 128KiB，启动全零。一次串行服务一笔，等待 `20ns + 2ns × 拍数` 后访问数据，再向响应 FIFO 写入；响应背压会延长下一笔的开始时间。压力场景固定访问项为 80ns。
 

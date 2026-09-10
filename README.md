@@ -60,6 +60,8 @@ make SYSTEMC_HOME=/work/systemc UCIE_DIR=/work/models/ucie-model preflight
 
 - [设计文档](systemc/doc/design.md)：模块职责、握手、容量和顺序规则。
 - [字节格式与接口](systemc/doc/wire_contract.md)：消息、帧头、物理布局和接线约定。
+- [存储侧接口对接表](doc/存储侧接口对接表.md)：请求/响应字段、功能、单 RP 简化及外部存储模型映射。
 - [验证文档](systemc/doc/verification.md)：测试范围、判据、性能口径和验证边界。
 - [全链路使用说明](doc/UCIe全链路仿真计划与使用.md)：场景配置、产物和波形判读。
+- [全链路联合仿真接入指南](doc/全链路联合仿真接入指南.md)：现有接口、gem5/Vortex/Ramulator 适配、时间同步及验收计划。
 - [接入与交付说明](systemc/integration/README.md)：依赖安装和路径迁移。

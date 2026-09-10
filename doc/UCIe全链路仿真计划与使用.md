@@ -2,6 +2,8 @@
 
 本测试将 AXI 请求经桥、双向链路及响应端送至字节存储，并检查返回的状态和数据。实现位于 `systemc/tb/tb_full_link.cpp`，外部接口详见[设计文档](../systemc/doc/design.md)。
 
+接入 gem5、Vortex 或 Ramulator 的适配方案、时间同步约定及实施步骤，见[全链路联合仿真接入指南](全链路联合仿真接入指南.md)。
+
 ## 拓扑
 
 ```text
