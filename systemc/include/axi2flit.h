@@ -14,7 +14,7 @@
 #include "rp_order_guard.h"
 #include "axi_contract.h"
 
-// FIFO / credit 深度常量定义在 aou_types.h（按额度环路时间预算计算，见该文件注释）。
+// FIFO / credit 深度常量定义在 aou_types.h（按credit环路时间预算计算，见该文件注释）。
 
 // AXI4 W 不携带 ID/RP，需要按 AW 接收顺序保存写 burst 的路由信息。
 struct WriteRoute {

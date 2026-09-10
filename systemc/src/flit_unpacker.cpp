@@ -1,5 +1,5 @@
 /**
- * 接收暂存、消息解析、额度事件发送与响应队列分流的实现。
+ * 接收暂存、消息解析、credit事件发送与响应队列分流的实现。
  */
 #include "flit_unpacker.h"
 #include <algorithm>

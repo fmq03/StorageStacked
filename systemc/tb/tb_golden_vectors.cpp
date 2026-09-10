@@ -224,7 +224,7 @@ static void test_write_data() {
 }
 
 static void test_crdt_grant() {
-    std::printf("\n--- 用例7 CrdtGrant（接收额度）---\n");
+    std::printf("\n--- 用例7 CrdtGrant（接收credit）---\n");
     CreditMatrix g{};
     for (auto& per_rp : g) per_rp.fill(0);
     g[0][credit_kind_index(CreditKind::WriteReq)]  = 4;

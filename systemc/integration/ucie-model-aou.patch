@@ -79,7 +79,7 @@ index 3d4fe1c..668121b 100644
          throw std::runtime_error("FDI payload exceeds configured flit payload capacity");
      }
 +    if (cfg.flit_format == FlitFormat::AouFormat6) {
-+        // FDI 必须提供完整 250 字节，包括纯额度帧；不接受隐式短包补零。
++        // FDI 必须提供完整 250 字节，包括纯credit帧；不接受隐式短包补零。
 +        if (payload.size() != 250U) throw std::runtime_error("AoU PLP must be exactly 250B");
 +        aou_format6::Payload plp{};
 +        std::copy(payload.begin(), payload.end(), plp.begin());

@@ -387,7 +387,7 @@ public:
 
         // (c) 协议头捎带 credit。数据流空闲时这就是唯一的 credit 回传途径，
         //     此时发出的是"只有 header 有效"的空 Flit —— 反向链路本来就闲着，
-        //     本测试对端通过这种帧在无业务时归还额度。
+        //     本测试对端通过这种帧在无业务时归还credit。
         flit.msg_credit = credits_.take_header_grant();
         return flit.used_granules > 0 || flit.msg_credit != 0;
     }

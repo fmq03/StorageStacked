@@ -1,5 +1,5 @@
 /**
- * 发送调度、额度消耗、跨帧续传与输出保持的实现。
+ * 发送调度、credit消耗、跨帧续传与输出保持的实现。
  */
 #include "flit_packer.h"
 #include <iomanip>
@@ -33,8 +33,8 @@ void FlitPacker::packing_thread() {
     cur_flit_.clear();
     credits_.reset();
     // 复位后立刻把本端 R/B 接收容量转成"待归还 credit"，由下面的常规
-    // CrdtGrant 路径分批公布；单个三位额度字段最多表示 128 粒度，
-    // 写响应的两位额度字段最多表示 8 粒度。
+    // CrdtGrant 路径分批公布；单个三位credit字段最多表示 128 粒度，
+    // 写响应的两位credit字段最多表示 8 粒度。
     credits_.publish_initial_capacity();
     timeout_cnt_ = 0;
     // 让复位后的第一个空闲拍就发出 CrdtGrant，尽快让对端可以开始发数据。
@@ -195,7 +195,7 @@ void FlitPacker::consume_candidate(const Candidate& candidate) {
     AouMessage msg = *candidate.message;
 
     // credit 按整条消息一次性扣除，即使消息会被拆到两个 Flit 里发送。
-    // 额度描述对端接收缓冲能容纳的粒度数，
+    // credit描述对端接收缓冲能容纳的粒度数，
     // 与它被切成几个 Flit 传输无关。
     credits_.consume(static_cast<uint8_t>(candidate.rp), msg.type, msg.granules);
 

@@ -1,6 +1,6 @@
 /**
  * 存储侧响应端。解包入站请求、组装写突发、提交内存事务并打包返回数据与状态。
- * 每个写请求槽预留完整突发空间，写数据转入该空间后才能归还接收额度。
+ * 每个写请求槽预留完整突发空间，写数据转入该空间后才能归还接收credit。
  */
 #pragma once
 #include "aou_stream_decoder.h"
@@ -76,7 +76,7 @@ private:
     void release(uint8_t rp, CreditKind kind, unsigned n) {
         credits_.return_rx_credit({rp, kind, n});
     }
-    // 每拍取一帧；先验证完整消息结构，再更新额度并分流请求和写数据。
+    // 每拍取一帧；先验证完整消息结构，再更新credit并分流请求和写数据。
     void receive() {
         FdiFlit fdi;
         if (!link_rx.nb_read(fdi)) return;
@@ -124,7 +124,7 @@ private:
         }
     }
     // 每个资源平面每拍组装一拍写数据，按写请求接收顺序配对。
-    // 写数据进入已预留的突发空间后归还额度，使长突发可分批通过接收窗口。
+    // 写数据进入已预留的突发空间后归还credit，使长突发可分批通过接收窗口。
     void assemble() {
         for (unsigned rp = 0; rp < rp_count_; ++rp) {
 
@@ -182,7 +182,7 @@ private:
         tickets_.erase(it);
         (rsp.write ? write_replies_ : read_replies_)[rsp.rp].push_back({std::move(rsp), 0});
     }
-    // 优先写响应，再轮询各资源平面的读响应；发送前扣除对端接收额度。
+    // 优先写响应，再轮询各资源平面的读响应；发送前扣除对端接收credit。
     bool next_message(AouMessage& msg, bool& completes) {
         completes = false;
         for (bool wr : {true, false}) {
@@ -215,7 +215,7 @@ private:
         }
         return false;
     }
-    // 先续传上一帧尾部的消息，再装入新消息；额度可随业务帧或单独回传。
+    // 先续传上一帧尾部的消息，再装入新消息；credit可随业务帧或单独回传。
     // 末条响应跨帧时，只有全部片段写入发送 FIFO 后才能释放未完成事务槽。
     void transmit() {
         if (link_tx.num_free() == 0) { ++tx_fifo_stalls; return; }

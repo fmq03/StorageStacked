@@ -1,5 +1,5 @@
 /**
- * 按资源平面和消息类型维护发送额度、接收容量与待归还额度。每个额度表示一个5字节粒度。
+ * 按资源平面和消息类型维护发送credit、接收容量与待归还credit。每个credit表示一个5字节粒度。
  */
 #pragma once
 
@@ -83,10 +83,10 @@ inline uint8_t encode_credit_amount(unsigned pending, unsigned max_encoding = 7)
 }
 
 /**
- * CreditManager 是打包器、响应端及测试对端共用的额度状态组件：
+ * CreditManager 是打包器、响应端及测试对端共用的credit状态组件：
  *   - tx_available：对端已授予、尚未被本端消息消耗的 credit；
  *   - rx_capacity：本端接收 FIFO 可向对端承诺的初始容量；
- *   - rx_pending_return：本端接收空间释放后，等待回填给对端的额度。
+ *   - rx_pending_return：本端接收空间释放后，等待回填给对端的credit。
  */
 class CreditManager {
 public:
@@ -116,7 +116,7 @@ public:
         next_header_rp_ = 0;
     }
 
-    // 将全部接收容量排入待发布量；编码器分次扣除并发送可表示的额度。
+    // 将全部接收容量排入待发布量；编码器分次扣除并发送可表示的credit。
     void publish_initial_capacity() {
         rx_pending_return_ = rx_capacity_;
     }

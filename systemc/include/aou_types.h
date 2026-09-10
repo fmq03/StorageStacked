@@ -48,7 +48,7 @@ static constexpr unsigned DEFAULT_RESOURCE_PLANES = 1;
 // 一个 256B Flit 在链路上占用的时间（ns）：256 / 48 ≈ 5.333ns
 static constexpr double FLIT_PERIOD_NS     = FLIT_TOTAL_BYTES / LINK_BYTES_PER_NS;
 
-// 额度回传的排队、编码与发送等待按三个帧周期计入容量预算。
+// credit回传的排队、编码与发送等待按三个帧周期计入容量预算。
 static constexpr double CREDIT_RETURN_OVERHEAD_FLITS = 3.0;
 static constexpr double CREDIT_LOOP_NS =
     LINK_TAT_NS + CREDIT_RETURN_OVERHEAD_FLITS * FLIT_PERIOD_NS;
@@ -203,7 +203,7 @@ constexpr double message_wire_bytes(int granules) {
            static_cast<double>(FLIT_TOTAL_BYTES) / PAYLOAD_BYTES;
 }
 
-// 额度环路内的消息数预算：商取整数后加一，整除时也保留一条余量。
+// credit环路内的消息数预算：商取整数后加一，整除时也保留一条余量。
 constexpr unsigned messages_in_flight(int granules) {
     return static_cast<unsigned>(
                CREDIT_LOOP_NS * LINK_BYTES_PER_NS / message_wire_bytes(granules)) + 1u;
