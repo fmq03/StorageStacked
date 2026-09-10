@@ -1,0 +1,18 @@
+[submodule "gem5_new"]
+	path = gem5_new
+	url = https://github.com/hy2581/gem5_new
+[submodule "axi2flit"]
+	path = axi2flit
+	url = https://github.com/Jolinjoy666/axi2flit.git
+[submodule "mem_sim"]
+	path = mem_sim
+	url = https://github.com/GuXing25/mem_sim.git
+[submodule "gem5"]
+	path = gem5
+	url = https://github.com/gem5/gem5.git
+[submodule "coralnpu"]
+	path = coralnpu
+	url = https://github.com/google-coral/coralnpu.git
+[submodule "vortex"]
+	path = vortex-gpu/vortex
+	url = https://github.com/vortexgpgpu/vortex.git
