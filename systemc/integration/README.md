@@ -1,4 +1,6 @@
-# 链路与存储接入
+# 构建依赖、链路接线与交付
+
+本文负责依赖安装、内部接线和路径迁移。主机与存储开发者分别查阅[SoC 侧接口表](../../doc/SoC侧接口对接表.md)和[存储侧接口表](../../doc/存储侧接口对接表.md)；联合配置见[联仿交接约定](../../doc/全链路联合仿真接入指南.md#11-联仿交接约定)。当前没有可直接选用的 gem5/Vortex/Ramulator 顶层或 trace 回放入口。
 
 ## 1. 组件
 
@@ -51,7 +53,7 @@ Target.mem_rsp  ← responses ← Memory.response
 
 前两行使用 `sc_signal<FlitTransfer>` 和独立就绪信号，中间四行使用 `sc_fifo<FdiFlit>`，最后两行使用 `SimpleMemRequest/Response` FIFO。Endpoint 的 `link_state` 连接链路同名输出，类型为 `sc_signal<unsigned>`。
 
-SoC 侧适配器处理信号与 FIFO 的时序转换；响应端直接使用 FIFO，因此存储侧不再需要同类适配器。启动时等待链路训练完成后释放桥和响应端复位；运行期间不支持单端热复位。字段、精确字节布局及握手规则见[接口文档](../doc/wire_contract.md)和[设计文档](../doc/design.md)。
+Endpoint 只处理桥帧信号与 UCIe FIFO 的时序转换；Target 直接使用 FDI FIFO，因此 Target 与 UCIe 之间不需要同类适配器。这不代表不同存储模型可以无转换地接到 mem_req/mem_rsp，也不替代主机到 AXI 的适配器。启动时等待链路训练完成后释放桥、Endpoint 和 Target 复位；运行期间不支持单端热复位。字段、字节布局及握手规则见[接口文档](../doc/wire_contract.md)和[设计文档](../doc/design.md)。
 
 ## 4. 路径迁移与独立交付
 
@@ -79,6 +81,8 @@ make -C /work/models/ucie-model AOU_INCLUDE=/work/axi2flit/systemc/include \
 ```
 
 桥核心包含 `systemc/src/` 和 `systemc/include/`。交付可复现仿真环境还需根 Makefile、`systemc/Makefile`、`tb/`、`integration/`、`scripts/` 及文档。`sim/` 产物可以重新生成。桥独立功能和性能测试不需要 UCIe 依赖；联合测试需要接口匹配的链路源码和补丁内容。
+
+交付记录还应包含本仓库及外部模型的提交号、依赖补丁状态、SystemC 构建标准、位宽、时钟、地址窗口和运行命令。`reference/` 不随主仓库自动交付；仅修改路径不能弥补外部 API 或编译配置不匹配。新增存储模型需要绑定当前 FIFO 类型或提供包装层，文档中的建议类型尚未纳入公共头文件。
 
 ## 5. 测试与产物
 

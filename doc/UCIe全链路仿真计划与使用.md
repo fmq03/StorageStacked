@@ -2,7 +2,7 @@
 
 本测试将 AXI 请求经桥、双向链路及响应端送至字节存储，并检查返回的状态和数据。实现位于 `systemc/tb/tb_full_link.cpp`，外部接口详见[设计文档](../systemc/doc/design.md)。
 
-接入 gem5、Vortex 或 Ramulator 的适配方案、时间同步约定及实施步骤，见[全链路联合仿真接入指南](全链路联合仿真接入指南.md)。
+本文的命令和产物对应当前 BFM＋简单内存测试。接入开发分别使用[SoC 侧接口表](SoC侧接口对接表.md)和[存储侧接口表](存储侧接口对接表.md)；gem5、Vortex 或 Ramulator 的适配方案、时间同步及职责分工见[全链路联合仿真接入指南](全链路联合仿真接入指南.md)。
 
 ## 拓扑
 
@@ -37,7 +37,7 @@ AXI 读写间无隐含全局顺序；需要写后读依赖的测试必须先等�
 |---|---|---|
 | AXI 事务 BFM、自检与顶层 | `systemc/tb/tb_full_link.cpp` | AW/W/AR 请求、B/R 响应；500MHz，低有效复位 |
 | 请求发起侧桥 | `systemc/include/axi2flit.h` | AXI 请求与消息转换、响应恢复 |
-| SoC 侧适配器 | `systemc/integration/ucie_aou_endpoint.h` | Flit ready/valid ↔ 250B FDI FIFO |
+| 桥与 UCIe 之间的 Endpoint | `systemc/integration/ucie_aou_endpoint.h` | Flit ready/valid ↔ 250B FDI FIFO，不承担主机到 AXI 转换 |
 | 双向 UCIe | `reference/ucie-model/src/ucie_link.h` | PHY、CRC、序号、ACK/NAK、重放 |
 | 存储侧响应端 | `systemc/integration/aou_target.h` | `link_rx/link_tx`、`mem_req/mem_rsp` |
 | 简单内存 | `systemc/integration/simple_burst_memory.h` | `request/response` FIFO，单请求串行服务 |
@@ -59,11 +59,13 @@ read_beats（逐 beat data/resp/user）。读请求无写数据，写响应无�
 每次成功 FIFO 写入只交付一次；消费者没空间时保留原事务。Target 自己不主动
 访问 SoC 内存；其发送方向仍会主动发布初始 credit 和缓冲释放后的 credit。
 
-内存地址窗口为 **0x1234567800000000 起的 128KiB**，启动全零；默认访问时间
+当前测试内存地址窗口为 **0x1234567800000000 起的 128KiB**，启动全零；默认访问时间
 `20ns + 2ns × beat数`，stress 模式为 `80ns + 2ns × beat数`。数据和 strobe
 保留 AXI lane 顺序，窄访问的 lane 随地址移动；窄读无效 lane 返回零（本模型约定）。
 越界整笔返回 DECERR=3，不产生部分写副作用；不支持的 LOCK 返回 SLVERR=2。
 USER 采用地址 USER 回送 BUSER/RUSER 的测试约定，不能视为所有内存控制器的通用要求。
+
+地址窗口和 AXI 时钟来自 `FullLinkTb` 的常量与构造配置，不是当前命令行参数。接入新主机时应在联合顶层配置它能访问的地址范围，并同步修改后端和参考状态。当前没有外部模型选择开关，直接运行以下命令仍使用原 BFM 与简单内存。
 
 AXI 请求仍须 INCR、按 SIZE 对齐、SIZE 不超过总线宽度且不跨 4KB，违例由桥
 fail-fast。全宽单 burst 最大 beat 数因 4KB 约束为 128/64/32；256 beat 用例采用
@@ -104,7 +106,7 @@ full_link_1024_rp2_stress_replay.*  压力+重放配置的独立产物
 
 CSV 数据按总线十六进制表示，最右侧为 lane0；`strb_bits` 为从高 lane 到低 lane
 的 0/1 字符串。R 行的地址与 beat 索引从已接收的 AR 推导，不是 R 通道额外引脚。
-B 行地址为0，因为 B 通道只携带 ID/状态；通过 ID 关联 AW。
+B 行地址为 0，因为 B 通道不携带地址；按 BID 和该 ID 的待完成写请求队列关联 AW。W 行地址记录原 AW 的突发首地址，各拍实际地址需结合拍号和 SIZE 计算；不能把 W 行地址当成每拍实际地址。
 
 `preflight` 汇总桥和链路组件回归；`full-link-all` 运行完整链路功能回归，两者分别执行。
 
@@ -122,6 +124,7 @@ B 行地址为0，因为 B 通道只携带 ID/状态；通过 ID 关联 AW。
 
 可从 AXI CSV 测量实际事务延迟。例如默认256bit/RP1的TC2，AW→B为52ns、
 最后W→B为48ns、AR→R为48ns，均包含链路、适配器、Target和内存服务时间。
+这些是默认配置下的参考数值，按成功握手计时；更换模型、时钟或调度后应重新测量，不能作为固定接口延迟。
 不能把端到端延迟与桥内 TX/RX 延迟直接比较，也不能把带主动等待/背压的
 功能用例总字节数除以总时长，当成链路最大吞吐。
 
@@ -175,7 +178,7 @@ ALL FULL-LINK TESTS PASSED
 任意数据/协议检查失败或等待超时返回非零。仅看到某个TC的PASS不够，还须看
 最终汇总；最终覆盖/计数检查可能在全部用例结束后发现错误。日志中的
 `Simulation stopped by user` 是 SystemC 对测试程序调用 `sc_stop()` 的常规提示，
-表示仿真由测试程序正常结束。
+表示程序请求停止仿真，不能单凭这条提示判断测试通过；成功与失败路径都可能调用 `sc_stop()`，仍以最终汇总和退出码为准。
 
 浏览器直接打开HTML，默认显示TC2；可选择用例、输入起始时间/跨度、缩放平移，
 悬停总线区间查看完整值。HTML保留64bit地址和1024bit数据的十六进制字符串，
@@ -193,23 +196,15 @@ rdata/rid/rlast/rresp；再加入clk、rst_n、testcase。总线选择十六进�
 建议先看TC2：AW握手一次，W握手一次且WLAST=1；随后BVALID/BREADY握手，BRESP=0；
 之后AR握手一次，R握手一次且RLAST=1，RDATA与先前WDATA相同。再看TC3：
 握手次数等于LEN+1，只有最后一拍LAST=1。最后看TC11：VALID=1且READY=0的
-多个周期里数据/ID/LAST不变，READY恢复后的上升沿只接收一次。
+多个周期里数据/ID/LAST不变；READY 恢复后，每个 VALID 与 READY 同时有效的上升沿都接收一拍。
 计数必须按**上升沿上的VALID&&READY**，不能按VALID高电平持续时间或跳变次数。
 
-## 默认回归结果
+## 默认配置的核对方法
 
-12种配置 × 12组用例全部通过，合计144组配置内用例；每配置55笔写、66笔读。
-默认256bit/RP1：AW=55、W=1219、B=55、AR=66、R=1241；CRC错误为0。
-三组RP2压力+重放分别观察到：
+`full-link-all` 运行 12 种配置 × 12 组用例，共 144 组配置内用例。默认测试内容每配置产生 55 笔写、66 笔读；256 位 RP1 的预期握手计数为 AW=55、W=1219、B=55、AR=66、R=1241。接入自定义主机后，请按其实际请求重新计算期望数，不沿用这组固定值。
 
-| AXI位宽 | CRC失败帧数 | 重发Flit数 | 最终AXI错误 |
-|---|---:|---:|---:|
-| 256 | 73 | 243 | 0 |
-| 512 | 76 | 237 | 0 |
-| 1024 | 81 | 236 | 0 |
+无误码场景要求 CRC 错误为 0；三种位宽的 RP2 压力＋重放场景要求确实发生 CRC 错误和重发，同时最终 AXI 错误为 0。具体错误帧数、重放数和延迟应读取本次日志，不作为不同后端/调度条件下的固定验收值。
 
-256bit ReadData占8 granule，整除48 granule数据区，因此该配置不强制产生跨Flit。
-512/1024bit压力配置检查确实出现响应跨Flit，分别观察到148/372次。
-负向scoreboard控制测试已确认能够报告数据错误并返回失败。
+256 位读数据每条占 8 粒度，可整除 48 粒度载荷区，不强制该配置产生响应跨帧；512/1024 位压力配置须观察到响应跨帧。负向记分板测试必须实际检出指定数据错误并得到预期失败退出码，不能仅检查程序发生过退出。
 
-这些结果覆盖行为链路与简单存储的事务闭环，不覆盖多随机种子长时间运行、热复位、DRAM 引脚时序、独占/原子执行和 RTL 时序。接入其他主机或后端后的接口要求见[设计文档](../systemc/doc/design.md)，性能判据见[验证文档](../systemc/doc/verification.md)。
+以上是当前行为链路与简单存储的验收方法，不是新主机或新后端已经通过的证明。未覆盖多随机种子长时间运行、热复位、DRAM 引脚时序、独占/原子执行和 RTL 时序。新模型验收见[联仿交接约定](全链路联合仿真接入指南.md#11-联仿交接约定)，性能判据见[验证文档](../systemc/doc/verification.md)。
