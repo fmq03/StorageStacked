@@ -41,3 +41,14 @@ systemc/sim/perf_report.txt
 *.d
 *.a
 __pycache__/
+*.py[cod]
+*.so
+*.fst
+*.fsdb
+*.wlf
+/.venv/
+/.vscode/
+/.idea/
+*.swp
+*.swo
+*~

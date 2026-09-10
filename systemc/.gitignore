@@ -1,0 +1,5 @@
+# This directory contains source; all simulator outputs belong in sim/ or obj/.
+/sim/
+/obj/
+/build/
+/build-*/
