@@ -25,7 +25,7 @@ make -C systemc report
 | `golden-all` | `tb_golden_vectors.cpp` | 每位宽 71 项；固定消息黄金字节，覆盖请求、数据、响应、credit及字段宽度 |
 | `wire-all` | `tb_aou_wire.cpp` | 三种位宽；PH 黄金字节、48 个起点位、16 个credit位、FDId、物理映射、续传及非法编码 |
 | `boundary-all` | `tb_preintegration.cpp` | 三位宽 × RP1/2/4；协调本地复位、96 条读请求随机背压、credit事件拥塞；每位宽 12 个非法 AXI 场景 |
-| `endpoint` | `tb_ucie_endpoint.cpp` | 250 字节长度、全部 2048 个物理位单错、深度 1 双向 FIFO、训练门控和握手时间 |
+| `adapter` | `tb_ucie_adapter.cpp` | 250 字节长度、全部 2048 个物理位单错、深度 1 双向 FIFO、训练门控和握手时间 |
 | `ucie-unit` | 链路依赖的单元测试 | 编译链路主程序并运行 22 项独立单元检查 |
 | `config-check` | 适配器及边界测试 | x8、PAM4、48GB/s、TAT=80ns；参数匹配与桥功能 |
 | `perf-all` | `tb_axi2flit_perf.cpp` | 简化链路下的吞吐、载荷效率、延迟及credit环路预算 |

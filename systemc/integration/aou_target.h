@@ -4,7 +4,7 @@
  */
 #pragma once
 #include "aou_stream_decoder.h"
-#include "ucie_aou_endpoint.h"
+#include "ucie_aou_adapter.h"
 #include "msg_decoder.h"
 #include "credit_manager.h"
 #include "simple_mem_if.h"

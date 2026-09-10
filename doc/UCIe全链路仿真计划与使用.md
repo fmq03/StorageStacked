@@ -7,7 +7,7 @@
 ## 拓扑
 
 ```text
-AXI BFM ⇄ Axi2Flit ⇄ UcieAouEndpoint ⇄ UcieLink ⇄ AouTarget ⇄ SimpleBurstMemory
+AXI BFM ⇄ Axi2Flit ⇄ UcieAouAdapter ⇄ UcieLink ⇄ AouTarget ⇄ SimpleBurstMemory
          AXI信号      Flit握手          FdiFlit FIFO          请求/响应FIFO
 ```
 
@@ -37,7 +37,7 @@ AXI 读写间无隐含全局顺序；需要写后读依赖的测试必须先等�
 |---|---|---|
 | AXI 事务 BFM、自检与顶层 | `systemc/tb/tb_full_link.cpp` | AW/W/AR 请求、B/R 响应；500MHz，低有效复位 |
 | 请求发起侧桥 | `systemc/include/axi2flit.h` | AXI 请求与消息转换、响应恢复 |
-| 桥与 UCIe 之间的 Endpoint | `systemc/integration/ucie_aou_endpoint.h` | Flit ready/valid ↔ 250B FDI FIFO，不承担主机到 AXI 转换 |
+| 桥与 UCIe 之间的 Adapter | `systemc/integration/ucie_aou_adapter.h` | Flit ready/valid ↔ 250B FDI FIFO，不承担主机到 AXI 转换 |
 | 双向 UCIe | `reference/ucie-model/src/ucie_link.h` | PHY、CRC、序号、ACK/NAK、重放 |
 | 存储侧响应端 | `systemc/integration/aou_target.h` | `link_rx/link_tx`、`mem_req/mem_rsp` |
 | 简单内存 | `systemc/integration/simple_burst_memory.h` | `request/response` FIFO，单请求串行服务 |
@@ -45,8 +45,8 @@ AXI 读写间无隐含全局顺序；需要写后读依赖的测试必须先等�
 顶层创建四个 `sc_fifo<FdiFlit>`，连接：
 
 ```text
-Endpoint.fifo_tx  → soc_tx → UcieLink.soc_tx_in
-Endpoint.fifo_rx  ← soc_rx ← UcieLink.soc_rx_out
+Adapter.fifo_tx  → soc_tx → UcieLink.soc_tx_in
+Adapter.fifo_rx  ← soc_rx ← UcieLink.soc_rx_out
 Target.link_rx    ← mem_rx ← UcieLink.mem_rx_out
 Target.link_tx    → mem_tx → UcieLink.mem_tx_in
 Target.mem_req    → requests → Memory.request

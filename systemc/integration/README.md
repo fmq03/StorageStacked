@@ -6,7 +6,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| [ucie_aou_endpoint.h](ucie_aou_endpoint.h) | 桥帧握手与 FDI FIFO 的双向适配、250 字节编解码、训练门控 |
+| [ucie_aou_adapter.h](ucie_aou_adapter.h) | 桥帧握手与 FDI FIFO 的双向适配、250 字节编解码、训练门控 |
 | [aou_target.h](aou_target.h) | 存储侧请求解包、写突发组装、后端提交与响应打包 |
 | [simple_burst_memory.h](simple_burst_memory.h) | 串行突发存储、字节选通、窄访问及错误响应 |
 | [ucie-model-aou.patch](ucie-model-aou.patch) | 链路格式、长度检查、物理帧收发、命令行和构建依赖适配 |
@@ -41,19 +41,19 @@ make full-link-all
 ## 3. 接线
 
 ```text
-Axi2Flit.flit_out / flit_ready ⇄ Endpoint.tx / tx_ready
-Axi2Flit.flit_in / flit_in_ready ⇄ Endpoint.rx / rx_ready
-Endpoint.fifo_tx → soc_tx → UcieLink.soc_tx_in
-Endpoint.fifo_rx ← soc_rx ← UcieLink.soc_rx_out
+Axi2Flit.flit_out / flit_ready ⇄ Adapter.tx / tx_ready
+Axi2Flit.flit_in / flit_in_ready ⇄ Adapter.rx / rx_ready
+Adapter.fifo_tx → soc_tx → UcieLink.soc_tx_in
+Adapter.fifo_rx ← soc_rx ← UcieLink.soc_rx_out
 Target.link_rx  ← mem_rx ← UcieLink.mem_rx_out
 Target.link_tx  → mem_tx → UcieLink.mem_tx_in
 Target.mem_req  → requests  → Memory.request
 Target.mem_rsp  ← responses ← Memory.response
 ```
 
-前两行使用 `sc_signal<FlitTransfer>` 和独立就绪信号，中间四行使用 `sc_fifo<FdiFlit>`，最后两行使用 `SimpleMemRequest/Response` FIFO。Endpoint 的 `link_state` 连接链路同名输出，类型为 `sc_signal<unsigned>`。
+前两行使用 `sc_signal<FlitTransfer>` 和独立就绪信号，中间四行使用 `sc_fifo<FdiFlit>`，最后两行使用 `SimpleMemRequest/Response` FIFO。Adapter 的 `link_state` 连接链路同名输出，类型为 `sc_signal<unsigned>`。
 
-Endpoint 只处理桥帧信号与 UCIe FIFO 的时序转换；Target 直接使用 FDI FIFO，因此 Target 与 UCIe 之间不需要同类适配器。这不代表不同存储模型可以无转换地接到 mem_req/mem_rsp，也不替代主机到 AXI 的适配器。启动时等待链路训练完成后释放桥、Endpoint 和 Target 复位；运行期间不支持单端热复位。字段、字节布局及握手规则见[接口文档](../doc/wire_contract.md)和[设计文档](../doc/design.md)。
+Adapter 只处理桥帧信号与 UCIe FIFO 的时序转换；Target 直接使用 FDI FIFO，因此 Target 与 UCIe 之间不需要同类适配器。这不代表不同存储模型可以无转换地接到 mem_req/mem_rsp，也不替代主机到 AXI 的适配器。启动时等待链路训练完成后释放桥、Adapter 和 Target 复位；运行期间不支持单端热复位。字段、字节布局及握手规则见[接口文档](../doc/wire_contract.md)和[设计文档](../doc/design.md)。
 
 ## 4. 路径迁移与独立交付
 
@@ -86,4 +86,4 @@ make -C /work/models/ucie-model AOU_INCLUDE=/work/axi2flit/systemc/include \
 
 ## 5. 测试与产物
 
-`endpoint` 测试适配器和字节处理组件，`ucie-unit` 运行链路独立单元测试，`full-link-all` 实例化链路物理行为、响应端与内存完成端到端检查。波形、事务日志及结果判读见[全链路使用说明](../../doc/UCIe全链路仿真计划与使用.md)，性能口径见[验证文档](../doc/verification.md)。
+`adapter` 测试适配器和字节处理组件，`ucie-unit` 运行链路独立单元测试，`full-link-all` 实例化链路物理行为、响应端与内存完成端到端检查。波形、事务日志及结果判读见[全链路使用说明](../../doc/UCIe全链路仿真计划与使用.md)，性能口径见[验证文档](../doc/verification.md)。

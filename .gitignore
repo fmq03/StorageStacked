@@ -27,7 +27,7 @@ systemc/sim/perf_*
 systemc/sim/golden_*
 systemc/sim/wire_*
 systemc/sim/boundary_*
-systemc/sim/endpoint*
+systemc/sim/adapter*
 systemc/sim/full_link*
 systemc/obj/
 

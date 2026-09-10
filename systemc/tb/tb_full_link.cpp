@@ -35,7 +35,7 @@ SC_MODULE(FullLinkTb) {
     sc_fifo<SimpleMemRequest> requests;
     sc_fifo<SimpleMemResponse> responses;
     Axi2Flit bridge;
-    UcieAouEndpoint endpoint;
+    UcieAouAdapter adapter;
     UcieLink link;
     AouTarget target;
     SimpleBurstMemory memory;
@@ -53,7 +53,7 @@ SC_MODULE(FullLinkTb) {
           soc_tx("soc_tx", pressure ? 1 : 8), soc_rx("soc_rx", pressure ? 1 : 8),
           mem_tx("mem_tx", pressure ? 1 : 8), mem_rx("mem_rx", pressure ? 1 : 8),
           requests("requests", pressure ? 1 : 4), responses("responses", pressure ? 1 : 4),
-          bridge("bridge", planes), endpoint("endpoint", cfg),
+          bridge("bridge", planes), adapter("adapter", cfg),
           link("link", cfg, &stats, sc_time(cfg.ui_fs(), SC_FS)),
           target("target", cfg, planes),
           memory("memory", BASE, MEM_SIZE, sc_time(pressure ? 80 : 20, SC_NS)),
@@ -67,9 +67,9 @@ SC_MODULE(FullLinkTb) {
         bridge.r_valid(rv); bridge.r_ready(rr); bridge.r_ch(r);
         bridge.flit_out(tx); bridge.flit_ready(txr);
         bridge.flit_in(rx); bridge.flit_in_ready(rxr);
-        endpoint.clk(clk); endpoint.rst_n(rst); endpoint.link_state(state);
-        endpoint.tx(tx); endpoint.tx_ready(txr); endpoint.rx(rx); endpoint.rx_ready(rxr);
-        endpoint.fifo_tx(soc_tx); endpoint.fifo_rx(soc_rx);
+        adapter.clk(clk); adapter.rst_n(rst); adapter.link_state(state);
+        adapter.tx(tx); adapter.tx_ready(txr); adapter.rx(rx); adapter.rx_ready(rxr);
+        adapter.fifo_tx(soc_tx); adapter.fifo_rx(soc_rx);
         link.soc_tx_in(soc_tx); link.soc_rx_out(soc_rx);
         link.mem_rx_out(mem_rx); link.mem_tx_in(mem_tx); link.link_state(state);
         target.clk(clk); target.rst_n(rst); target.link_rx(mem_rx); target.link_tx(mem_tx);

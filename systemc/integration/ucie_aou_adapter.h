@@ -28,7 +28,7 @@ inline void require_aou_ucie_config(const Config& cfg) {
         throw std::invalid_argument("UCIe format/rate 与 AXI2Flit 编译配置不一致");
 }
 
-SC_MODULE(UcieAouEndpoint) {
+SC_MODULE(UcieAouAdapter) {
     sc_in<bool> clk, rst_n;
     sc_in<unsigned> link_state; // 与 UcieLink::link_state 类型一致，可直接接线/追踪
     sc_in<FlitTransfer> tx;
@@ -38,8 +38,8 @@ SC_MODULE(UcieAouEndpoint) {
     sc_fifo_out<FdiFlit> fifo_tx;
     sc_fifo_in<FdiFlit> fifo_rx;
 
-    SC_HAS_PROCESS(UcieAouEndpoint);
-    UcieAouEndpoint(sc_module_name name, const Config& cfg,
+    SC_HAS_PROCESS(UcieAouAdapter);
+    UcieAouAdapter(sc_module_name name, const Config& cfg,
                     BusinessKind direction = BusinessKind::Request)
         : sc_module(name), direction_(direction) {
         require_aou_ucie_config(cfg);
@@ -88,7 +88,7 @@ private:
                 ready = active && fifo_tx.num_free() > 0;
                 tx_ready.write(ready);
             } catch (const std::exception& e) {
-                SC_REPORT_FATAL("UcieAouEndpoint", e.what());
+                SC_REPORT_FATAL("UcieAouAdapter", e.what());
                 return;
             }
             wait();

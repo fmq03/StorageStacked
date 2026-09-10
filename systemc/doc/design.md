@@ -2,14 +2,14 @@
 
 ## 1. 范围与模型形式
 
-项目实现请求发起侧桥 `Axi2Flit`、链路适配器 `UcieAouEndpoint`、存储侧响应端 `AouTarget` 和简单突发内存 `SimpleBurstMemory`。全链路测试由 `tb_full_link.cpp` 实例化这些模块及 UcieLink。
+项目实现请求发起侧桥 `Axi2Flit`、链路适配器 `UcieAouAdapter`、存储侧响应端 `AouTarget` 和简单突发内存 `SimpleBurstMemory`。全链路测试由 `tb_full_link.cpp` 实例化这些模块及 UcieLink。
 
 ```text
 SoC AXI 主机 / 测试激励
           ⇅ AXI 五通道
       Axi2Flit
           ⇅ 帧有效/就绪信号
-   UcieAouEndpoint
+   UcieAouAdapter
           ⇅ sc_fifo<FdiFlit>
        UcieLink
           ⇅ sc_fifo<FdiFlit>
@@ -87,7 +87,7 @@ WRESP FIFO 深度 = floor(环路预算 / 2ns) + 4
 
 ## 5. 链路边界
 
-`UcieAouEndpoint` 将桥的帧信号转换为完整 250 字节 `FdiFlit`，并连接链路 SoC 侧的两个 FIFO。发送端以寄存就绪信号预约 FIFO 空位，在握手沿写入；接收端从 FIFO 取出后保持一拍，最快在下一 AXI 上升沿交付。因此适配器的接收路径包含一个 AXI 周期及可能的相位等待。
+`UcieAouAdapter` 将桥的帧信号转换为完整 250 字节 `FdiFlit`，并连接链路 SoC 侧的两个 FIFO。发送端以寄存就绪信号预约 FIFO 空位，在握手沿写入；接收端从 FIFO 取出后保持一拍，最快在下一 AXI 上升沿交付。因此适配器的接收路径包含一个 AXI 周期及可能的相位等待。
 
 链路 Reset/Training 状态不接受新传输，Active/Degraded 允许传输。已公布的发送就绪必须兑现，状态改变时可能完成一次已经预约的握手。启动流程先保持桥和响应端复位，链路训练完成后再释放。
 

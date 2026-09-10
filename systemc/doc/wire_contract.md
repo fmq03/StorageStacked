@@ -122,7 +122,7 @@ FH 字节 0 保存序号低 8 位，字节 1 的 bit0 表示重放标志。两�
 
 ## 7. 信号与 FIFO 连接
 
-| AXI2Flit/链路信号 | Endpoint 端口 | 通道类型 |
+| AXI2Flit/链路信号 | Adapter 端口 | 通道类型 |
 |---|---|---|
 | `Axi2Flit.flit_out` | `tx` | `sc_signal<FlitTransfer>` |
 | `Axi2Flit.flit_ready` | `tx_ready` | `sc_signal<bool>` |

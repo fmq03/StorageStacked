@@ -35,7 +35,7 @@ PERF_TARGET   := $(SIM_DIR)/axi2flit_perf_$(WIDTH)
 GOLDEN_TARGET := $(SIM_DIR)/axi2flit_golden_$(WIDTH)
 
 .PHONY: all run perf golden wave clean test-all perf-all golden-all report wire-all preflight
-.PHONY: boundary-all endpoint ucie-unit config-check reference-check FORCE
+.PHONY: boundary-all adapter ucie-unit config-check reference-check FORCE
 
 all: $(TARGET)
 
@@ -131,7 +131,7 @@ preflight: reference-check
 	$(MAKE) golden-all
 	$(MAKE) wire-all
 	$(MAKE) boundary-all
-	$(MAKE) endpoint
+	$(MAKE) adapter
 	$(MAKE) ucie-unit
 	$(MAKE) config-check
 	$(MAKE) perf-all
@@ -151,12 +151,12 @@ boundary-all: | $(SIM_DIR)
 AXI2FLIT_SYSTEMC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 UCIE_DIR ?= ../reference/ucie-model
 UCIE_PATCH := $(AXI2FLIT_SYSTEMC_DIR)/integration/ucie-model-aou.patch
-ENDPOINT_FLAGS := -I./integration -I"$(UCIE_DIR)/src"
+ADAPTER_FLAGS := -I./integration -I"$(UCIE_DIR)/src"
 FULL_LINK_ARGS ?=
 FULL_LINK_TARGET := $(SIM_DIR)/full_link_$(WIDTH)
 .PHONY: full-link full-link-all full-link-negative full-link-wave
 $(FULL_LINK_TARGET) $(SIM_DIR)/full_link_negative_$(WIDTH): $(DUT_SRCS) $(TB_DIR)/tb_full_link.cpp $(HDRS) $(wildcard integration/*.h) $(wildcard $(UCIE_DIR)/src/*.h) FORCE | $(SIM_DIR)
-	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(DUT_SRCS) $(TB_DIR)/tb_full_link.cpp -o $@ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(ADAPTER_FLAGS) -DAXI_DATA_WIDTH_CFG=$(WIDTH) $(DUT_SRCS) $(TB_DIR)/tb_full_link.cpp -o $@ $(LDFLAGS)
 
 full-link: reference-check $(FULL_LINK_TARGET)
 	./$(FULL_LINK_TARGET) $(FULL_LINK_ARGS)
@@ -187,9 +187,9 @@ full-link-negative: reference-check $(SIM_DIR)/full_link_negative_$(WIDTH)
 	  grep -q 'FULL-LINK TESTS FAILED' $(SIM_DIR)/full_link_negative.log && \
 	  echo 'PASS: scoreboard negative control detected corrupted expectation'
 
-endpoint: reference-check | $(SIM_DIR)
-	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) $(TB_DIR)/tb_ucie_endpoint.cpp -o $(SIM_DIR)/endpoint $(LDFLAGS)
-	./$(SIM_DIR)/endpoint
+adapter: reference-check | $(SIM_DIR)
+	$(CXX) $(CXXFLAGS) $(ADAPTER_FLAGS) $(TB_DIR)/tb_ucie_adapter.cpp -o $(SIM_DIR)/adapter $(LDFLAGS)
+	./$(SIM_DIR)/adapter
 
 ucie-unit: reference-check
 	$(MAKE) -C "$(UCIE_DIR)" SYSTEMC_HOME="$(SYSTEMC_HOME)" \
@@ -198,9 +198,9 @@ ucie-unit: reference-check
 # 参数化回归：x8、PAM4、48 GB/s、TAT=80ns。
 # 不复用默认配置的可执行文件，防止 make 未感知宏变化而命中旧缓存。
 config-check: reference-check | $(SIM_DIR)
-	$(CXX) $(CXXFLAGS) $(ENDPOINT_FLAGS) -DAOU_LINK_LANES=8 -DAOU_LINK_BITS_PER_SYMBOL=2 \
-	  -DAOU_LINK_TAT_NS=80 $(TB_DIR)/tb_ucie_endpoint.cpp -o $(SIM_DIR)/endpoint_config $(LDFLAGS)
-	./$(SIM_DIR)/endpoint_config
+	$(CXX) $(CXXFLAGS) $(ADAPTER_FLAGS) -DAOU_LINK_LANES=8 -DAOU_LINK_BITS_PER_SYMBOL=2 \
+	  -DAOU_LINK_TAT_NS=80 $(TB_DIR)/tb_ucie_adapter.cpp -o $(SIM_DIR)/adapter_config $(LDFLAGS)
+	./$(SIM_DIR)/adapter_config
 	$(CXX) $(CXXFLAGS) -DAOU_LINK_LANES=8 -DAOU_LINK_BITS_PER_SYMBOL=2 -DAOU_LINK_TAT_NS=80 \
 	  $(DUT_SRCS) $(TB_DIR)/tb_preintegration.cpp -o $(SIM_DIR)/boundary_config $(LDFLAGS)
 	./$(SIM_DIR)/boundary_config normal 1
@@ -215,7 +215,7 @@ wave:
 
 clean:
 	rm -f $(SIM_DIR)/full_link*
-	rm -f $(SIM_DIR)/wire_* $(SIM_DIR)/boundary_* $(SIM_DIR)/endpoint*
+	rm -f $(SIM_DIR)/wire_* $(SIM_DIR)/boundary_* $(SIM_DIR)/adapter*
 	rm -f $(SIM_DIR)/axi2flit_sim_* $(SIM_DIR)/axi2flit_perf_* $(SIM_DIR)/axi2flit_golden_*
 	rm -f $(SIM_DIR)/axi2flit_sim $(SIM_DIR)/axi2flit_perf
 	rm -f $(SIM_DIR)/func_* $(SIM_DIR)/perf_* $(SIM_DIR)/golden_*

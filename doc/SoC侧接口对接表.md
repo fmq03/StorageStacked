@@ -11,10 +11,10 @@
                  ⇅ 本文的 AXI 五通道
              Axi2Flit
                  ⇅ 帧握手
-          UcieAouEndpoint ⇄ UcieLink ⇄ AouTarget ⇄ 存储后端
+          UcieAouAdapter ⇄ UcieLink ⇄ AouTarget ⇄ 存储后端
 ```
 
-BFM（Bus Functional Model，总线功能模型）负责产生总线访问与处理握手，不要求模拟完整 CPU。`UcieAouEndpoint` 位于桥与 UCIe 之间，不是主机到 AXI 的适配器。
+BFM（Bus Functional Model，总线功能模型）负责产生总线访问与处理握手，不要求模拟完整 CPU。`UcieAouAdapter` 位于桥与 UCIe 之间，不是主机到 AXI 的适配器。
 
 下表方向相对 `Axi2Flit`。各端口通过顶层创建的 `sc_signal<T>` 连接，时钟也可以绑定 `sc_clock`；每条信号只能有一个驱动方。
 
@@ -102,7 +102,7 @@ data[lane + j] 对应内存地址 A[n] + j，0 <= j < S
 6. 同方向、同 ID 的未完成请求必须保持 RP 不变；同 ID 响应按顺序匹配，不同 ID 的先后不能依赖全局发起顺序。单 RP 并不意味着只有一笔 outstanding。
 7. 读写间无隐含全局顺序。需要写后读依赖时，等待相应 B 完成再发依赖读；同一个 ID 本身不建立跨读写方向的依赖。
 
-主机可提前拉高 BREADY/RREADY，也可制造有限背压；背压会占用链路响应资源。桥的 READY 随队列、路由和额度变化，接入方不应假设固定接受周期或固定返回延迟。
+主机可提前拉高 BREADY/RREADY，也可制造有限背压；背压会占用链路响应资源。桥的 READY 随队列、路由和 credit 变化，接入方不应假设固定接受周期或固定返回延迟。
 
 请求合法性由 [axi_contract.h](../systemc/include/axi_contract.h) 检查。非 INCR、超 SIZE、未对齐、跨 4KB 以及 WLAST 不匹配会在入口触发致命报告，不是自动返回 DECERR。对合法格式但越出后端窗口的访问，当前简单内存通过 B/R 返回 DECERR。同 ID 跨 RP 违例会记录在 `bridge.order_violations()`，顶层验收须检查为 0。
 
@@ -120,7 +120,7 @@ bridge.aw_ready(aw_ready);
 bridge.aw_ch(aw_payload);
 ```
 
-顶层在创建模型前设置时间分辨率，驱动公共时钟，启动时保持桥、Endpoint 和 Target 复位，待 UCIe Active 后在确定的相位释放复位。现有测试使用 1fs 分辨率、2ns 时钟，并在下降沿驱动主机信号，在上升沿观察握手；接入方可复用这种方式避免同沿采样歧义。启动后的额度交换由现有链路模块完成，主机只需遵守 READY。
+顶层在创建模型前设置时间分辨率，驱动公共时钟，启动时保持桥、Adapter 和 Target 复位，待 UCIe Active 后在确定的相位释放复位。现有测试使用 1fs 分辨率、2ns 时钟，并在下降沿驱动主机信号，在上升沿观察握手；接入方可复用这种方式避免同沿采样歧义。启动后的 credit 交换由现有链路模块完成，主机只需遵守 READY。
 
 时钟周期、AXI 位宽和地址窗口是顶层配置，当前默认值不是 SoC 模型必须采用的硬件参数；修改周期后应重新核对容量预算和性能门限。不能在有在途事务时单独复位一端。
 

@@ -3,7 +3,7 @@
 AXI2FLIT 是使用 C++17 和 SystemC 实现的双向协议桥及联合仿真环境。桥将 SoC 的 AXI 请求编码为固定字节格式的消息，经 UCIe 行为链路送到存储侧响应端；响应端访问存储后，将状态和读数据送回 AXI B/R 通道。
 
 ```text
-AXI 激励 ⇄ Axi2Flit ⇄ UcieAouEndpoint ⇄ UcieLink ⇄ AouTarget ⇄ SimpleBurstMemory
+AXI 激励 ⇄ Axi2Flit ⇄ UcieAouAdapter ⇄ UcieLink ⇄ AouTarget ⇄ SimpleBurstMemory
          AXI 信号       帧握手          帧 FIFO             突发事务 FIFO
 ```
 
@@ -11,7 +11,7 @@ AXI 激励 ⇄ Axi2Flit ⇄ UcieAouEndpoint ⇄ UcieLink ⇄ AouTarget ⇄ Simpl
 
 - SoC 侧：AXI 五通道信号接口，64 位字节地址、10 位 ID、16 位 USER，数据宽度支持 256/512/1024 位。
 - 传输：支持按 SIZE 对齐、不跨 4KB 的 INCR 突发、字节选通和窄访问；每笔最多 256 拍，同时受 4KB 边界限制。
-- 桥内部：1～4 个资源平面、分类型额度流控、跨帧消息续传和双向背压。
+- 桥内部：1～4 个资源平面、分类型 credit 流控、跨帧消息续传和双向背压。
 - 存储侧：整笔突发请求/响应 FIFO。简单内存保存实际字节数据，支持读写、掩码和错误响应。
 - 全链路：实例化 UcieLink，包含链路训练、行为物理层、CRC 和重放；生成 AXI 波形、事务记录和自动检查结果。
 
@@ -25,7 +25,7 @@ AXI 激励 ⇄ Axi2Flit ⇄ UcieAouEndpoint ⇄ UcieLink ⇄ AouTarget ⇄ Simpl
 | 存储开发者 | `AouTarget.mem_req/mem_rsp`，整突发 `SimpleMemRequest/Response` FIFO | [存储侧接口对接表第 1～3 节](doc/存储侧接口对接表.md) |
 | 联合仿真顶层开发者 | 参考 `tb_full_link.cpp` 装配模块和监视器 | [联仿交接约定](doc/全链路联合仿真接入指南.md#11-联仿交接约定) |
 
-gem5/Vortex/Ramulator 适配器、trace 文件回放器和独立的统一链路顶层尚未实现。文档中的精简存储接口属于可选设计方案，不能直接替代当前头文件；首轮集成使用现有类型，后端不匹配的部分由包装层转换。Endpoint 是桥到 UCIe 的内部适配，不是主机接口。
+gem5/Vortex/Ramulator 适配器、trace 文件回放器和独立的统一链路顶层尚未实现。文档中的精简存储接口属于可选设计方案，不能直接替代当前头文件；首轮集成使用现有类型，后端不匹配的部分由包装层转换。Adapter 是桥到 UCIe 的内部适配，不是主机接口。
 
 ## 构建与运行
 
@@ -62,7 +62,7 @@ make SYSTEMC_HOME=/work/systemc UCIE_DIR=/work/models/ucie-model preflight
 
 | 路径 | 内容 |
 |---|---|
-| `systemc/include/`、`systemc/src/` | 接口、消息编码、额度管理及桥实现 |
+| `systemc/include/`、`systemc/src/` | 接口、消息编码、 credit 管理及桥实现 |
 | `systemc/integration/` | 链路适配器、响应端、简单存储及依赖补丁 |
 | `systemc/tb/` | 桥、组件、性能和全链路测试 |
 | `systemc/scripts/` | 波形页面生成工具 |

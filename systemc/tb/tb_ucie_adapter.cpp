@@ -1,7 +1,7 @@
 /**
  * 链路适配组件自检。覆盖帧映射、逐位错误检测、深度1的双向FIFO与训练门控。
  */
-#include "ucie_aou_endpoint.h"
+#include "ucie_aou_adapter.h"
 #include "ucie_link.h"
 #include <random>
 
@@ -76,10 +76,10 @@ int sc_main(int, char**) {
     sc_signal<unsigned> state;
     sc_signal<FlitTransfer> tx, rx;
     sc_fifo<FdiFlit> fifo_tx("fifo_tx", 1), fifo_rx("fifo_rx", 1);
-    UcieAouEndpoint endpoint("endpoint", cfg);
-    endpoint.clk(clk); endpoint.rst_n(rst); endpoint.link_state(state);
-    endpoint.tx(tx); endpoint.tx_ready(tx_ready); endpoint.rx(rx); endpoint.rx_ready(rx_ready);
-    endpoint.fifo_tx(fifo_tx); endpoint.fifo_rx(fifo_rx);
+    UcieAouAdapter adapter("adapter", cfg);
+    adapter.clk(clk); adapter.rst_n(rst); adapter.link_state(state);
+    adapter.tx(tx); adapter.tx_ready(tx_ready); adapter.rx(rx); adapter.rx_ready(rx_ready);
+    adapter.fifo_tx(fifo_tx); adapter.fifo_rx(fifo_rx);
     rst.write(false); state.write(static_cast<unsigned>(LinkState::Reset));
     sc_start(6, SC_NS);
     rst.write(true); state.write(static_cast<unsigned>(LinkState::Training));
@@ -136,6 +136,6 @@ int sc_main(int, char**) {
     check(stalls > 100, "随机用例确实覆盖足够背压");
     tx.write(FlitTransfer{}); rx_ready.write(true); sc_start(20, SC_NS);
     check(!rx.read().valid && fifo_tx.num_available() == 0, "完成后无重复或尾部残留");
-    std::cout << "ENDPOINT: " << pass_count << " PASS / " << fail_count << " FAIL\n";
+    std::cout << "ADAPTER: " << pass_count << " PASS / " << fail_count << " FAIL\n";
     return fail_count ? 1 : 0;
 }
