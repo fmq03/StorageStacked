@@ -1,10 +1,8 @@
 # Reference delivery stays on disk and is distributed separately when needed.
 /zhongxing-full-environment-20260831/
 
-# 暂不提交交接材料、待整理的集成模块和本地克隆辅助脚本。
+# 交接材料与本地克隆辅助脚本单独保留。
 /integrate_doc/
-/gem5_axi/
-/ucie-model/
 /scripts/clone_local.py
 
 # Workspace build, dependency, result and handoff-package directories.
@@ -17,7 +15,7 @@
 /vortex-gpu/vxbuild/
 /vortex-gpu/build*/
 
-# Local environments and editor state; module rules live inside each submodule.
+# Local environments and editor state; component rules live inside each directory.
 .venv/
 venv/
 .env
