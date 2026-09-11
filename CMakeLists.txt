@@ -65,6 +65,10 @@ add_library(hbm_sim_core
 
 target_include_directories(hbm_sim_core PUBLIC include)
 target_compile_options(hbm_sim_core PRIVATE -Wall -Wextra -pedantic)
+set_target_properties(hbm_sim_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library(storagestacked_memsim SHARED integration/online.cpp)
+target_link_libraries(storagestacked_memsim PRIVATE hbm_sim_core)
+target_include_directories(storagestacked_memsim PUBLIC integration)
 
 add_executable(hbm_sim
   src/cli/help.cpp
