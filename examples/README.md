@@ -4,8 +4,8 @@
 
 当前示例重点覆盖：普通 trace、timed trace、真实 payload trace、初始 memory
 image、final memory txt/CSV 导出、DFI beat/signal trace 以及 storage model 参数。
-大规模实验选择 `configs/hbm.cfg` 或 `configs/lpddr.cfg` 的 preset，不要把长 trace 或
-后端大文件放在 examples 中。
+`configs/` 中的两个主配置是权威模板；`examples/configs/` 中四份 cfg 是由主配置复制得到的
+自包含 Demo。不要把长 trace 或后端大文件放在 examples 中。
 
 主要文件：
 
@@ -13,10 +13,16 @@ image、final memory txt/CSV 导出、DFI beat/signal trace 以及 storage model
 - `run_hbm3_random.sh`：运行 HBM3 random workload。
 - `run_lpddr6_trace.sh`：运行 LPDDR6 trace workload。
 - `run_lpddr5_trace.sh`：运行 LPDDR5 trace workload。
+- `configs/hbm.cfg`：HBM 单 Stack 完整 cfg Demo。
+- `configs/lpddr.cfg`：LPDDR 单器件完整 cfg Demo。
+- `configs/hbm_nstacks.cfg`：HBM 多 Stack 完整 cfg Demo。
+- `configs/lpddr_nstacks.cfg`：LPDDR 多器件完整 cfg Demo。
 - `sample.trace`：简单 trace 输入样例，格式为 `R|W ADDRESS`。
 - `timed.trace`：带显式注入 cycle 的 trace 输入样例，格式为 `CYCLE R|W ADDRESS`。
 - `memory_image.txt`：稀疏真实存储区初始内容样例。
 - `data_check.trace`：带 `data=`、`expect=` 和 `mask=` 的数据正确性 trace 样例。
+- `qos_priority.trace`：同一源注入时刻、同 Stack 的多优先级 trace，用于对照
+  `fcfs` 与 `strict_priority` 的完成顺序。
 - `multistack_demos/`：四种标准的多 Stack 工程脚本、共享数据闭环 trace 和使用说明。
 
 修改建议：
@@ -192,8 +198,8 @@ For sensitivity studies, the first-version floorplan/power/thermal model can be 
   --thermal-rise-c-per-pj 0.00003
 ```
 
-The same keys can be placed in the `[override]` section of `configs/hbm.cfg` or
-`configs/lpddr.cfg`. The default values are research defaults; replace them with
+The same keys can be placed in the `[override]` section of a copied HBM or LPDDR
+configuration. The default values are research defaults; replace them with
 device/vendor data before making numeric power or thermal claims.
 
 For a DRAMsim3-style power calibration path, use:

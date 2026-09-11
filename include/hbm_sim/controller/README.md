@@ -8,6 +8,7 @@ row policy、refresh/RFM、timing gate 和命令执行，是 Ramulator2.1 风格
 主要头文件：
 
 - `controller.hpp`：单 channel controller 顶层接口和 `ControllerOptions`。
+- `request_queues.hpp`：四类请求队列、容量查询、active 提升与移除及 bank 所有权。
 - `command.hpp`：已发射命令事件格式，用于 trace、统计和 validator。
 - `executor.hpp`：`CommandExecutor`，集中声明命令副作用执行接口。
 - `timing.hpp`：`TimingEngine`，声明 scope timing、tFAW、WCK window 等检查接口。

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hbm_sim/controller/request_queues.hpp"
+
 // Controller 层顶层接口：一个 Controller 对应一个 channel 内的调度与 DRAM
 // 状态。 MemorySystem 可以按 [stack][channel] 并行持有多个 Controller；跨 stack
 // 路由、 反压和 QoS 位于 system 层，不污染这里的单 channel JEDEC 调度状态。
@@ -108,15 +110,7 @@ public:
   const std::vector<IssuedCommand> &issued_commands() const { return issued_; }
 
 private:
-  enum class BufferKind {
-    // active buffer 保存已经发出 ACT/ACT1、仍需要 ACT2/CAS/RD/WR 的请求。
-    Active,
-    // priority buffer 保存 refresh/RFM/row-policy PRE 等维护请求。
-    Priority,
-    // read/write buffer 保存 frontend 普通请求。
-    Read,
-    Write,
-  };
+  using BufferKind = RequestQueueKind;
 
   struct RisingEdgeCommandInfo {
     // 最近一次 rising edge 行命令，用于判断下一次 falling edge PRE 是否可
@@ -166,10 +160,7 @@ private:
   std::vector<BankState> banks_;
   // Ramulator 风格的 request buffers：active 保存已发 opening 命令、等待后续
   // ACT2/CAS/RD/WR 的请求；priority 保存 refresh/RFM；read/write 保存普通请求。
-  std::deque<Request> active_buffer_;
-  std::deque<Request> priority_buffer_;
-  std::deque<Request> read_buffer_;
-  std::deque<Request> write_buffer_;
+  RequestQueues request_queues_;
   std::deque<Request> pending_maintenance_;
   // 已发出 RD/WR、正在等待完成统计的请求。
   std::deque<Request> pending_;
@@ -189,9 +180,6 @@ private:
   Stats stats_;
   // 轻量命令 trace。主要供 tests/sequence_tests.cpp 做精确断言。
   std::vector<IssuedCommand> issued_;
-  // 每个 flat bank 中 active_buffer_ 里的请求数，用于避免 refresh/PRE 关闭
-  // 尚有打开流程的 bank。
-  std::vector<int> active_per_bank_;
   // 行策略、refresh 和 RFM 都有独立状态对象；Controller 只在 tick()
   // 中协调它们。
   RowPolicyEngine row_policy_;
@@ -298,23 +286,17 @@ private:
   // 命令分类函数保持独立，避免 bus_matches()/retire_or_advance() 中重复写条件。
   bool is_row_command(Command cmd) const;
   bool is_column_command(Command cmd) const;
-  bool is_activate_command(Command cmd) const;
-  bool is_cas_command(Command cmd) const;
   bool is_data_command(Command cmd) const;
-  bool is_refresh_command(Command cmd) const;
-  bool is_rfm_command(Command cmd) const;
   bool is_opening_command(Command cmd) const;
   bool is_maintenance_request(const Request &req) const;
   bool is_terminal_maintenance(const Request &req, Command cmd) const;
   bool is_all_bank_row_command(Command cmd) const;
-  bool any_bank_busy() const;
   bool any_bank_busy_in_channel(const DecodedAddress &decoded) const;
   bool any_bank_busy_in_rank(const DecodedAddress &decoded) const;
   bool any_bank_activating_in_rank(const DecodedAddress &decoded) const;
   std::pair<int, int> rank_bank_range(const DecodedAddress &decoded) const;
 
   Cycle timing_delay(int cycles) const;
-  Cycle burst_delay() const;
   void schedule_refresh();
   void service_pending_maintenance();
   void schedule_maintenance(Command cmd, const DecodedAddress &decoded);

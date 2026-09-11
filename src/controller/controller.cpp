@@ -102,7 +102,8 @@ void validate_request_decoded(const DramSpec &spec,
 
 Controller::Controller(DramSpec spec, ControllerOptions options)
     : spec_(std::move(spec)), options_(options), banks_(spec_.total_banks()),
-      active_per_bank_(spec_.total_banks(), 0),
+      request_queues_(spec_.total_banks(), options.priority_buffer_size,
+                      options.read_buffer_size, options.write_buffer_size),
       row_policy_(static_cast<std::size_t>(spec_.total_banks()),
                   std::max(1, options_.row_policy_cap)),
       timing_engine_(spec_) {
@@ -189,10 +190,10 @@ bool Controller::enqueue(Request req) {
       stats_.read_forwards++;
       bool initialized = true;
       ByteVector initialized_mask;
-      const PhysicalStorageStats storage_before =
-          memory_image_->storage_stats();
+      const EccStatusCounters storage_before =
+          memory_image_->ecc_status_counters();
       req.payload = read_forward_payload(req, &initialized, &initialized_mask);
-      const PhysicalStorageStats storage_after = memory_image_->storage_stats();
+      const EccStatusCounters storage_after = memory_image_->ecc_status_counters();
       req.response_ecc_corrected = storage_after.ecc_corrected_errors >
                                    storage_before.ecc_corrected_errors;
       req.response_ecc_uncorrectable = storage_after.ecc_uncorrectable_errors >
@@ -214,7 +215,7 @@ bool Controller::enqueue(Request req) {
     req.controller_sequence = next_controller_sequence_++;
     stats_.reads++;
     stats_.injected_requests++;
-    read_buffer_.push_back(req);
+    request_queues_[BufferKind::Read].push_back(req);
     return true;
   }
 
@@ -290,7 +291,7 @@ bool Controller::enqueue(Request req) {
         state.byte_sequence[i] = req.controller_sequence;
     }
     buffered_writes_[req.address] = std::move(state);
-    write_buffer_.push_back(req);
+    request_queues_[BufferKind::Write].push_back(req);
     return true;
   }
 
@@ -301,7 +302,7 @@ bool Controller::enqueue(Request req) {
   }
   req.controller_sequence = next_controller_sequence_++;
   stats_.maintenance_requests++;
-  priority_buffer_.push_back(req);
+  request_queues_[BufferKind::Priority].push_back(req);
   return true;
 }
 
@@ -487,8 +488,8 @@ void Controller::flush_storage() {
 }
 
 bool Controller::done() const {
-  return active_buffer_.empty() && priority_buffer_.empty() &&
-         read_buffer_.empty() && write_buffer_.empty() &&
+  return request_queues_[BufferKind::Active].empty() && request_queues_[BufferKind::Priority].empty() &&
+         request_queues_[BufferKind::Read].empty() && request_queues_[BufferKind::Write].empty() &&
          pending_maintenance_.empty() && pending_.empty() &&
          (!mem_phy_ || mem_phy_->idle());
 }
@@ -567,10 +568,10 @@ void Controller::tick() {
     }
   }
 
-  stats_.read_queue_len_sum += read_buffer_.size();
-  stats_.write_queue_len_sum += write_buffer_.size();
-  stats_.priority_queue_len_sum += priority_buffer_.size();
-  stats_.active_queue_len_sum += active_buffer_.size();
+  stats_.read_queue_len_sum += request_queues_[BufferKind::Read].size();
+  stats_.write_queue_len_sum += request_queues_[BufferKind::Write].size();
+  stats_.priority_queue_len_sum += request_queues_[BufferKind::Priority].size();
+  stats_.active_queue_len_sum += request_queues_[BufferKind::Active].size();
   if (write_mode_) {
     stats_.write_mode_cycles++;
   }
@@ -733,11 +734,11 @@ Controller::complete_read(Request &req,
     ecc_corrected = phy_completion->ecc_corrected;
     ecc_uncorrectable = phy_completion->ecc_uncorrectable;
   } else {
-    const PhysicalStorageStats storage_before = memory_image_->storage_stats();
+    const EccStatusCounters storage_before = memory_image_->ecc_status_counters();
     actual = memory_image_->read(req.address, size, &initialized, &storage);
     initialized_mask = memory_image_->read_initialized_mask(
         req.address, actual.size(), &storage);
-    const PhysicalStorageStats storage_after = memory_image_->storage_stats();
+    const EccStatusCounters storage_after = memory_image_->ecc_status_counters();
     ecc_corrected = storage_after.ecc_corrected_errors >
                     storage_before.ecc_corrected_errors;
     ecc_uncorrectable = storage_after.ecc_uncorrectable_errors >
@@ -926,7 +927,7 @@ bool Controller::has_unresolved_overlapping_read(
                                 request_data_size(spec_, candidate));
         });
   };
-  return queue_has_overlap(read_buffer_) || queue_has_overlap(active_buffer_) ||
+  return queue_has_overlap(request_queues_[BufferKind::Read]) || queue_has_overlap(request_queues_[BufferKind::Active]) ||
          queue_has_overlap(pending_);
 }
 
@@ -1058,7 +1059,7 @@ Controller::Candidate Controller::choose(BusClass bus) {
   if (!cand.valid && (bus == BusClass::Column || bus == BusClass::Unified)) {
     // active_buffer 保存已经打开/正在打开的请求。优先检查它能最大化 row-hit
     // 和已经投入的 ACT/CAS 工作，接近 Ramulator active buffer 的意义。
-    cand = pick_best_ready_from(active_buffer_, BufferKind::Active, bus, false,
+    cand = pick_best_ready_from(request_queues_[BufferKind::Active], BufferKind::Active, bus, false,
                                 &phy_block);
   }
   if (!cand.valid) {
@@ -1066,7 +1067,7 @@ Controller::Candidate Controller::choose(BusClass bus) {
     // 只看队首， 防止维护命令之间互相重排导致 refresh rotation 难以验证。
     cand = pick_priority_if(bus, &phy_block);
   }
-  if (!cand.valid && priority_buffer_.empty()) {
+  if (!cand.valid && request_queues_[BufferKind::Priority].empty()) {
     // 只有 priority buffer 为空时才调度普通读写，避免维护请求被持续推迟。
     cand = pick_rw_if(bus, &phy_block);
   }
@@ -1092,8 +1093,8 @@ Controller::pick_urgent_act2(BusClass bus,
   }
   Candidate best;
   Cycle best_deadline = 0;
-  for (std::size_t i = 0; i < active_buffer_.size(); i++) {
-    Request &req = active_buffer_[i];
+  for (std::size_t i = 0; i < request_queues_[BufferKind::Active].size(); i++) {
+    Request &req = request_queues_[BufferKind::Active][i];
     auto cmd = next_command(req);
     if (!cmd.has_value() || *cmd != Command::ACT2) {
       continue;
@@ -1114,7 +1115,7 @@ Controller::pick_urgent_act2(BusClass bus,
     // hit 或维护请求长期饿死。
     if (!best.valid || bank.act2_deadline < best_deadline ||
         (bank.act2_deadline == best_deadline &&
-         req.arrival < active_buffer_[best.index].arrival)) {
+         req.arrival < request_queues_[BufferKind::Active][best.index].arrival)) {
       best = Candidate{i, BufferKind::Active, *cmd, bus, true};
       best_deadline = bank.act2_deadline;
     }
@@ -1173,9 +1174,11 @@ bool Controller::candidate_eligible(const Request &req, Command cmd,
       is_data_command(cmd) && has_unresolved_overlapping_write(req)) {
     return false;
   }
-  if (req.type == RequestType::Write && is_data_command(cmd) &&
+  if (req.type == RequestType::Write &&
       has_unresolved_overlapping_read(req, req.controller_sequence)) {
-    // FR-FCFS 可以重排独立地址，但不能让后到写覆盖仍未完成的先到读。
+    // Do not acquire an active bank for a write waiting on an older read.
+    // Otherwise maintenance waits for this active write, while that older read
+    // is blocked by maintenance priority: a circular wait before data issue.
     return false;
   }
   if (!bus_matches(req, cmd, bus)) {
@@ -1207,10 +1210,20 @@ bool Controller::phy_admission_ok(Command cmd,
 Controller::Candidate
 Controller::pick_priority_if(BusClass bus,
                              PhyBackpressureObservation *phy_block) {
-  if (priority_buffer_.empty()) {
+  while (!request_queues_[BufferKind::Priority].empty()) {
+    const Request& head = request_queues_[BufferKind::Priority].front();
+    const BankState& bank = banks_[head.decoded.flat_bank(spec_)];
+    if (head.next != Command::PREPB || bank.activating || bank.open_row >= 0)
+      break;
+    // Another PRE/refresh/auto-precharge already satisfied this maintenance
+    // request. Retire it without emitting an illegal PRE to a closed bank.
+    row_policy_.on_issue(options_.row_policy, head.decoded.flat_bank(spec_), Command::PREPB);
+    request_queues_[BufferKind::Priority].pop_front();
+  }
+  if (request_queues_[BufferKind::Priority].empty()) {
     return {};
   }
-  Request &req = priority_buffer_.front();
+  Request &req = request_queues_[BufferKind::Priority].front();
   auto cmd = next_command(req);
   if (!cmd.has_value()) {
     return {};
@@ -1226,10 +1239,20 @@ Controller::Candidate
 Controller::pick_rw_if(BusClass bus, PhyBackpressureObservation *phy_block) {
   set_write_mode();
   if (write_mode_) {
-    return pick_best_ready_from(write_buffer_, BufferKind::Write, bus, true,
-                                phy_block);
+    auto write = pick_best_ready_from(request_queues_[BufferKind::Write], BufferKind::Write, bus, true,
+                                      phy_block);
+    if (write.valid) return write;
+    // A write-drain watermark cannot prevent the older reads needed by queued
+    // writes from progressing. Do not relax bank/timing/PHY eligibility.
+    const bool read_dependency = std::any_of(request_queues_[BufferKind::Write].begin(), request_queues_[BufferKind::Write].end(),
+        [&](const Request& req) {
+          return has_unresolved_overlapping_read(req, req.controller_sequence);
+        });
+    if (read_dependency)
+      return pick_best_ready_from(request_queues_[BufferKind::Read], BufferKind::Read, bus, true, phy_block);
+    return {};
   }
-  return pick_best_ready_from(read_buffer_, BufferKind::Read, bus, true,
+  return pick_best_ready_from(request_queues_[BufferKind::Read], BufferKind::Read, bus, true,
                               phy_block);
 }
 
@@ -1242,68 +1265,26 @@ void Controller::set_write_mode() {
   double low = options_.write_low_watermark *
                static_cast<double>(options_.write_buffer_size);
   if (!write_mode_) {
-    if (static_cast<double>(write_buffer_.size()) > high ||
-        read_buffer_.empty()) {
+    if (static_cast<double>(request_queues_[BufferKind::Write].size()) > high ||
+        request_queues_[BufferKind::Read].empty()) {
       write_mode_ = true;
     }
   } else {
-    if (static_cast<double>(write_buffer_.size()) < low &&
-        !read_buffer_.empty()) {
+    if (static_cast<double>(request_queues_[BufferKind::Write].size()) < low &&
+        !request_queues_[BufferKind::Read].empty()) {
       write_mode_ = false;
     }
   }
 }
 
 std::deque<Request> &Controller::request_buffer(BufferKind kind) {
-  switch (kind) {
-  case BufferKind::Active:
-    return active_buffer_;
-  case BufferKind::Priority:
-    return priority_buffer_;
-  case BufferKind::Read:
-    return read_buffer_;
-  case BufferKind::Write:
-    return write_buffer_;
-  }
-  return read_buffer_;
+  return request_queues_[kind];
 }
-
 const std::deque<Request> &Controller::request_buffer(BufferKind kind) const {
-  switch (kind) {
-  case BufferKind::Active:
-    return active_buffer_;
-  case BufferKind::Priority:
-    return priority_buffer_;
-  case BufferKind::Read:
-    return read_buffer_;
-  case BufferKind::Write:
-    return write_buffer_;
-  }
-  return read_buffer_;
+  return request_queues_[kind];
 }
-
-std::size_t Controller::queued_requests() const {
-  return active_buffer_.size() + priority_buffer_.size() + read_buffer_.size() +
-         write_buffer_.size();
-}
-
-bool Controller::buffer_has_space(BufferKind kind) const {
-  switch (kind) {
-  case BufferKind::Active:
-    // active_buffer 最多按 bank 数限制，因为一个 bank 上只应该有一个正在打开/
-    // 已打开并等待数据命令的 owning request。active_per_bank_
-    // 会防止维护命令误关。
-    return active_buffer_.size() <
-           static_cast<std::size_t>(spec_.total_banks());
-  case BufferKind::Priority:
-    return priority_buffer_.size() < options_.priority_buffer_size;
-  case BufferKind::Read:
-    return read_buffer_.size() < options_.read_buffer_size;
-  case BufferKind::Write:
-    return write_buffer_.size() < options_.write_buffer_size;
-  }
-  return false;
-}
+std::size_t Controller::queued_requests() const { return request_queues_.size(); }
+bool Controller::buffer_has_space(BufferKind kind) const { return request_queues_.has_space(kind); }
 
 std::optional<Command> Controller::next_command(Request &req) {
   BankState &bank = banks_[req.decoded.flat_bank(spec_)];
@@ -1439,6 +1420,7 @@ bool Controller::timing_ok(const Request &req, Command cmd) const {
            clk_ >= row.next_row && timing_engine_.faw_ready(spec_, req.decoded);
   case Command::REFDB:
     return dual_bank_target_idle(req.decoded) && clk_ >= bank.next_act &&
+           clk_ >= banks_[lpddr_refdb_partner(spec_, req.decoded).flat_bank(spec_)].next_act &&
            clk_ >= row.next_row && timing_engine_.faw_ready(spec_, req.decoded);
   case Command::RFMPB:
     return !bank.activating && bank.open_row < 0 && clk_ >= bank.next_act &&
@@ -1517,11 +1499,11 @@ bool Controller::would_close_active(const Request &req, Command cmd,
     // bank， 否则 active_buffer 里的普通请求会在 row 被维护命令关闭后继续发
     // RD/WR。
     const auto [begin, end] = rank_bank_range(req.decoded);
-    return std::any_of(active_per_bank_.begin() + begin,
-                       active_per_bank_.begin() + end,
+    return std::any_of(request_queues_.active_counts().begin() + begin,
+                       request_queues_.active_counts().begin() + end,
                        [](int count) { return count > 0; });
   }
-  return active_per_bank_[req.decoded.flat_bank(spec_)] > 0;
+  return request_queues_.active_counts()[req.decoded.flat_bank(spec_)] > 0;
 }
 
 bool Controller::is_rising_edge() const { return (clk_ % 2) == 1; }
@@ -1721,30 +1703,10 @@ void Controller::retire_or_advance(Candidate cand, Command issued) {
 }
 
 void Controller::erase_request(BufferKind kind, std::size_t index) {
-  auto &buffer = request_buffer(kind);
-  if (index >= buffer.size()) {
-    return;
-  }
-  if (kind == BufferKind::Active) {
-    // active_per_bank_ 是维护命令仲裁的保护计数。active_buffer
-    // 删除时必须同步递减， 否则 refresh/RFM 会以为 bank 仍被普通请求占用。
-    int flat = buffer[index].decoded.flat_bank(spec_);
-    active_per_bank_[flat] = std::max(0, active_per_bank_[flat] - 1);
-  }
-  buffer.erase(buffer.begin() + static_cast<std::ptrdiff_t>(index));
+  request_queues_.erase(kind, index, spec_);
 }
-
 void Controller::promote_to_active(BufferKind kind, std::size_t index) {
-  auto &source = request_buffer(kind);
-  if (index >= source.size() || !buffer_has_space(BufferKind::Active)) {
-    return;
-  }
-  Request req = source[index];
-  // promote 后请求保留同一个 id/arrival/decoded，用于延迟统计和 command trace
-  // 连续性。
-  active_buffer_.push_back(req);
-  active_per_bank_[req.decoded.flat_bank(spec_)]++;
-  source.erase(source.begin() + static_cast<std::ptrdiff_t>(index));
+  request_queues_.promote(kind, index, spec_);
 }
 
 void Controller::classify_row_status(Request &req) {
@@ -1829,24 +1791,8 @@ bool Controller::is_column_command(Command cmd) const {
   return command_meta(cmd).column_command;
 }
 
-bool Controller::is_activate_command(Command cmd) const {
-  return command_meta(cmd).activate;
-}
-
-bool Controller::is_cas_command(Command cmd) const {
-  return command_meta(cmd).cas;
-}
-
 bool Controller::is_data_command(Command cmd) const {
   return command_meta(cmd).data;
-}
-
-bool Controller::is_refresh_command(Command cmd) const {
-  return command_meta(cmd).refresh;
-}
-
-bool Controller::is_rfm_command(Command cmd) const {
-  return command_meta(cmd).rfm;
 }
 
 bool Controller::is_opening_command(Command cmd) const {
@@ -1864,12 +1810,6 @@ bool Controller::is_terminal_maintenance(const Request &req,
 
 bool Controller::is_all_bank_row_command(Command cmd) const {
   return command_meta(cmd).all_bank;
-}
-
-bool Controller::any_bank_busy() const {
-  return std::any_of(banks_.begin(), banks_.end(), [](const BankState &bank) {
-    return bank.activating || bank.open_row >= 0;
-  });
 }
 
 bool Controller::any_bank_busy_in_channel(const DecodedAddress &decoded) const {
@@ -1931,14 +1871,10 @@ Cycle Controller::timing_delay(int cycles) const {
          static_cast<Cycle>(std::max(1, spec_.tick_multiplier));
 }
 
-Cycle Controller::burst_delay() const {
-  return timing_delay(std::max(1, spec_.timing.nBL));
-}
-
 void Controller::schedule_refresh() {
-  const bool ordinary_work = !active_buffer_.empty() || !read_buffer_.empty() ||
-                             !write_buffer_.empty();
-  const bool allow_pull_in = !ordinary_work && priority_buffer_.empty() &&
+  const bool ordinary_work = !request_queues_[BufferKind::Active].empty() || !request_queues_[BufferKind::Read].empty() ||
+                             !request_queues_[BufferKind::Write].empty();
+  const bool allow_pull_in = !ordinary_work && request_queues_[BufferKind::Priority].empty() &&
                              pending_maintenance_.empty() && pending_.empty();
   auto result =
       refresh_manager_.tick(spec_, clk_, ordinary_work, allow_pull_in);
@@ -1972,7 +1908,7 @@ void Controller::service_pending_maintenance() {
   // 暂时放不下的维护请求。每个 tick 尽可能搬运，保持维护压力可见。
   while (!pending_maintenance_.empty() &&
          buffer_has_space(BufferKind::Priority)) {
-    priority_buffer_.push_back(pending_maintenance_.front());
+    request_queues_[BufferKind::Priority].push_back(pending_maintenance_.front());
     pending_maintenance_.pop_front();
   }
 }
@@ -2000,7 +1936,7 @@ void Controller::apply_row_policy_pre_schedule() {
   for (int flat = 0; flat < static_cast<int>(row_policy_.bank_count());
        flat++) {
     if (!row_policy_.should_schedule_precharge(options_.row_policy, flat,
-                                               active_per_bank_[flat])) {
+                                               request_queues_.active_counts()[flat])) {
       continue;
     }
     DecodedAddress decoded = decoded_from_flat_bank(flat);
@@ -2018,7 +1954,7 @@ void Controller::apply_row_policy_pre_schedule() {
       // 的维护请求，反而遮蔽调度器本身的行为。
       continue;
     }
-    priority_buffer_.push_back(req);
+    request_queues_[BufferKind::Priority].push_back(req);
     row_policy_.mark_precharge_pending(flat);
     stats_.maintenance_requests++;
     stats_.row_policy_precharges++;

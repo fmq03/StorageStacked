@@ -1,10 +1,10 @@
 # HBM3/HBM4/LPDDR5/LPDDR6 多 Stack 工程 Demo
 
-这里的四个脚本复用两份多实例用例配置：
-[`configs/usecases/hbm_nstacks.cfg`](../../configs/usecases/hbm_nstacks.cfg) 和
-[`configs/usecases/lpddr_nstacks.cfg`](../../configs/usecases/lpddr_nstacks.cfg)。两份文件通过
-`[meta] extends` 继承对应的标准主配置，只保存多实例场景的差异参数，避免复制整套
-标准参数后产生漂移。
+这里的四个脚本使用两份完整、自包含的多实例 cfg Demo：
+[`examples/configs/hbm_nstacks.cfg`](../configs/hbm_nstacks.cfg) 和
+[`examples/configs/lpddr_nstacks.cfg`](../configs/lpddr_nstacks.cfg)。它们由对应主配置完整复制，
+在 `[override]` 设置多实例差异，不使用额外继承层。脚本再通过命令行选择具体标准、
+Stack 数、trace 和产物路径。
 
 ```bash
 bash examples/multistack_demos/hbm3_nstack.sh
@@ -35,12 +35,12 @@ command/response/DFI/DFI-signal CSV、带来源的 timing 表、每个 Stack 的
 | LPDDR5 | 6400 | 1250 / 1 | 16 | 1 / 1 / 1 | 16 | 64 / 64 B | 两个独立 LPDDR5 device 实例 |
 | LPDDR6 | 10667 | 375 / 1 | 24 | 1 / 2 / 1 | 32 | 64 / 32 B | 两个独立 LPDDR6 device 实例，含 WCK/REFdb 能力 |
 
-两份 `*_nstacks.cfg` 的共有值是 `stack_count=2`、256 B interleave、每 Stack 256 项
-ingress、每拍最多 dispatch 4 个 transaction、strict-priority QoS、Behavioral PHY、
-sparse backend，并开启 command/DFI 验证。四个包装脚本可以覆盖 `STACK_COUNT`，但不会
-修改 standard 的组织/timing。若要研究 scheduler、row policy、ECC、backend、PHY、功耗
-或热参数，可复制对应的用例配置后修改 `[override]`，也可通过 CLI 临时覆盖，并以运行目录
-中的 `resolved.cfg` 确认最终生效值。
+两份 `*_nstacks.cfg` 共有 256 B interleave、每 Stack 256 项 ingress、每拍最多 dispatch 4 个
+transaction、strict-priority QoS、Behavioral PHY 和 sparse backend；脚本默认
+`stack_count=2` 并开启 command/DFI 验证。四个包装脚本可以覆盖 `STACK_COUNT`，但不会修改
+standard 的组织/timing。若要长期研究 scheduler、row policy、ECC、backend、PHY、功耗或
+热参数，应复制对应主配置后修改 `[override]`；临时实验也可使用 CLI，并以运行目录中的
+`resolved.cfg` 确认最终生效值。
 
 可覆盖变量：`HBM_SIM_BIN` 指定二进制，`STACK_COUNT` 指定 Stack 数，
 `OUTPUT_ROOT` 指定产物根目录。未知标准、Stack 数小于 2 或不存在的可执行算法都会

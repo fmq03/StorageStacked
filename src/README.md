@@ -4,19 +4,21 @@
 
 `src/` 按模拟器职责分层，目标是接近 Ramulator2.1 的模块边界，同时保持 HBM/LPDDR 专用小型项目的清晰度。
 
-- `cli/`：命令行、配置文件、结果输出装配。这里只做参数解析、`DramSpec` 覆盖、timing table 校验和模块组装，不写协议状态机。
+- `cli/`：命令行、运行选项、结果输出装配；调用配置库生成模型，不写协议状态机。
+- `config/`：配置文件分层、模型 key 映射、schema 3 参数联动与矛盾检查；可由库调用。
 - `core/`：跨模块核心对象，例如地址映射、多 controller `MemorySystem` 和真实堆叠存储 `MemoryImage`。多 channel 并行、channel mapper、全局命令 trace 合并、真实 payload、bank/row/column/subarray/mat/cell/microbump 存储视图、floorplan、SECDED shadow、功耗和 TSV-aware 热事件都从这里进入。
 - `dram/`：DRAM 标准描述，包括标准 traits、JEDEC 换算、命令语义、命令状态合法性、接口开销、完整 organization/timing profile 和派生 timing table。新增 HBM/LPDDR 标准参数时优先改这里。
 - `controller/`：控制器内部实现，包括 request buffer 调度、row policy、refresh/RFM manager、timing engine 和命令执行器。它对应 Ramulator2.1 controller 侧的核心骨架。
 - `frontend/`：合成流量和 trace 读取。进入 controller 前要完成地址解码，避免调度热路径重复做映射。
-- `frontend/` 中还维护初始化/训练控制序列生成器。`init_sequence` 会把 `MRW/MRR/DVFS/WCK_TRAIN/PDE/PDX/SREFEN/SREFEX/ECC_SCRUB/RAS_ERR` 这类维护请求预置到普通 workload 前，使 mode register、WCK training、DVFS、链路保护和低功耗状态可以走完整 controller/validator 路径。
-- `stats/`：统计数据和稳定文本输出。payload bandwidth、interface bandwidth、system cycles、controller aggregate cycles、refresh credit 和低功耗周期等口径都在这里输出。
+- `frontend/` 中还维护初始化/训练控制序列生成器。`init_sequence` 会把 `MRW/MRR/DVFS/WCK_TRAIN/PDE/PDX/SREFEN/SREFEX/ECC_SCRUB/RAS_ERR` 这类维护请求预置到普通 workload 前，使 mode register、WCK training、DVFS、链路保护和低功耗状态可以走完整 controller/validator 路径；生成器会拒绝 HBM/LPDDR 跨族序列，CLI 的 `--check-config` 也会提前报告该错误。
+- `stats/`：统计数据、完整文本、人工摘要及版本化 JSON 结果；payload/interface bandwidth、system cycles、controller aggregate cycles 等保持明确口径。
 - `validation/`：命令 trace 导出、DFI beat/signal trace 生成、离线 command validator 和 DFI validator。Ramulator2.1/golden trace/DFI 视图扩展应优先复用这个层的结构化事件。
 
 依赖方向应尽量保持为：
 
 ```text
-cli -> frontend/core/controller/stats/validation
+cli -> config/frontend/core/controller/stats/validation
+config -> dram
 core -> controller/stats
 controller -> dram/stats
 frontend -> core/dram
@@ -30,12 +32,12 @@ dram -> common
 
 - 目录表达大类，文件名表达本层职责。比如 `dram/state.cpp` 是 DRAM 命令状态合法性，`controller/timing.cpp` 是 controller 侧 timing gate，`validation/validator.cpp` 是离线 trace validator。
 - 文件名可以短，但类型名保持完整。`controller/executor.cpp` 里仍然实现 `CommandExecutor`，这样读代码和搜索类名时不会丢语义。
-- CLI 的用户说明独立放在 `cli/help.cpp`，`cli/main.cpp` 只保留参数解析、配置覆盖和仿真流程装配。
+- CLI 的用户说明独立放在 `cli/help.cpp`；模型字段覆盖与推导放在 `config/model.cpp`，`cli/main.cpp` 负责运行选项与流程装配。
 
 常见修改入口：
 
-- 新增或校准 JEDEC/vendor timing：标准身份/能力放在 `dram/standard_traits.cpp`，organization/timing 和标准公式放在 `dram/profiles.cpp`，并同步更新 `configs/hbm.cfg` 或 `configs/lpddr.cfg` 的具名 preset 与 `TimingTable` 来源。
-- 从手册摘录某个 speed-bin/density/stack-height/mode 的 timing 表：增加家族主配置中的具名 preset；只有当规则影响一整类器件或需要公式推导时，才把逻辑沉到 `dram/profiles.cpp`。
+- 新增或校准 JEDEC/vendor timing：标准身份/能力放在 `dram/standard_traits.cpp`，基准 organization/timing 和公式放在 `dram/profiles.cpp`，并更新 `TimingTable` 来源与测试。主模板不重复完整基准表。
+- 单个自定义 speed/density/mode：复制家族主配置后修改主输入或内联 Timing，不要求新增集中注册的 preset；通用公式仍放在 `dram/profiles.cpp`，联动规则放在 `config/model.cpp`。
 - 每个 preset 必须明确 `standard + speed-bin + density + stack-height + mode + vendor + source`，避免 JEDEC、vendor、外部仿真器和研究默认数值混用。
 - 新增命令类别：先改 `include/hbm_sim/core/common.hpp` 的 `Command`，再改 `dram/semantics.cpp`、`dram/state.cpp`、`controller/executor.cpp` 和 `validation/validator.cpp`。MRW/MRR/WCK_SYNC/WCK_TRAIN/DVFS/PDE/PDX/SREFEN/SREFEX/ECC_SCRUB/RAS_ERR 这类控制命令也要同步补 `Stats` 和 sequence test。
 - 新增调度策略：扩展 `include/hbm_sim/core/common.hpp` 的 `SchedulerKind` 和 `controller/scheduler.cpp`，保持 Controller 只提供候选视图。

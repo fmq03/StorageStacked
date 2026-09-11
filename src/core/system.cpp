@@ -326,6 +326,10 @@ DramSpec MemorySystem::make_channel_spec(const DramSpec &spec) {
   // 维度也算进去。 collect_issued_commands() 会把本地 channel=0
   // 的命令重新标成全局 channel。
   channel_spec.org.channels = 1;
+  // Keep full-device density and refresh timings; this is a local scheduling
+  // view, not a newly configured one-channel physical device.
+  channel_spec.density_reference_channels = spec.density_reference_channels > 0
+      ? spec.density_reference_channels : spec.org.channels;
   return channel_spec;
 }
 
@@ -906,104 +910,118 @@ void MemorySystem::run(std::vector<Request> requests, Cycle max_cycles) {
 }
 
 void MemorySystem::run(RequestSource &source, Cycle max_cycles) {
-  run_source(source, max_cycles, nullptr, 0, nullptr);
+  run_source(source, max_cycles, RunOptions{});
 }
 
 void MemorySystem::run(RequestSource &source, Cycle max_cycles,
                        Cycle progress_interval,
                        RunProgressConsumer progress_consumer) {
-  run_source(source, max_cycles, nullptr, progress_interval,
-             progress_consumer ? &progress_consumer : nullptr);
+  RunOptions options;
+  options.progress_interval = progress_interval;
+  options.progress = std::move(progress_consumer);
+  run_source(source, max_cycles, options);
 }
 
 void MemorySystem::run(RequestSource &source, Cycle max_cycles,
                        HostResponseConsumer consumer) {
-  if (!consumer) {
-    run_source(source, max_cycles, nullptr, 0, nullptr);
-    return;
+  RunOptions options;
+  if (consumer) {
+    set_response_delivery_mode(ResponseDeliveryMode::HostOnly);
+    options.drain_responses = true;
+    options.host_response = std::move(consumer);
   }
-  // 这个 overload 的契约就是把完整 host response 交给 consumer；不同时保留
-  // transaction 视图，避免无人消费的调试队列反过来阻塞 host 路径。
-  set_response_delivery_mode(ResponseDeliveryMode::HostOnly);
-  run_source(source, max_cycles, &consumer, 0, nullptr);
+  run_source(source, max_cycles, options);
+}
+
+void MemorySystem::run(RequestSource &source, Cycle max_cycles,
+                       const RunOptions &options) {
+  run_source(source, max_cycles, options);
 }
 
 void MemorySystem::run_source(RequestSource &source, Cycle max_cycles,
-                              HostResponseConsumer *consumer,
-                              Cycle progress_interval,
-                              RunProgressConsumer *progress_consumer) {
+                              const RunOptions &options) {
+  const bool drain = options.drain_responses || options.host_response ||
+                     options.transaction_response;
+  if (drain && response_delivery_mode_ == ResponseDeliveryMode::Disabled) {
+    throw std::invalid_argument("response consumers require an enabled response delivery mode");
+  }
+  if ((options.host_response && !retains_host_responses()) ||
+      (options.transaction_response && !retains_transaction_responses())) {
+    throw std::invalid_argument("response consumer does not match response delivery mode");
+  }
+  auto consume_responses = [&] {
+    if (!drain) return;
+    while (has_response()) {
+      HostResponse response = pop_response();
+      if (options.host_response) options.host_response(response);
+    }
+    while (has_transaction_response()) {
+      TransactionResponse response = pop_transaction_response();
+      if (options.transaction_response) options.transaction_response(response);
+    }
+  };
   Request pending_request;
   bool has_pending_request = false;
   bool source_done = false;
   Cycle last_inject_cycle = 0;
   bool saw_request = false;
-
+  auto remaining_frontend = [&] {
+    std::uint64_t count = has_pending_request ? 1 : 0;
+    if (!source_done) count += source.remaining_hint().value_or(1);
+    return count;
+  };
   while ((!source_done || has_pending_request || !done() ||
-          (consumer != nullptr && !responses_drained())) &&
-         clk_ < max_cycles) {
-    bool stalled = false;
+          (drain && !responses_drained())) && clk_ < max_cycles) {
     while (true) {
       if (!has_pending_request && !source_done) {
         if (!source.next(pending_request)) {
           source_done = true;
           break;
         }
-        if (saw_request && pending_request.inject_cycle < last_inject_cycle) {
-          throw std::runtime_error(
-              "streaming request source is not ordered by inject_cycle");
-        }
+        if (saw_request && pending_request.inject_cycle < last_inject_cycle)
+          throw std::runtime_error("streaming request source is not ordered by inject_cycle");
         saw_request = true;
         last_inject_cycle = pending_request.inject_cycle;
         has_pending_request = true;
       }
-      if (!has_pending_request || pending_request.inject_cycle > clk_) {
-        break;
-      }
-      if (!enqueue(pending_request)) {
-        stalled = true;
+      if (!has_pending_request || pending_request.inject_cycle > clk_) break;
+      const bool accepted = drain
+          ? (pending_request.type == RequestType::Maintenance
+                 ? try_submit_maintenance(pending_request) : try_submit(pending_request))
+          : enqueue(pending_request);
+      if (!accepted) {
+        // Async admission already records at most one stall per system tick.
+        if (!drain) frontend_stall_cycles_++;
         break;
       }
       has_pending_request = false;
     }
-    if (stalled) {
-      frontend_stall_cycles_++;
-    }
-    tick();
-    if (progress_consumer != nullptr && progress_interval != 0 &&
-        clk_ % progress_interval == 0) {
+    step();
+    if (options.progress && options.progress_interval != 0 &&
+        clk_ % options.progress_interval == 0) {
       RunProgress progress;
       progress.cycle = clk_;
       for (const Controller &controller : controllers_) {
         progress.completed_reads += controller.stats().completed_reads;
         progress.completed_writes += controller.stats().completed_writes;
       }
-      progress.remaining_frontend = has_pending_request ? 1 : 0;
-      if (!source_done) {
-        progress.remaining_frontend += source.remaining_hint().value_or(1);
-      }
-      (*progress_consumer)(progress);
+      progress.remaining_frontend = remaining_frontend();
+      options.progress(progress);
     }
-    if (consumer != nullptr) {
-      while (has_response()) {
-        HostResponse response = pop_response();
-        (*consumer)(response);
-      }
-    }
+    consume_responses();
   }
-
-  if (consumer != nullptr) {
-    while (has_response()) {
-      HostResponse response = pop_response();
-      (*consumer)(response);
+  // Drain already-completed responses even at a zero/expired cycle limit.
+  // Freeing a bounded system queue can expose completions still retained by
+  // Controllers. Transfer those without ticking or executing unfinished work.
+  consume_responses();
+  if (drain) {
+    while (true) {
+      collect_responses();
+      if (!has_response() && !has_transaction_response()) break;
+      consume_responses();
     }
   }
-
-  remaining_frontend_requests_ = has_pending_request ? 1 : 0;
-  if (!source_done) {
-    remaining_frontend_requests_ += source.remaining_hint().value_or(1);
-  }
-  finalize_run_stats();
-  collect_issued_commands();
+  finish(remaining_frontend());
 }
 
 bool MemorySystem::done() const {

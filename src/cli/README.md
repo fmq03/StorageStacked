@@ -7,7 +7,7 @@ CLI 现在是所有模型能力的总装入口：标准/profile/config、streami
 
 主要文件：
 
-- `main.cpp`：参数解析、配置覆盖、仿真流程装配和结果输出。
+- `main.cpp`：CLI 与运行选项解析、调用配置库构建模型、仿真流程装配和结果输出。
 - `help.cpp`、`help.hpp`：用户可见的命令行帮助文本。
 
 修改建议：
@@ -24,8 +24,8 @@ CLI 现在是所有模型能力的总装入口：标准/profile/config、streami
 argv
   -> parse_args()
   -> load_config()
-  -> apply_option()/apply_spec_override()
-  -> make DramSpec
+  -> apply_option() 与 config::build_model()
+  -> 主输入联动、Timing 换算和 DramSpec 检查
   -> build StorageModelOptions
   -> build traffic/control sequence
   -> run Controller 或 MemorySystem
@@ -40,11 +40,18 @@ argv
 
 - 参数解析：把 `--key value` 转换成 `Cli` 结构或 `DramSpec` 覆盖项。
 - 配置加载：读取 `key = value` 文件，跳过空行和注释。
-- profile 展开：调用 `dram/profiles` 和 `dram/spec` 生成最终器件描述。
+- profile 展开：调用 `config/model`，统一主输入推导与 `dram/profiles`、`dram/spec` 的最终模型描述。
 - workload 生成：调用 `frontend/traffic` 创建 synthetic 或 trace 请求。
 - 存储模型装配：解析 `--memory-image`、`--dump-memory-image`、`--dump-memory-csv`、`--verify-golden`、`--mismatch-report`、`--dump-thermal-map`、`--power-scale`、`--thermal-*`、物理几何和 ECC shadow 参数，创建共享 `MemoryImage` 与 `DataValidator`。
-- 仿真执行：选择单 controller 或多 controller memory system。
+- 仿真执行：选择单 controller 或多 controller memory system；多 controller 的
+  流式运行交给 `MemorySystem::run(RequestSource&, ..., RunOptions)`，
+  CLI 仅提供响应 CSV 和进度回调，不重复维护注入/重试/step/收尾循环。
 - 输出与验证：打印配置、统计、timing table dump、command trace / DFI beat/signal trace、command/DFI validation report。
+
+默认 `summary` 输出 MODEL—PARAMETERS—RESULTS 英文精简报告；`--stats-json` 输出分区 schema 2。
+只有 diagnostic 才附加内部审计字段。CLI 收集类型化值并直接序列化 JSON；
+参数变化比较使用实际 resolved 值与程序内置基准，不局限于 override 段。
+模型字段的白名单、单位和相互推导在 `src/config/model.cpp`，不再在 CLI 维护第二套模型覆盖表。
 
 ## 存储模型相关 CLI
 
@@ -71,7 +78,7 @@ argv
 
 DFI 6.x-oriented 输出有两层抽象：beat CSV 用于检查 command/data beat、phase、latency、真实 payload 和 payload accounting；signal-like CSV 用于把同一批事件展开成后续 MC/PHY 联调更容易消费的 `dfi_*` 字段。它仍不是完整 pin-level DFI 协议。Behavioral PHY 会把真实完成拍回填到 `IssuedCommand`；Direct 模式继续按配置的 DFI latency 推导。启用 `--dfi-trace` 或 `--dfi-signal-trace` 时，CLI 会保留 command trace，因此适合可审计的调试窗口，不适合默认保留百万级请求的完整事件。
 
-- `--mem-phy direct|behavioral`：选择历史兼容路径或在线行为级 PHY。
+- `--mem-phy direct|behavioral`：选择直接完成或在线行为级 PHY。
 - `--dfi-version VER`：记录目标 DFI 版本标签。
 
 - `--dfi-trace PATH` 或 `--dump-dfi-trace PATH`：导出 DFI beat trace。

@@ -1,6 +1,6 @@
 #pragma once
 
-// 统计数据结构与稳定文本输出。Stats 同时包含 system-level 和 controller-aggregate
+// 内部统计数据结构。Stats 同时包含 system-level 和 controller-aggregate
 // 字段，因此多 controller 实验需要注意每个指标的归一化口径。
 
 #include <cstdint>
@@ -10,12 +10,7 @@
 
 namespace hbm_sim {
 
-// CLI 输出中 key 的固定宽度。当前最长字段 aggregate_ctrl_cycles 为 21 个字符，
-// 这里留到 30，保证冒号和值在同一列，同时给后续指标留一点空间。
-inline constexpr int kOutputKeyWidth = 30;
-
-// 控制器运行期间累计的全局统计。为了让 smoke test 和脚本后处理稳定，
-// 输出保持固定的 key: value 顺序。
+// 控制器运行期间累计的内部统计；ResultReport 单独定义公共指标集合。
 struct Stats {
   // run_until_done() 结束时写入总 cycle。若 hit_cycle_limit=true，这里是上限值。
   Cycle cycles = 0;
@@ -226,8 +221,8 @@ struct Stats {
   // 是所有 channel controller 周期数之和。单 controller 模式下二者相同。
   std::uint64_t system_cycles = 0;
   std::uint64_t aggregate_controller_cycles = 0;
-  // 队列长度累计值用于计算平均占用。多 controller 模式下，这些是所有 controller
-  // 的总和，因此既提供按 system cycle 归一化，也提供按 aggregate_controller_cycles 归一化。
+  // 队列长度累计值是所有 controller 的总和；诊断均值统一按
+  // aggregate_controller_cycles 归一化，不再重复输出全局平均值别名。
   std::uint64_t read_queue_len_sum = 0;
   std::uint64_t write_queue_len_sum = 0;
   std::uint64_t priority_queue_len_sum = 0;
@@ -258,34 +253,6 @@ struct Stats {
     return completed_reads == 0 ? 0.0 : static_cast<double>(total_read_latency) / completed_reads;
   }
 
-  double read_bytes_per_cycle() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(read_bytes) / cycles;
-  }
-
-  double write_bytes_per_cycle() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(write_bytes) / cycles;
-  }
-
-  double total_bytes_per_cycle() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(read_bytes + write_bytes) / cycles;
-  }
-
-  double read_queue_len_avg() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(read_queue_len_sum) / cycles;
-  }
-
-  double write_queue_len_avg() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(write_queue_len_sum) / cycles;
-  }
-
-  double priority_queue_len_avg() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(priority_queue_len_sum) / cycles;
-  }
-
-  double active_queue_len_avg() const {
-    return cycles == 0 ? 0.0 : static_cast<double>(active_queue_len_sum) / cycles;
-  }
-
   double read_queue_len_avg_per_controller() const {
     return aggregate_controller_cycles == 0 ? 0.0 :
         static_cast<double>(read_queue_len_sum) / aggregate_controller_cycles;
@@ -307,6 +274,5 @@ struct Stats {
   }
 };
 
-void print_stats(std::ostream& os, const Stats& stats);
 
 }  // namespace hbm_sim

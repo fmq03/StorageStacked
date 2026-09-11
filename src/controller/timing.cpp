@@ -4,6 +4,9 @@
 #include "hbm_sim/controller/timing.hpp"
 
 #include <algorithm>
+#include <limits>
+
+#include "hbm_sim/dram/semantics.hpp"
 
 namespace hbm_sim {
 
@@ -19,6 +22,11 @@ void TimingEngine::reset(const DramSpec &spec) {
                                 {});
   sid_scopes_.assign(scope_count(spec, TimingScope::Sid), {});
   rank_scopes_.assign(scope_count(spec, TimingScope::Rank), {});
+  refdb_states_.assign(scope_count(spec, TimingScope::Rank), {});
+  if (spec.lpddr_dual_bank_refresh)
+    for (auto &refresh : refdb_states_)
+      refresh.visited_pairs.assign(
+          (spec.org.bank_groups / 2) * spec.org.banks_per_group, false);
   activation_scopes_.assign(scope_count(spec, spec.activation_scope), {});
   row_scopes_.assign(scope_count(spec, spec.row_bus_scope), {});
   column_scopes_.assign(scope_count(spec, spec.column_bus_scope), {});
@@ -75,6 +83,12 @@ TimingEngine::wck_state(const DramSpec &spec,
 bool TimingEngine::constraint_ready(const DramSpec &spec,
                                     const DecodedAddress &decoded, Command cmd,
                                     Cycle clk) const {
+  if (spec.lpddr_dual_bank_refresh && cmd == Command::REFDB) {
+    const auto &refresh = refdb_states_[scope_index(spec, TimingScope::Rank, decoded)];
+    const auto pair = (decoded.bank_group / 2) * spec.org.banks_per_group + decoded.bank;
+    if (clk < refresh.ready || refresh.visited_pairs[pair])
+      return false;
+  }
   for (const auto &constraint : spec.timing_constraints) {
     if (constraint.window > 0) {
       // window 型约束例如 tFAW 需要计数历史命令，而不是单个 ready time；
@@ -92,6 +106,11 @@ bool TimingEngine::constraint_ready(const DramSpec &spec,
     if (clk < scope.next_command[command_index(cmd)]) {
       return false;
     }
+    if (cmd == Command::REFDB && spec.lpddr_dual_bank_refresh &&
+        constraint.scope == TimingScope::Bank &&
+        clk < scope_state(spec, TimingScope::Bank, lpddr_refdb_partner(spec, decoded))
+                  .next_command[command_index(cmd)])
+      return false;
   }
   return true;
 }
@@ -100,6 +119,15 @@ Cycle TimingEngine::constraint_ready_at(const DramSpec &spec,
                                         const DecodedAddress &decoded,
                                         Command cmd) const {
   Cycle ready = 0;
+  if (spec.lpddr_dual_bank_refresh && cmd == Command::REFDB) {
+    const auto &refresh = refdb_states_[scope_index(spec, TimingScope::Rank, decoded)];
+    const auto pair = (decoded.bank_group / 2) * spec.org.banks_per_group + decoded.bank;
+    // Time alone cannot legalize a repeated bank: complete the sweep or
+    // synchronize using REFab/self-refresh exit first.
+    if (refresh.visited_pairs[pair])
+      return std::numeric_limits<Cycle>::max();
+    ready = refresh.ready;
+  }
   for (const auto &constraint : spec.timing_constraints) {
     if (constraint.window > 0 ||
         std::find(constraint.following.begin(), constraint.following.end(),
@@ -109,6 +137,11 @@ Cycle TimingEngine::constraint_ready_at(const DramSpec &spec,
     const TimingScopeState &scope =
         scope_state(spec, constraint.scope, decoded);
     ready = std::max(ready, scope.next_command[command_index(cmd)]);
+    if (cmd == Command::REFDB && spec.lpddr_dual_bank_refresh &&
+        constraint.scope == TimingScope::Bank)
+      ready = std::max(ready, scope_state(spec, TimingScope::Bank,
+                                         lpddr_refdb_partner(spec, decoded))
+                                   .next_command[command_index(cmd)]);
   }
   return ready;
 }
@@ -116,6 +149,37 @@ Cycle TimingEngine::constraint_ready_at(const DramSpec &spec,
 void TimingEngine::apply_constraints(const DramSpec &spec,
                                      const DecodedAddress &decoded,
                                      Command issued, Cycle clk) {
+  if (spec.lpddr_dual_bank_refresh) {
+    auto &refresh = refdb_states_[scope_index(spec, TimingScope::Rank, decoded)];
+    if (issued == Command::REFDB) {
+      const int pairs = (spec.org.bank_groups / 2) * spec.org.banks_per_group;
+      refresh.visited_pairs[(decoded.bank_group / 2) * spec.org.banks_per_group +
+                            decoded.bank] = true;
+      refresh.bank_count = (refresh.bank_count + 1) % pairs;
+      if (refresh.bank_count == 0)
+        std::fill(refresh.visited_pairs.begin(), refresh.visited_pairs.end(), false);
+      const int short_gap = spec.timing.nREFDB2REFDBS > 0
+                                ? spec.timing.nREFDB2REFDBS : spec.timing.nRRDL;
+      const int long_gap = spec.timing.nREFDB2REFDBL > 0
+                               ? spec.timing.nREFDB2REFDBL : short_gap;
+      refresh.ready = clk + timing_delay(spec, refresh.bank_count == 0
+                                                  ? long_gap : short_gap);
+    } else if (issued == Command::REFAB) {
+      refresh.bank_count = 0;
+      refresh.ready = clk + timing_delay(spec, spec.timing.nRFC);
+      std::fill(refresh.visited_pairs.begin(), refresh.visited_pairs.end(), false);
+    } else if (issued == Command::SREFEX) {
+      // The current control-command model applies self-refresh to a channel.
+      const auto [begin, end] = sibling_range(spec, TimingScope::PseudoChannel, decoded);
+      const std::size_t ranks_per_pc = spec.org.sids * spec.org.ranks;
+      for (std::size_t i = begin * ranks_per_pc; i < end * ranks_per_pc; ++i) {
+        refdb_states_[i].bank_count = 0;
+        refdb_states_[i].ready = 0;
+        std::fill(refdb_states_[i].visited_pairs.begin(),
+                  refdb_states_[i].visited_pairs.end(), false);
+      }
+    }
+  }
   for (const auto &constraint : spec.timing_constraints) {
     if (constraint.window > 0) {
       continue;
@@ -138,6 +202,10 @@ void TimingEngine::apply_constraints(const DramSpec &spec,
 
     if (!constraint.sibling) {
       update(mutable_scope(spec, constraint.scope, decoded));
+      if (issued == Command::REFDB && spec.lpddr_dual_bank_refresh &&
+          constraint.scope == TimingScope::Bank)
+        update(mutable_scope(spec, TimingScope::Bank,
+                             lpddr_refdb_partner(spec, decoded)));
       continue;
     }
 

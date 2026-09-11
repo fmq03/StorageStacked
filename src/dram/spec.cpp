@@ -168,10 +168,9 @@ TimingTable build_timing_table(const DramSpec &spec) {
       tv("nREFDB2ACT", t.nREFDB2ACT, lpddr6 ? jedec : derived, false,
          "LPDDR6 REFdb->ACT different-bank recovery.", lpddr6),
       tv("nREFDB2REFDBS", t.nREFDB2REFDBS, lpddr6 ? jedec : derived, false,
-         "LPDDR6 REFdb->REFdb short-pair interval.", lpddr6),
+         "LPDDR6 REFdb->REFdb interval within the same refresh-row counter.", lpddr6),
       tv("nREFDB2REFDBL", t.nREFDB2REFDBL, lpddr6 ? jedec : derived, false,
-         "LPDDR6 REFdb->REFdb long-pair interval; current scheduler uses it "
-         "conservatively.",
+         "LPDDR6 REFdb->REFdb interval across a refresh-row counter boundary.",
          lpddr6),
       tv("nREFI", t.nREFI, jedec),
       tv("nREFIpb", t.nREFIpb, jedec),
@@ -291,9 +290,6 @@ std::vector<TimingConstraint> make_hbm_constraints(const Timing &t) {
 std::vector<TimingConstraint> make_lpddr_constraints(const Timing &t) {
   const int nrefdb2act =
       t.nREFDB2ACT > 0 ? t.nREFDB2ACT : (t.nRREFD > 0 ? t.nRREFD : t.nRRDS);
-  const int nrefdb2refdbs = t.nREFDB2REFDBS > 0 ? t.nREFDB2REFDBS : t.nRRDL;
-  const int nrefdb2refdbl =
-      t.nREFDB2REFDBL > 0 ? t.nREFDB2REFDBL : nrefdb2refdbs;
   return {
       // LPDDR 当前使用统一命令总线，因此 RD/WR 首先在 Channel scope 上受 burst
       // 间隔限制；LPDDR6 preset 会把部分 scope 调到 pseudo-channel 来表达
@@ -340,6 +336,8 @@ std::vector<TimingConstraint> make_lpddr_constraints(const Timing &t) {
          t.nRCDWR, "nRCDWR"),
       tc(TimingScope::Bank, {Command::ACT1}, {Command::PREPB}, t.nRAS, "nRAS"),
       tc(TimingScope::Bank, {Command::PREPB}, {Command::ACT1}, t.nRP, "nRP"),
+      tc(TimingScope::Bank, {Command::PREPB}, {Command::REFDB}, t.nRP, "nRP"),
+      tc(TimingScope::Rank, {Command::PREAB}, {Command::REFDB}, t.nRPab, "nRPab"),
       tc(TimingScope::Bank, {Command::RD}, {Command::PREPB}, t.nRTP, "nRTP"),
       tc(TimingScope::Bank, {Command::WR}, {Command::PREPB},
          t.nCWL + t.nBL + t.nWR, "nCWL+nBL+nWR"),
@@ -353,10 +351,14 @@ std::vector<TimingConstraint> make_lpddr_constraints(const Timing &t) {
          t.nRFMpb > 0 ? t.nRFMpb : t.nRFCpb, "nRFMpb_or_nRFCpb"),
       tc(TimingScope::PseudoChannel, {Command::REFDB}, {Command::ACT1},
          nrefdb2act, "nREFDB2ACT"),
-      tc(TimingScope::Bank, {Command::REFDB}, {Command::REFDB}, nrefdb2refdbs,
-         "nREFDB2REFDBS"),
-      tc(TimingScope::PseudoChannel, {Command::REFDB}, {Command::REFDB},
-         nrefdb2refdbl, "nREFDB2REFDBL"),
+      // S/L selection depends on the refresh-row bank counter, not the
+      // addressed bank. TimingEngine and the independent validator replay it.
+      tc(TimingScope::Bank, {Command::REFDB}, {Command::REFDB}, t.nRFCpb,
+         "nRFCpb"),
+      tc(TimingScope::Rank, {Command::REFDB}, {Command::REFAB}, t.nRFCpb,
+         "nRFCpb"),
+      tc(TimingScope::Rank, {Command::REFAB}, {Command::REFDB, Command::REFAB},
+         t.nRFC, "nRFC"),
       tc(TimingScope::PseudoChannel, {Command::RFMPB}, {Command::ACT1},
          nrefdb2act, "nREFDB2ACT"),
       tc(TimingScope::PseudoChannel, {Command::RFMPB}, {Command::RFMPB},
@@ -402,6 +404,19 @@ DramSpec make_spec(const std::string &name) {
   return spec;
 }
 
+double density_gbit_from_geometry(double capacity_bytes, bool lpddr_family,
+                                 int stack_height, int channels,
+                                 int subchannels, int ranks) {
+  if (!std::isfinite(capacity_bytes) || capacity_bytes <= 0 ||
+      (lpddr_family ? (channels <= 0 || subchannels <= 0 || ranks <= 0)
+                    : stack_height <= 0)) {
+    throw std::invalid_argument("invalid geometry for density calculation");
+  }
+  const double count = lpddr_family
+      ? static_cast<double>(channels) * subchannels * ranks : stack_height;
+  return capacity_bytes / 134217728.0 / count;
+}
+
 void validate_spec(const DramSpec &spec) {
   // 这些检查不能只留在 CLI：DramSpec 也是公开库接口，SystemC/UCIe
   // 适配器可以绕过命令行直接构造规格。未实现的模式若在这里静默通过，
@@ -421,7 +436,7 @@ void validate_spec(const DramSpec &spec) {
   }
   if (spec.data_rate_mbps <= 0 || spec.data_bus_bits <= 0 ||
       spec.internal_prefetch_size <= 0 || spec.speed_bin_mbps <= 0 ||
-      spec.density_gb <= 0 || spec.timing.tCK_ps <= 0.0 ||
+      spec.density_gb <= 0 || !std::isfinite(spec.density_gb) || spec.timing.tCK_ps <= 0.0 ||
       !std::isfinite(spec.timing.tCK_ps) || spec.tick_multiplier <= 0) {
     throw std::invalid_argument(
         "data rate, bus width, prefetch, speed bin, density, tCK and "
@@ -432,6 +447,30 @@ void validate_spec(const DramSpec &spec) {
     throw std::invalid_argument(
         "HBM stack_height must be > 0; LPDDR stack_height must be >= 0");
   }
+  const auto capacity = spec.addressable_capacity_bytes();
+  if (capacity == 0)
+    throw std::invalid_argument("DRAM geometry capacity overflow");
+  if (spec.density_reference_channels < 0 ||
+      (spec.density_reference_channels > 0 && spec.org.channels != 1))
+    throw std::invalid_argument("invalid channel-local density reference");
+  const int reference_channels = spec.density_reference_channels > 0
+      ? spec.density_reference_channels : spec.org.channels;
+  const double reference_capacity = static_cast<double>(capacity) *
+      reference_channels / spec.org.channels;
+  const double density = density_gbit_from_geometry(
+      reference_capacity, spec.lpddr_family, spec.stack_height,
+      reference_channels, spec.org.pseudo_channels, spec.org.ranks);
+  if (std::abs(spec.density_gb - density) > 1e-9 * std::max(1.0, density))
+    throw std::invalid_argument("density_gb conflicts with geometry-derived density; use the config model resolver after changing organization");
+  if (spec.speed_bin_mbps != spec.data_rate_mbps)
+    throw std::invalid_argument("speed_bin_mbps must equal data_rate_mbps");
+  const int ratio = spec.standard == DramStandard::Lpddr5 ? spec.lpddr_wck_ratio : 2;
+  if ((spec.standard == DramStandard::Lpddr5 && ratio != 2 && ratio != 4) ||
+      (spec.standard == DramStandard::Lpddr6 && spec.lpddr_wck_ratio != 2))
+    throw std::invalid_argument("unsupported LPDDR WCK:CK ratio");
+  const double expected_tck = 2000000.0 * ratio / spec.data_rate_mbps;
+  if (std::abs(spec.timing.tCK_ps - expected_tck) > 0.5 + 1e-9)
+    throw std::invalid_argument("tCK_ps conflicts with data_rate_mbps and protocol clock ratio (maximum rounding error 0.5 ps)");
   const std::initializer_list<std::pair<const char *, int>> non_negative = {
       {"metadata_bits_per_request", spec.metadata_bits_per_request},
       {"ecc_bits_per_request", spec.ecc_bits_per_request},
@@ -486,6 +525,10 @@ void validate_spec(const DramSpec &spec) {
     throw std::invalid_argument(
         "LPDDR REFdb adjacent-BG pair table requires an even bank_groups >= "
         "2");
+  }
+  const auto row_cycle = static_cast<std::int64_t>(spec.timing.nRAS) + spec.timing.nRP;
+  if (spec.timing.nRAS < 0 || spec.timing.nRP < 0 || spec.timing.nRC < row_cycle) {
+    throw std::invalid_argument("nRC must be >= nRAS + nRP (non-negative model row timings)");
   }
 }
 

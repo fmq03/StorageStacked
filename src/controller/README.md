@@ -25,7 +25,8 @@ refresh/RFM manager、timing engine 和 command executor，决定每个 cycle �
 
 `controller.cpp` 是协调层，不应该无限膨胀。它可以做这些事：
 
-- 管理 read/write/priority/active buffer。
+- 通过 `RequestQueues` 管理 read/write/priority/active buffer；
+  队列组件集中处理容量查询、active 提升/移除和每 bank 的 active 所有权计数。
 - 处理请求进入、完成、读转发、写合并和 channel-local transaction response。
 - 调用 scheduler、row policy、timing engine、executor。
 - 维护 HBM row/column bus 发射顺序和 LPDDR split activate 流程。
@@ -35,7 +36,7 @@ refresh/RFM manager、timing engine 和 command executor，决定每个 cycle �
 - 直接写 JEDEC timing table。
 - 在局部硬编码命令类别。
 - 直接格式化输出统计文本。
-- 绕过 validator 单独实现一套验证逻辑。
+- 把离线 validator 当作在线发射 gate；离线重放保留独立状态与规则检查。
 
 `executor.cpp` 是命令副作用集中地。发出 ACT/PRE/RD/WR/REF/RFM/MR/WCK/DVFS 后，
 bank 状态、timing 更新、RFM 计数和命令计数应尽量在这里完成。
@@ -44,6 +45,10 @@ bank 状态、timing 更新、RFM 计数和命令计数应尽量在这里完成�
 constraint、scope bucket、tFAW、WCK active window、HBM/LPDDR 相关 bus 约束。
 
 `refresh.cpp` 和 `rfm.cpp` 只负责产生维护目标和维护计数，不直接改普通请求排序。
+
+Scheduler 只对 eligible/ready 候选排序，row policy 决定关页行为，Controller
+负责跨队列仲裁及 HBM/LPDDR 协议流程；不能把这些规则塞进队列组件。
+CAS_RD/CAS_WR 共用 WCK 状态更新，仅分别增加读/写 CAS 计数。
 
 ## 修改流程示例
 

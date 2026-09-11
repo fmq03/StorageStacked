@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Compare two hbm_sim key-value result files.
+"""Compare hbm_sim schema 1/2 JSON or historical/diagnostic key-value files.
 
-The simulator intentionally prints stable, aligned ``key : value`` text so that
-research runs can be reviewed by humans and compared by scripts.  This helper is
-the first small step toward a golden/differential validation flow: capture one
-run as a baseline, capture another run from hbm_sim/Ramulator/device-derived
-data after converting it to the same key-value shape, then compare the selected
-metrics with explicit tolerances.
+Compact human reports are not machine inputs. Compare selected metrics with
+explicit tolerances after normalizing protocol, workload and units.
 """
 
 from __future__ import annotations
@@ -15,20 +11,12 @@ import argparse
 import math
 import sys
 from pathlib import Path
+from result_io import read_result
 
 
 def parse_stats(path: Path) -> dict[str, str]:
     """Parse ``key : value`` lines while ignoring banners and free text."""
-    stats: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if ":" not in raw:
-            continue
-        key, value = raw.split(":", 1)
-        key = key.strip()
-        value = value.strip()
-        if key:
-            stats[key] = value
-    return stats
+    return read_result(path)
 
 
 def maybe_float(value: str) -> float | None:

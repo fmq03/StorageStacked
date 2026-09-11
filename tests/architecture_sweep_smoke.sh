@@ -33,4 +33,22 @@ test -s "$sweep_tmp/hbm4/geometry_row32768_col512/workload.trace"
 test -s "$sweep_tmp/lpddr6/refresh_all_bank/resolved.cfg"
 test -s "$sweep_tmp/lpddr6/geometry_row32768_col512/workload.trace"
 
+# 第二个 bank case 请求应落在 bank=1,column=0：
+# 64 columns * 32 B/transaction = 0x800。该断言防止把 64 B host line
+# 错当成地址解码的 transaction 粒度，尤其覆盖 HBM3/LPDDR5。
+python3 - "$sweep_source/experiments/architecture_sweep/run.py" "$sweep_tmp" <<'PY'
+import pathlib
+import runpy
+import sys
+
+module = runpy.run_path(sys.argv[1])
+case = module["Case"]("bank", "unit", {"bank_groups": 2, "banks_per_group": 4})
+root = pathlib.Path(sys.argv[2])
+for standard in ("hbm3", "hbm4", "lpddr5", "lpddr6"):
+    assert module["transaction_bytes"](standard) == 32
+    trace = root / f"{standard}_address_unit.trace"
+    module["write_trace"](trace, standard, case, 2, 2)
+    assert trace.read_text().splitlines()[1] == "0 R 0x800"
+PY
+
 echo "architecture sweep smoke passed"

@@ -2,12 +2,15 @@
 // Controller 先把“该请求下一条命令是什么、是否 eligible/ready”算好，
 // Scheduler 只处理排序语义，便于后续对齐 Ramulator2.1 scheduler 插件。
 #include "hbm_sim/controller/scheduler.hpp"
+#include <stdexcept>
 
 namespace hbm_sim {
 
 std::optional<SchedulerCandidateView> select_scheduled_request(
     SchedulerKind kind,
     const std::vector<SchedulerCandidateView>& candidates) {
+  if (kind != SchedulerKind::FCFS && kind != SchedulerKind::FRFCFS)
+    throw std::invalid_argument("unsupported scheduler kind");
   std::optional<SchedulerCandidateView> first_eligible;
   std::optional<SchedulerCandidateView> first_ready;
 

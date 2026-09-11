@@ -66,7 +66,6 @@ PhyCommandEncoding HbmPhyAdapter::encode(const DramSpec& spec,
                                          Command command,
                                          BusClass bus) const {
   PhyCommandEncoding result;
-  result.dfi_phases = std::max(1, spec.dfi_phase_count);
   result.row_path = bus == BusClass::Row || command_meta(command).row_command;
   result.column_path = bus == BusClass::Column || command_meta(command).column_command;
   // HBM 的行为级 CA 摘要按 edge-pairing 模式表达半拍，否则每命令一条 CA edge。
@@ -74,12 +73,11 @@ PhyCommandEncoding HbmPhyAdapter::encode(const DramSpec& spec,
   return result;
 }
 
-PhyCommandEncoding LpddrPhyAdapter::encode(const DramSpec& spec,
+PhyCommandEncoding LpddrPhyAdapter::encode(const DramSpec&,
                                            Command command,
                                            BusClass bus) const {
   (void)bus;
   PhyCommandEncoding result;
-  result.dfi_phases = std::max(1, spec.dfi_phase_count);
   result.row_path = command_meta(command).row_command;
   result.column_path = command_meta(command).column_command;
   // LPDDR 的 CA 命令按 double-data-rate edge 摘要；split ACT 明确保留 ACT1/ACT2。
@@ -260,12 +258,12 @@ void MemPhy::complete_slot(const DataSlot& slot, Cycle cycle) {
                                       ? &slot.request.storage_decoded
                                       : &slot.request.decoded;
   if (slot.request.type == RequestType::Read) {
-    const PhysicalStorageStats before = memory_image_->storage_stats();
+    const EccStatusCounters before = memory_image_->ecc_status_counters();
     const std::size_t size = transfer_size(spec_, slot.request);
     completion.data = memory_image_->read(slot.request.address, size, &completion.initialized, decoded);
     completion.initialized_mask =
         memory_image_->read_initialized_mask(slot.request.address, completion.data.size(), decoded);
-    const PhysicalStorageStats after = memory_image_->storage_stats();
+    const EccStatusCounters after = memory_image_->ecc_status_counters();
     completion.ecc_corrected =
         after.ecc_corrected_errors > before.ecc_corrected_errors;
     completion.ecc_uncorrectable =

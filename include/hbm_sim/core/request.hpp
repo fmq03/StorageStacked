@@ -83,8 +83,6 @@ struct Request {
   // 对维护请求而言，next 保存最终维护命令，例如 REFpb/RFMpb。普通读写请求
   // 仍由 Controller::next_command() 根据 row 状态即时推导。
   Command next = Command::NOP;
-  // 预留字段：早期版本曾用 opened 标记 row 状态；目前以 BankState::open_row 为准。
-  bool opened = false;
   // LPDDR split activate 专用：ACT1 发出后，请求必须继续拥有该 bank 的 ACT2。
   bool issued_first_activate = false;
   // LPDDR WCK/CAS 专用：本请求是否已经发过 CAS_RD/CAS_WR 建立 WCK2CK sync。

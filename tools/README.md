@@ -7,9 +7,10 @@
 主要文件：
 
 - `compare_stats.py`：比较两次仿真输出中的关键统计字段，用于轻量 golden/baseline 对比。
-- `view_stats.py`：把一份或多份 `key : value` 统计文件按指定字段输出为对齐表格。
+- `view_stats.py`：把一份或多份完整 JSON / `key : value` 统计文件按指定字段输出为对齐表格。
+- `result_io.py`：共同结果读取器；实验工具要求完成状态、整数计数与必要字段，不再把缺失值补零。
 - `audit_case_backends.sh`：用相同配置、trace 和初始 image 审计 sparse/mmap/chunk 三种后端。
-- `config_selection.py`：验证工具共享的 master/preset 选择表，避免重新维护配置路径。
+- `config_selection.py`：验证工具共享的配置/preset 选择表，共同面入口位于 `configs/validation/*.cfg`，避免各工具重复维护路径。
 - `model_validation.py`：运行项目原生 HBM4 配置，检查分析公式、性能阈值、真实存储、full-stack、DFI、来源和 project identity。
 - `timing_boundary_validation.py`：审计 C++ probe 生成的四标准 `t-1/t` Timing 边界矩阵。
 - `ramulator2_differential.py`：将本地 Ramulator2.1 作为非规范性外部参考，检查四标准共同命令面。
@@ -22,12 +23,16 @@
 
 项目不把浏览器框架嵌入仿真核心。先按原有方式导出 trace，再用标准库脚本生成一个
 自包含 HTML；复制该 HTML 到另一台机器也能离线查看。
+热图读取 `address_kind`，悬停时将仅耦合节点标为地址未知，不将邻居的代表地址误当成
+该节点的 DRAM 地址；没有此列的输入仍可显示温度和网格。
 这对应 Ramulator2 的 offline trace visualizer。当前不实现 HTTP/WebSocket 实时推流，
 因为那会把服务端生命周期和网络错误处理引入 controller 的仿真热路径；以后若确有实时
 观测需求，可在此 HTML 数据格式之外增加独立 streamer，而不改变现有 trace 入口。
 
 ```bash
+mkdir -p outputs/visualization
 ./build-clang-debug/hbm_sim --config configs/hbm.cfg --standard hbm4 --requests 128 \
+  --stats-json outputs/visualization/result.json \
   --cmd-trace outputs/visualization/commands.csv \
   --dfi-trace outputs/visualization/dfi.csv \
   --dump-thermal-map outputs/visualization/thermal_map.txt \
@@ -36,7 +41,7 @@
 python3 tools/visualize.py \
   --command-trace outputs/visualization/commands.csv \
   --dfi-trace outputs/visualization/dfi.csv \
-  --stats outputs/visualization/stats.txt \
+  --stats outputs/visualization/result.json \
   --thermal-map outputs/visualization/thermal_map.txt \
   --out outputs/visualization/dashboard.html
 ```

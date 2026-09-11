@@ -94,27 +94,16 @@ CommandExecutionResult CommandExecutor::issue(Request &req, Command issued,
     }
     break;
   case Command::CASRD:
-    // CAS_RD/CAS_WR 不搬运数据，只建立 WCK2CK 同步窗口。
-    // 后续 RD/WR 必须落在 wck_ready_at 和 wck_active_until 之间。
-    col.next_col = clk + 1;
-    wck.next_cas = clk + 1;
-    wck.wck_ready_at = clk + timing_delay(std::max(1, t.nWCK2CK));
-    wck.wck_active_until =
-        clk + timing_delay(std::max(t.nWCKPST, t.nWCK2CK + 1));
-    req.cas_sync_issued = true;
-    stats_.cas_rd++;
-    stats_.wck_syncs++;
-    break;
   case Command::CASWR:
-    // CAS_WR 和 CAS_RD 的状态更新完全对称，只是统计字段不同。二者都建立
-    // WCK ready window，后续真正的数据命令还要通过 wck_ready_for_data() 检查。
+    // Both CAS commands establish the same WCK window; only direction counts differ.
     col.next_col = clk + 1;
     wck.next_cas = clk + 1;
     wck.wck_ready_at = clk + timing_delay(std::max(1, t.nWCK2CK));
     wck.wck_active_until =
         clk + timing_delay(std::max(t.nWCKPST, t.nWCK2CK + 1));
     req.cas_sync_issued = true;
-    stats_.cas_wr++;
+    if (issued == Command::CASRD) stats_.cas_rd++;
+    else stats_.cas_wr++;
     stats_.wck_syncs++;
     break;
   case Command::RD:

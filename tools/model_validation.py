@@ -12,6 +12,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from result_io import parse_stats, run_simulator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,37 +57,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_stats(text: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in text.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        result[key.strip()] = value.strip()
-    return result
-
 
 def run(binary: Path, config_args: list[str], extra: list[str]) -> tuple[dict[str, str], str]:
-    command = [str(binary), *config_args, *extra]
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"command failed ({completed.returncode}): {' '.join(command)}\n"
-            f"{completed.stdout}{completed.stderr}"
-        )
-    return parse_stats(completed.stdout), completed.stdout
+    return run_simulator([str(binary), *config_args, *extra], cwd=ROOT, diagnostic=True)
 
 
 def run_cli(binary: Path, extra: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(binary), *extra],
+        [str(binary), *extra, "--stats-view", "diagnostic"],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,

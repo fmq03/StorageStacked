@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from result_io import run_simulator
 
 from config_selection import REFERENCE_PRESETS, selection_args
 
@@ -33,15 +34,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_stats(text: str) -> dict[str, str]:
-    result = {}
-    for line in text.splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            result[key.strip()] = value.strip()
-    return result
-
-
 def timing_table(binary: Path, standard: str, temp: Path) -> dict[str, int]:
     output = temp / (standard + "_timing.csv")
     completed = subprocess.run(
@@ -54,11 +46,22 @@ def timing_table(binary: Path, standard: str, temp: Path) -> dict[str, int]:
         return {row["name"]: int(row["value_nck"]) for row in csv.DictReader(stream)}
 
 
-def derived_config(overrides: dict[str, object], path: Path) -> None:
+def derived_config(overrides: dict[str, int], path: Path,
+                   nominal: dict[str, int]) -> dict[str, int]:
     # 只生成小型 override，不复制权威 master，避免临时实验形成第三份参数源。
+    overrides = dict(overrides)
+    # Reference presets explicitly pin nRC. Preserve their extra row-cycle margin
+    # when varying nRP/nRAS, rather than keeping an impossible inherited nRC.
+    if "nRP" in overrides or "nRAS" in overrides:
+        margin = nominal["nRC"] - nominal["nRAS"] - nominal["nRP"]
+        if margin < 0:
+            raise ValueError("nominal nRC must be >= nRAS + nRP")
+        overrides["nRC"] = (overrides.get("nRAS", nominal["nRAS"]) +
+                            overrides.get("nRP", nominal["nRP"]) + margin)
     lines = ["[override]", "timing_override_source = research_default"]
     lines += [f"{key} = {value}" for key, value in overrides.items()]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return overrides
 
 
 def simulate(binary: Path, standard: str, requests: int, seed: int,
@@ -71,19 +74,20 @@ def simulate(binary: Path, standard: str, requests: int, seed: int,
                "--pattern", "random", "--read-ratio", "100", "--inject-interval", "2",
                "--seed", str(seed), "--max-cycles", "100000000"]
     command += extra or []
-    completed = subprocess.run(command, cwd=ROOT, text=True, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, check=False)
-    if completed.returncode:
-        raise RuntimeError(f"sensitivity run failed:\n{completed.stdout}{completed.stderr}")
-    stats = parse_stats(completed.stdout)
+    stats, _ = run_simulator(command, cwd=ROOT)
     if stats.get("hit_cycle_limit", "true").lower() != "false":
         raise RuntimeError("sensitivity run hit cycle limit")
-    return {
+    result = {
         "latency_ticks": float(stats["avg_read_latency"]),
         "throughput_GBps": float(stats["achieved_bw_GBps"]),
-        "energy_pJ": float(stats["power_energy_pJ"]),
-        "peak_temperature_C": float(stats["thermal_peak_temp_C"]),
     }
+    # Timing-only reference cases disable these models. Their old diagnostic
+    # zeroes were not measurements and must not appear as sensitivity results.
+    if stats["power_model_enabled"] == "true":
+        result["energy_pJ"] = float(stats["power_energy_pJ"])
+    if stats["thermal_model_enabled"] == "true":
+        result["peak_temperature_C"] = float(stats["thermal_peak_temp_C"])
+    return result
 
 
 def quantile(values: list[float], probability: float) -> float:
@@ -129,12 +133,13 @@ def main() -> int:
                 case_results = {}
                 for level, value in values.items():
                     config = temp / f"{standard}_{parameter}_{level}.cfg"
-                    derived_config({parameter: value}, config)
+                    effective = derived_config({parameter: value}, config, nominal)
                     case_results[level] = simulate(
                         binary, standard, args.requests, args.seed, overlay=config)
                     sensitivity.append({
                         "standard": standard.upper(), "parameter": parameter,
                         "level": level, "value_nck": value,
+                        "effective_nRC_nck": effective.get("nRC", nominal["nRC"]),
                         **case_results[level],
                     })
                 low, high = case_results["low"], case_results["high"]
@@ -164,7 +169,7 @@ def main() -> int:
                     factor = 1.0 + rng.uniform(-args.fraction, args.fraction)
                     overrides[parameter] = max(1, round(nominal[parameter] * factor))
                 config = temp / f"{standard}_uncertainty_{sample_index}.cfg"
-                derived_config(overrides, config)
+                derived_config(overrides, config, nominal)
                 samples.append(simulate(
                     binary, standard, args.requests, args.seed, overlay=config))
             entry = {"standard": standard.upper(), "samples": args.samples,
@@ -212,9 +217,10 @@ def main() -> int:
         })
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "oat_timing_sensitivity_and_bounded_input_uncertainty",
         "parameters": list(PARAMETERS), "fraction": args.fraction,
+        "row_cycle_policy": "nRC = nRAS + nRP + nominal row-cycle margin; nRC is not sampled independently",
         "requests": args.requests, "seed": args.seed,
         "sensitivity": sensitivity, "uncertainty_intervals": uncertainty,
         "power_thermal_sensitivity": power_results, "checks": checks,

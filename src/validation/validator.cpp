@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <set>
 #include <sstream>
 #include <utility>
 
@@ -572,6 +573,10 @@ validate_single_stack_trace(const DramSpec &spec,
       scope_count(spec, TimingScope::Channel));
   std::vector<ValidatorHbmPairingState> hbm_pairing_states(
       scope_count(spec, TimingScope::Channel));
+  // Independent replay: no calls to the online TimingEngine.
+  std::vector<int> refresh_bank_count(scope_count(spec, TimingScope::Rank), 0);
+  std::vector<Cycle> refresh_next(scope_count(spec, TimingScope::Rank), 0);
+  std::vector<std::set<int>> refreshed_banks(scope_count(spec, TimingScope::Rank));
 
   auto scope_state_for =
       [&](TimingScope scope,
@@ -590,6 +595,45 @@ validate_single_stack_trace(const DramSpec &spec,
       continue;
     }
     const auto &meta = command_meta(issued.command);
+    if (spec.lpddr_dual_bank_refresh) {
+      const auto rank = scope_index(spec, TimingScope::Rank, issued.decoded);
+      if (issued.command == Command::REFDB) {
+        report.timing_constraint_checks++;
+        if (issued.cycle < refresh_next[rank])
+          add_error(report, issued, "violates REFdb refresh-counter S/L interval");
+        const int pairs_per_row = spec.org.bank_groups * spec.org.banks_per_group / 2;
+        const auto partner = lpddr_refdb_partner(spec, issued.decoded);
+        for (int bg : {issued.decoded.bank_group, partner.bank_group}) {
+          const int bank = bg * spec.org.banks_per_group + issued.decoded.bank;
+          if (!refreshed_banks[rank].insert(bank).second)
+            add_error(report, issued, "REFdb repeats a bank before completing the refresh-row sweep");
+        }
+        ++refresh_bank_count[rank];
+        const bool next_row = refresh_bank_count[rank] == pairs_per_row;
+        if (next_row) {
+          refresh_bank_count[rank] = 0;
+          refreshed_banks[rank].clear();
+        }
+        int gap = spec.timing.nREFDB2REFDBS > 0
+                      ? spec.timing.nREFDB2REFDBS : spec.timing.nRRDL;
+        if (next_row && spec.timing.nREFDB2REFDBL > 0)
+          gap = spec.timing.nREFDB2REFDBL;
+        refresh_next[rank] = issued.cycle + timing_delay(spec, gap);
+      } else if (issued.command == Command::REFAB) {
+        refresh_bank_count[rank] = 0;
+        refreshed_banks[rank].clear();
+        refresh_next[rank] = issued.cycle + timing_delay(spec, spec.timing.nRFC);
+      } else if (issued.command == Command::SREFEX) {
+        const std::size_t ranks_per_channel =
+            spec.org.pseudo_channels * spec.org.sids * spec.org.ranks;
+        const std::size_t first = issued.decoded.channel * ranks_per_channel;
+        for (std::size_t i = first; i < first + ranks_per_channel; ++i) {
+          refresh_bank_count[i] = 0;
+          refresh_next[i] = 0;
+          refreshed_banks[i].clear();
+        }
+      }
+    }
 
     if (spec.dual_command_bus) {
       report.bus_checks++;
@@ -641,6 +685,11 @@ validate_single_stack_trace(const DramSpec &spec,
       ValidatorScopeState &state =
           scope_state_for(constraint.scope, issued.decoded);
       Cycle ready = state.next_command[command_index(issued.command)];
+      if (issued.command == Command::REFDB && spec.lpddr_dual_bank_refresh &&
+          constraint.scope == TimingScope::Bank)
+        ready = std::max(ready, scope_state_for(TimingScope::Bank,
+                         lpddr_refdb_partner(spec, issued.decoded))
+                         .next_command[command_index(issued.command)]);
       if (issued.cycle < ready) {
         // 先检查 ready，再应用当前命令的 preceding 约束，等价于在线路径中的
         // timing_ok() -> issue() -> apply_constraints() 顺序。
@@ -736,6 +785,10 @@ validate_single_stack_trace(const DramSpec &spec,
       };
       if (!constraint.sibling) {
         update(scope_state_for(constraint.scope, issued.decoded));
+        if (issued.command == Command::REFDB && spec.lpddr_dual_bank_refresh &&
+            constraint.scope == TimingScope::Bank)
+          update(scope_state_for(TimingScope::Bank,
+                                 lpddr_refdb_partner(spec, issued.decoded)));
       } else {
         auto &scopes = constraint_scopes[scope_slot(constraint.scope)];
         const std::size_t current =

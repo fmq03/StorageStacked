@@ -15,6 +15,7 @@ import html as html_module
 import json
 from collections import Counter
 from pathlib import Path
+from result_io import read_result
 from typing import Any
 
 
@@ -135,22 +136,22 @@ def read_dfi_trace(path: Path | None) -> dict[str, Any]:
 def read_stats(path: Path | None) -> dict[str, str]:
     if path is None:
         return {}
-    if not path.is_file():
-        raise SystemExit(f"stats file not found: {path}")
-    result: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key, value = key.strip(), value.strip()
-        if key and value:
-            result[key] = value
+    result = read_result(path)
+    # Historical input may only provide tick latency. Do not silently relabel
+    # it ns, and do not turn a no-read sentinel into a measured zero latency.
+    if "avg_read_latency_ns" not in result and int(result.get("completed_reads", "0")) > 0:
+        if "avg_read_latency" in result:
+            if "tick_duration_ps" in result:
+                result["avg_read_latency_ns"] = str(float(result["avg_read_latency"]) *
+                                                     float(result["tick_duration_ps"]) / 1000)
+            else:
+                result["avg_read_latency_ticks"] = result["avg_read_latency"]
     # Keep the dashboard readable even when stdout contains a full configuration dump.
     wanted = (
-        "standard", "mem_phy_mode", "phy_protocol", "cycles", "system_cycles",
-        "reads", "writes", "completed_reads", "completed_writes", "avg_read_latency",
+        "standard", "mem_phy_mode", "host_requests", "dram_transactions", "simulation_time_ns",
+        "completed_reads", "completed_writes", "avg_read_latency_ns", "avg_read_latency_ticks",
         "achieved_bw_GBps", "peak_bandwidth_GBps", "bandwidth_util_pct",
-        "data_mismatches", "phy_command_backpressure", "phy_data_backpressure",
+        "row_hit_pct", "data_checked_reads", "data_mismatches",
         "thermal_peak_temp_C", "power_energy_pJ", "cmd_validation", "dfi_validation",
     )
     return {key: result[key] for key in wanted if key in result}
@@ -177,13 +178,18 @@ def read_thermal(paths: list[Path] | None) -> list[dict[str, Any]]:
     for path in paths:
         if not path.is_file():
             raise SystemExit(f"thermal map not found: {path}")
+        header = []
         for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# stack layer "):
+                header = line[2:].split()
             if not line or line.startswith("#"):
                 continue
             fields = line.split()
             if len(fields) < 23:
                 continue
             try:
+                kind_index = header.index("address_kind") if "address_kind" in header else -1
+                kind = fields[kind_index] if 0 <= kind_index < len(fields) else "unspecified"
                 result.append({
                     "stack": int(fields[0]), "layer": int(fields[1]),
                     "x": int(fields[2]), "y": int(fields[3]),
@@ -196,6 +202,7 @@ def read_thermal(paths: list[Path] | None) -> list[dict[str, Any]]:
                     "rank": int(fields[18]), "bank_group": int(fields[19]),
                     "bank": int(fields[20]), "row": int(fields[21]),
                     "column": int(fields[22]),
+                    "address_kind": kind if kind in {"direct_event", "coupling_only"} else "unspecified",
                 })
             except ValueError:
                 continue
@@ -253,7 +260,7 @@ function drawCurve(){
   svg.innerHTML=out;el('curveHint').textContent=`${numeric.length} deterministic sweep points. Left scale max ${ymax.toFixed(1)} GB/s; right scale max ${lmax.toFixed(1)} ticks.`
 }
 function thermalColor(t,min,max){const f=max===min?.5:(t-min)/(max-min);return `hsl(${220-220*f} 78% ${78-30*f}%)`}
-function drawThermal(){const tiles=DATA.thermal,stackSelect=el('thermalStack'),layerSelect=el('layer'),scaleSelect=el('thermalScale'),grid=el('thermal'),legend=el('thermalLegend');if(!tiles.length){stackSelect.innerHTML='<option>n/a</option>';layerSelect.innerHTML='<option>n/a</option>';legend.textContent='';grid.innerHTML='<p class="empty">No thermal map supplied.</p>';return}const stacks=[...new Set(tiles.map(x=>x.stack))].sort((a,b)=>a-b),globalTemps=tiles.map(x=>x.temperature),globalMin=Math.min(...globalTemps),globalMax=Math.max(...globalTemps);option(stackSelect,stacks);const render=()=>{const cells=tiles.filter(x=>String(x.stack)===stackSelect.value&&String(x.layer)===layerSelect.value);if(!cells.length){grid.innerHTML='<p class="empty">No cells in this layer.</p>';return}const cols=Math.max(...cells.map(x=>x.cols),...cells.map(x=>x.x+1)),rows=Math.max(...cells.map(x=>x.rows),...cells.map(x=>x.y+1)),temps=cells.map(x=>x.temperature),min=scaleSelect.value==='global'?globalMin:Math.min(...temps),max=scaleSelect.value==='global'?globalMax:Math.max(...temps),byPos=new Map(cells.map(x=>[`${x.x},${x.y}`,x]));grid.style.gridTemplateColumns=`repeat(${cols},minmax(32px,1fr))`;const html=[];for(let y=0;y<rows;y++){for(let x=0;x<cols;x++){const c=byPos.get(`${x},${y}`);if(!c){html.push(`<div class="tile missing" title="thermal grid (${x},${y}) was not touched">·</div>`);continue}html.push(`<div class="tile" title="stack ${c.stack}, layer ${c.layer}; thermal (${c.x},${c.y}); tile (${c.tile_x},${c.tile_y}) + local grid (${c.grid_x},${c.grid_y}); representative first location: CH ${c.channel}, PC ${c.pseudo_channel}, SID ${c.sid}, rank ${c.rank}, BG ${c.bank_group}, bank ${c.bank}, row ${c.row}, column ${c.column}; aggregate ${c.temperature.toFixed(2)} °C; ${c.energy.toFixed(2)} pJ; ${c.events} events" style="background:${thermalColor(c.temperature,min,max)}">${c.temperature.toFixed(1)}</div>`)} }grid.innerHTML=html.join('');legend.textContent=`X: 0…${cols-1}, Y: 0…${rows-1} • colour range ${min.toFixed(2)}…${max.toFixed(2)} °C (${scaleSelect.value==='global'?'whole run':'current layer'})`};const updateLayers=()=>{const layers=[...new Set(tiles.filter(x=>String(x.stack)===stackSelect.value).map(x=>x.layer))].sort((a,b)=>a-b);option(layerSelect,layers);render()};stackSelect.onchange=updateLayers;layerSelect.onchange=render;scaleSelect.onchange=render;updateLayers()}
+function drawThermal(){const tiles=DATA.thermal,stackSelect=el('thermalStack'),layerSelect=el('layer'),scaleSelect=el('thermalScale'),grid=el('thermal'),legend=el('thermalLegend');if(!tiles.length){stackSelect.innerHTML='<option>n/a</option>';layerSelect.innerHTML='<option>n/a</option>';legend.textContent='';grid.innerHTML='<p class="empty">No thermal map supplied.</p>';return}const stacks=[...new Set(tiles.map(x=>x.stack))].sort((a,b)=>a-b),globalTemps=tiles.map(x=>x.temperature),globalMin=Math.min(...globalTemps),globalMax=Math.max(...globalTemps);option(stackSelect,stacks);const render=()=>{const cells=tiles.filter(x=>String(x.stack)===stackSelect.value&&String(x.layer)===layerSelect.value);if(!cells.length){grid.innerHTML='<p class="empty">No cells in this layer.</p>';return}const cols=Math.max(...cells.map(x=>x.cols),...cells.map(x=>x.x+1)),rows=Math.max(...cells.map(x=>x.rows),...cells.map(x=>x.y+1)),temps=cells.map(x=>x.temperature),min=scaleSelect.value==='global'?globalMin:Math.min(...temps),max=scaleSelect.value==='global'?globalMax:Math.max(...temps),byPos=new Map(cells.map(x=>[`${x.x},${x.y}`,x]));grid.style.gridTemplateColumns=`repeat(${cols},minmax(32px,1fr))`;const html=[];for(let y=0;y<rows;y++){for(let x=0;x<cols;x++){const c=byPos.get(`${x},${y}`);if(!c){html.push(`<div class="tile missing" title="thermal grid (${x},${y}) was not touched">·</div>`);continue}html.push(`<div class="tile" title="stack ${c.stack}, layer ${c.layer}; thermal (${c.x},${c.y}); tile (${c.tile_x},${c.tile_y}) + local grid (${c.grid_x},${c.grid_y}); ${c.address_kind==='coupling_only'?'coupling-only node; DRAM address unknown':'representative first location'}: CH ${c.channel}, PC ${c.pseudo_channel}, SID ${c.sid}, rank ${c.rank}, BG ${c.bank_group}, bank ${c.bank}, row ${c.row}, column ${c.column}; aggregate ${c.temperature.toFixed(2)} °C; ${c.energy.toFixed(2)} pJ; ${c.events} events" style="background:${thermalColor(c.temperature,min,max)}">${c.temperature.toFixed(1)}</div>`)} }grid.innerHTML=html.join('');legend.textContent=`X: 0…${cols-1}, Y: 0…${rows-1} • colour range ${min.toFixed(2)}…${max.toFixed(2)} °C (${scaleSelect.value==='global'?'whole run':'current layer'})`};const updateLayers=()=>{const layers=[...new Set(tiles.filter(x=>String(x.stack)===stackSelect.value).map(x=>x.layer))].sort((a,b)=>a-b);option(layerSelect,layers);render()};stackSelect.onchange=updateLayers;layerSelect.onchange=render;scaleSelect.onchange=render;updateLayers()}
 metrics();drawMix();drawDfi();drawCurve();drawThermal();
 // Enhanced explorer: mirrors the useful offline portions of Ramulator's visualizer
 // while retaining the project-specific DFI, payload and thermal panels above.

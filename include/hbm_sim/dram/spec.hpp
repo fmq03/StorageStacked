@@ -310,13 +310,16 @@ struct DramSpec {
   // 标准/供应商 timing profile 选择维度。profile 先按 standard + speed-bin +
   // density + stack-height + mode 展开成 timing，之后配置文件仍可逐项覆盖。
   std::string timing_profile = "generic";
-  // 可选外部 profile 文件。文件格式保持 key=value，用来承载从 JEDEC/vendor
-  // 表格整理出的 speed-bin/density/mode 片段，避免所有数值继续堆在 C++ 中。
-  std::string timing_profile_file;
   std::string vendor_profile = "generic";
   std::string mode_profile = "default";
   int speed_bin_mbps = 0;
-  int density_gb = 0;
+  // Gibit per die (HBM) or per subchannel/rank (LPDDR). Fractional research
+  // geometries must not be rounded to an unrelated density table row.
+  double density_gb = 0;
+  // Internal channel-local views retain their parent device's timing/density.
+  // Zero denotes a complete user model; otherwise this is the parent's Channel
+  // count after MemorySystem localizes org.channels to one. Not a cfg key.
+  int density_reference_channels = 0;
   int stack_height = 0;
   // true 时，tick() 每周期分别尝试一条 column 和一条 row 命令。
   bool dual_command_bus = false;
@@ -556,10 +559,15 @@ private:
 const StandardTraits &find_standard_traits(const std::string &name);
 void apply_standard_traits(DramSpec &spec, const StandardTraits &traits);
 
-// Draft 只应用 traits，供 CLI 在 profile/config/CLI 覆盖后统一 finalize。
+// Draft 只应用 traits，供底层 profile 构造使用；用户配置优先走 config::build_model。
 DramSpec make_spec_draft(const std::string &name);
 // 完整默认模型：traits -> default profile -> finalize。
 DramSpec make_spec(const std::string &name);
+// Density lookup scope: HBM per physical die; LPDDR per channel/subchannel/rank.
+// Capacity itself remains the integer geometry product, not this floating value.
+double density_gbit_from_geometry(double capacity_bytes, bool lpddr_family,
+                                 int stack_height, int channels,
+                                 int subchannels, int ranks);
 // 只检查当前规格是否合法，不修改 timing table/constraint；供 Controller、
 // MemoryImage、PHY 等公开库入口防止绕过 CLI/finalize 后静默降级。
 void validate_spec(const DramSpec &spec);

@@ -8,6 +8,7 @@ mkdir -p "$vis_out"
 
 "$vis_bin" \
   --config "$vis_source/configs/hbm.cfg" --standard hbm4 \
+  --stats-view summary --stats-json "$vis_out/result.json" \
   --requests 128 \
   --read-ratio 50 \
   --cmd-trace "$vis_out/commands.csv" \
@@ -28,7 +29,7 @@ python3 "$vis_source/tools/performance_curve.py" \
 python3 "$vis_source/tools/visualize.py" \
   --command-trace "$vis_out/commands.csv" \
   --dfi-trace "$vis_out/dfi.csv" \
-  --stats "$vis_out/stats.txt" \
+  --stats "$vis_out/result.json" \
   --performance-json "$vis_out/performance_curves.json" \
   --thermal-map "$vis_out/thermal_map.txt" \
   --out "$vis_out/dashboard.html" \

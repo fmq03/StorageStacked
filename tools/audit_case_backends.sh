@@ -54,6 +54,7 @@ done
 mkdir -p "$case_out/sparse" "$case_out/mmap" "$case_out/chunk"
 
 common=(--config "$case_cfg" --standard "$case_standard"
+        --stats-view diagnostic --validate-cmd-trace --validate-dfi-trace
         --trace "$trace_file" --requests 0
         --memory-image "$image_file" --memory-capacity-bytes 1048576)
 if [[ $case_preset != none && $case_preset != - ]]; then
@@ -61,12 +62,14 @@ if [[ $case_preset != none && $case_preset != - ]]; then
 fi
 
 "$sim_binary" "${common[@]}" --memory-backend sparse \
+  --stats-json "$case_out/sparse/result.json" \
   --dump-memory-image "$case_out/sparse/final.txt" \
   --dump-memory-csv "$case_out/sparse/final.csv" \
   --mismatch-report "$case_out/sparse/mismatch.txt" \
   | tee "$case_out/sparse/stats.txt" >/dev/null
 
 "$sim_binary" "${common[@]}" --memory-backend mmap_sparse \
+  --stats-json "$case_out/mmap/result.json" \
   --memory-data-file "$case_out/mmap/data.bin" \
   --dump-memory-image "$case_out/mmap/final.txt" \
   --dump-memory-csv "$case_out/mmap/final.csv" \
@@ -75,6 +78,7 @@ fi
   | tee "$case_out/mmap/stats.txt" >/dev/null
 
 "$sim_binary" "${common[@]}" --memory-backend chunk_file \
+  --stats-json "$case_out/chunk/result.json" \
   --memory-data-file "$case_out/chunk/data.bin" \
   --memory-chunk-size 65536 --memory-chunk-cache-entries 4 \
   --dump-memory-image "$case_out/chunk/final.txt" \
@@ -85,6 +89,20 @@ fi
 
 diff -u "$case_out/sparse/final.txt" "$case_out/mmap/final.txt"
 diff -u "$case_out/sparse/final.txt" "$case_out/chunk/final.txt"
+
+python3 - "$repo_root" "$case_out" <<'PY'
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(sys.argv[1]) / "tools"))
+from result_io import count, read_result
+for backend in ("sparse", "mmap", "chunk"):
+    result = read_result(Path(sys.argv[2]) / backend / "result.json", require_completed=True)
+    assert count(result, "data_checked_reads") > 0, "no independent payload checks"
+    assert result["cmd_validation"] == result["dfi_validation"] == "pass"
+    if backend != "sparse":
+        assert count(result, "golden_verified") > 0
+        assert count(result, "golden_mismatches") == 0
+PY
 
 python3 "$repo_root/tools/view_stats.py" \
   "$case_out/sparse/stats.txt" "$case_out/mmap/stats.txt" "$case_out/chunk/stats.txt" \

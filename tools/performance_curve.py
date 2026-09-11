@@ -6,9 +6,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import subprocess
 import sys
 from pathlib import Path
+from result_io import run_simulator
 
 from config_selection import REFERENCE_PRESETS, selection_args
 
@@ -32,15 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--csv-out", type=Path)
     parser.add_argument("--json-out", type=Path)
     return parser.parse_args()
-
-
-def parse_stats(text: str) -> dict[str, str]:
-    result = {}
-    for line in text.splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            result[key.strip()] = value.strip()
-    return result
 
 
 def main() -> int:
@@ -71,14 +62,7 @@ def main() -> int:
                     "--read-ratio", str(read_ratio), "--inject-interval", str(interval),
                     "--seed", str(args.seed), "--max-cycles", "100000000",
                 ]
-                completed = subprocess.run(command, cwd=ROOT, text=True,
-                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                           check=False)
-                if completed.returncode != 0:
-                    raise RuntimeError(
-                        f"curve run failed for {standard}/R{read_ratio}/i{interval}:\n"
-                        f"{completed.stdout}{completed.stderr}")
-                stats = parse_stats(completed.stdout)
+                stats, _ = run_simulator(command, cwd=ROOT)
                 if stats.get("hit_cycle_limit", "true").lower() != "false":
                     raise RuntimeError(f"curve run hit cycle limit: {standard}/R{read_ratio}/i{interval}")
                 completed_count = int(stats["completed_reads"]) + int(stats["completed_writes"])
@@ -97,9 +81,7 @@ def main() -> int:
                     "achieved_bw_GBps": float(stats["achieved_bw_GBps"]),
                     "peak_bandwidth_GBps": float(stats["peak_bandwidth_GBps"]),
                     "bandwidth_util_pct": float(stats["bandwidth_util_pct"]),
-                    "row_hits": int(stats["row_hits"]),
-                    "row_misses": int(stats["row_misses"]),
-                    "row_conflicts": int(stats["row_conflicts"]),
+                    "row_hit_pct": float(stats["row_hit_pct"]),
                 })
 
     checks = []
@@ -130,7 +112,7 @@ def main() -> int:
                 })
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "synthetic_injection_latency_throughput_curve",
         "workload": {"pattern": args.pattern, "requests": args.requests,
                      "seed": args.seed, "intervals": sorted(set(intervals), reverse=True),

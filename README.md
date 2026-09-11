@@ -8,17 +8,19 @@ Mem PHY 与 Mem Stack，支持控制器时序研究、真实数据读写、
 ## 文档
 
 - [堆叠存储模型交付手册](堆叠存储模型交付手册.md)：项目总入口，覆盖总体设计、模块、构建、使用、验证、参数和输出指标。
-- [项目指南](文档/项目指南.md)：构建、配置、输出字段和代码索引。
-- [仿真使用手册](文档/仿真使用手册.md)：完整命令、全部输出指标、文件查看和定制条件。
-- [多 Stack 及存储后端](文档/多Stack及存储后端.md)：路由、隔离及三种后端。
-- [审计](文档/审计.md)：验证证据、真实厂商参数缺口和研究替代值。
-- [架构和构建流程](文档/架构和构建流程.md)：traits、profile、配置覆盖和 finalize。
-- [内存模型和平台](文档/内存模型和平台.md)：四类模型和平台对比。
+- [项目指南](文档/项目指南.md)：架构、构建、运行、后端、热模型和测试入口。
+- [cfg指南](文档/cfg指南.md)：详细配置项、可修改范围、参数联动与使用方法。
+- [输出指南](文档/输出指南.md)：普通报告、完整诊断、产物与性能分析。
+- [审计](文档/审计.md)：验证证据、来源及器件校准边界。
 
-PHY、异步接口和长期校准路线已合并到主手册，避免同一主题维护多份说明。目录内的
-`README.md` 只说明本目录，不重复根目录专题文档。
+交付手册保留完整使用路线与必要原理；四份指南按职责提供深入说明和参数/指标查表。
+目录内的 `README.md` 只说明本目录。
 
 ## 主要能力
+
+日常运行默认打印英文精简报告（MODEL / PARAMETERS / RESULTS）。默认 `summary` 使用该报告；
+机器工具读取 `--stats-json` 生成的 schema 2 结果，不解析人读报告。内部计数排障使用
+`--stats-view diagnostic`。详细配置仍可通过 `--dump-resolved-config` 保存。
 
 ### 仿真平台
 
@@ -146,14 +148,14 @@ lpddr6
 ```text
 configs/hbm.cfg、configs/lpddr.cfg          两个标准家族主配置
 configs/validation/{hbm3,hbm4,lpddr5,lpddr6}.cfg  四个验证配置
-configs/usecases/{hbm,lpddr,hbm_nstacks,lpddr_nstacks}.cfg  四个完整用例
-configs/developer.cfg                         开发者研究变体
+examples/configs/{hbm,lpddr,hbm_nstacks,lpddr_nstacks}.cfg  四个自包含 cfg Demo
+experiments/local/*.cfg                       可直接运行的自包含研究模型示例
 ```
 
-日常建模从两个主配置或四个完整用例开始。验证配置只用于固定共同参数面和回归口径；
-开发者配置保存合成参数、存储后端等研究变体。子配置通过 `[meta] extends` 继承主配置，
-CLI 按出现顺序继续覆盖。未知算法和不存在的 preset 会直接报错。配置分层、从零编写方法、
-逐项物理含义和检查命令见 [configs/README.md](configs/README.md)。
+日常建模直接使用两个主配置；四个 cfg Demo 展示单实例和多实例的完整副本。建立长期自定义
+模型时复制对应主配置，并在副本末尾 `[override]` 写差异。验证配置只用于固定共同参数面，内部仍可通过
+`[meta] extends` 继承主配置。未知算法和不存在的 preset 会直接报错。配置分层、复制修改
+方法、逐项物理含义和检查命令见 [configs/README.md](configs/README.md)。
 
 四标准多 Stack 工程 demo：
 
@@ -231,7 +233,7 @@ make visualize-example
 ```
 
 三种后端只改变宿主机上的数据保存方式，不改变控制器、时序、行缓冲、
-ECC、功耗和热模型语义。选择建议见 [存储后端](文档/多Stack及存储后端.md)。
+ECC、功耗和热模型语义。选择建议见 [存储后端](文档/项目指南.md)。
 
 ## 数据与 DFI
 
@@ -290,7 +292,7 @@ configs/          运行、配置、校准和验证
 examples/         示例脚本、trace 和存储镜像
 tests/            smoke 与命令序列测试
 tools/            验证和统计工具
-文档/             架构、模型和平台对比专题
+文档/             项目、cfg、输出、审计四份指南
 ```
 
 源码职责和请求路径见 [src/README.md](src/README.md)，公共接口见

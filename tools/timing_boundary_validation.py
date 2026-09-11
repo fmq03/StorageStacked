@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run and audit the exhaustive active TimingConstraint boundary matrix."""
+"""Audit active table constraints and stateful LPDDR6 REFdb S/L boundaries."""
 
 from __future__ import annotations
 
@@ -121,7 +121,7 @@ def main() -> int:
 
         report = {
             "schema_version": 1,
-            "scope": "all_active_table_driven_timing_constraints_four_standards",
+            "scope": "active_table_constraints_and_stateful_refdb_boundaries_four_standards",
             "probe": str(probe),
             "rows": len(rows),
             "zero_latency_or_non_applicable_skipped": skipped,
@@ -130,7 +130,8 @@ def main() -> int:
             "passed": all(bool(check["passed"]) for check in checks),
             "claim_boundary": (
                 "Proves implementation boundary enforcement and scope isolation for active "
-                "table-driven constraints. A row marked research_default or with pending "
+                "table-driven constraints and counter-dependent REFdb S/L intervals. "
+                "A row marked research_default or with pending "
                 "clause binding is not evidence of vendor calibration or full JEDEC certification."
             ),
         }

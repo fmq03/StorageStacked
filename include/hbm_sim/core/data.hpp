@@ -306,6 +306,13 @@ private:
   std::vector<DataMismatchRecord> mismatches_;
 };
 
+// Hot read paths only need these monotonic counters to annotate responses.
+// This snapshot deliberately excludes topology, thermal and backend scans.
+struct EccStatusCounters {
+  std::uint64_t ecc_corrected_errors = 0;
+  std::uint64_t ecc_uncorrectable_errors = 0;
+};
+
 class MemoryImage {
 public:
   explicit MemoryImage(std::size_t line_size = 64,
@@ -331,6 +338,9 @@ public:
   StorageKey storage_key(Address address,
                          const DecodedAddress *decoded = nullptr) const;
   PhysicalStorageStats storage_stats() const;
+  EccStatusCounters ecc_status_counters() const noexcept {
+    return {ecc_corrected_errors_, ecc_uncorrectable_errors_};
+  }
   std::optional<DataBlockMetadata>
   metadata(Address address, const DecodedAddress *decoded = nullptr) const;
   std::optional<Address> address_for_storage_key(const StorageKey &key) const;

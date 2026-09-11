@@ -12,6 +12,9 @@
   per-bank/dual-bank 与 all-bank scope。压力 timing 明确标记为 `research`，不是 JEDEC
   baseline 或器件值。
 
+定向地址按照主配置当前的 32 B DRAM transaction 粒度编码；不要把 64 B host line
+当成 column 步长。每个 host request 仍可在 frontend 中拆成两个 32 B transaction。
+
 ```bash
 python3 experiments/architecture_sweep/run.py
 ```
@@ -38,4 +41,6 @@ python3 experiments/architecture_sweep/run.py --standards hbm4 --requests 512 \
 `results.csv`、`checks.csv`、`summary.md`、离线 `trends.html`，以及每个 case 的
 `workload.trace`、`resolved.cfg` 与 `stats.txt`。自动检查包括：无 cycle-limit/数据错误、
 bank scaling、geometry hit/conflict 趋势，以及 REFpb/REFdb/REFab scope 是否实际分离。
-任一检查失败时脚本返回非零。结果属于模型参数敏感性研究，不代表某款器件。
+bank scaling 的硬门禁比较最大与最小 bank 组织，不要求三个中间点逐点严格单调，因为
+命令/数据总线饱和、映射和调度可能造成小幅回落；全部点仍保存在结果中。任一检查失败时
+脚本返回非零。结果属于模型参数敏感性研究，不代表某款器件。

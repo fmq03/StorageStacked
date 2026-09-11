@@ -1,3 +1,4 @@
+#include "spec_fixture.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -200,6 +201,7 @@ void test_explicit_low_power_wakeup() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   spec.hbm_edge_pairing = false;

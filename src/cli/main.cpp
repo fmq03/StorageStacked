@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -22,6 +23,9 @@
 #include "help.hpp"
 
 #include "hbm_sim/config/document.hpp"
+#include "hbm_sim/config/model.hpp"
+#include "hbm_sim/config/parse.hpp"
+#include "hbm_sim/config/fields.hpp"
 #include "hbm_sim/controller/controller.hpp"
 #include "hbm_sim/core/data.hpp"
 #include "hbm_sim/core/system.hpp"
@@ -31,11 +35,14 @@
 #include "hbm_sim/dram/profiles.hpp"
 #include "hbm_sim/frontend/traffic.hpp"
 #include "hbm_sim/stats/stats.hpp"
+#include "hbm_sim/stats/result.hpp"
 #include "hbm_sim/validation/dfi.hpp"
 #include "hbm_sim/validation/trace.hpp"
 #include "hbm_sim/validation/validator.hpp"
 
 namespace {
+
+using hbm_sim::config::is_spec_override_key;
 
 // CLI 参数先收集到一个小结构体，再转换为 DramSpec 与 TrafficOptions。
 struct Cli {
@@ -62,6 +69,7 @@ struct Cli {
   std::string explain_config_key;
   std::vector<hbm_sim::config::ConfigDocument> config_documents;
   std::vector<hbm_sim::config::ConfigEntry> resolved_config_entries;
+  std::vector<hbm_sim::config::ParameterDerivation> derived_parameters;
   std::string pattern = "stream";
   std::string trace_path;
   std::uint64_t requests = 10000;
@@ -74,9 +82,9 @@ struct Cli {
   hbm_sim::Cycle init_sequence_interval = 1;
   hbm_sim::Cycle max_cycles = 100000000;
   hbm_sim::Cycle progress_interval = 0;
-  // full 保留全部稳定 key，并显示分类边界；summary 只显示身份、完成性和
-  // 关键性能，适合终端日常查看。
-  std::string stats_view = "full";
+  // summary is the compact public report; diagnostic is an explicit audit view.
+  std::string stats_view = "summary";
+  std::string stats_json_path;
   bool single_controller = false;
   bool strict_timing_table = false;
   std::string cmd_trace_path;
@@ -111,92 +119,13 @@ struct Cli {
   std::vector<std::pair<std::string, std::string>> spec_overrides;
 };
 
-std::uint64_t parse_u64(const std::string& value) {
-  // stoull("-1") 会按无符号规则返回 UINT64_MAX，而且 stoi/stod 默认允许
-  // 未解析的尾部字符。配置错误不能静默变成一个看似合法的巨大实验。
-  if (value.empty() || value.front() == '-' ||
-      std::any_of(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-      })) {
-    throw std::invalid_argument("invalid non-negative integer: " + value);
-  }
-  std::size_t parsed = 0;
-  const auto result = std::stoull(value, &parsed, 10);
-  if (parsed != value.size()) {
-    throw std::invalid_argument("invalid non-negative integer: " + value);
-  }
-  return static_cast<std::uint64_t>(result);
-}
+using hbm_sim::config::parse_u64;
+using hbm_sim::config::parse_int;
+using hbm_sim::config::parse_double;
+using hbm_sim::config::parse_bool;
+using hbm_sim::config::lower_value;
 
-int parse_int(const std::string& value) {
-  if (value.empty() ||
-      std::any_of(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-      })) {
-    throw std::invalid_argument("invalid integer: " + value);
-  }
-  std::size_t parsed = 0;
-  const int result = std::stoi(value, &parsed, 10);
-  if (parsed != value.size()) {
-    throw std::invalid_argument("invalid integer: " + value);
-  }
-  return result;
-}
-
-double parse_double(const std::string& value) {
-  if (value.empty() ||
-      std::any_of(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-      })) {
-    throw std::invalid_argument("invalid finite number: " + value);
-  }
-  std::size_t parsed = 0;
-  const double result = std::stod(value, &parsed);
-  if (parsed != value.size() || !std::isfinite(result)) {
-    throw std::invalid_argument("invalid finite number: " + value);
-  }
-  return result;
-}
-
-bool parse_bool(const std::string& value) {
-  std::string normalized = value;
-  std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on") {
-    return true;
-  }
-  if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off") {
-    return false;
-  }
-  throw std::invalid_argument("invalid bool value: " + value);
-}
-
-std::string lower_value(std::string value);
-hbm_sim::ResponseDeliveryMode parse_response_delivery_mode(
-    const std::string& value);
-
-// 配置文件中的 timing 覆盖值不总是 vendor 数据：校准模板经常会显式写出
-// research_default 数字，方便审计和替换。这个解析函数让配置能声明后续
-// timing override 的来源，避免 strict_timing_table 被模板值“骗过”。
-hbm_sim::TimingValueSource parse_timing_value_source(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "jedec" || value == "standard") return hbm_sim::TimingValueSource::JEDEC;
-  if (value == "vendor" || value == "datasheet") return hbm_sim::TimingValueSource::Vendor;
-  if (value == "derived") return hbm_sim::TimingValueSource::Derived;
-  if (value == "external_reference" || value == "reference" || value == "ramulator2" ||
-      value == "dramsim3") return hbm_sim::TimingValueSource::ExternalReference;
-  if (value == "research" || value == "research_default") return hbm_sim::TimingValueSource::ResearchDefault;
-  throw std::invalid_argument("invalid timing source: " + value);
-}
-
-std::string lower_value(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-    if (c == '-') return '_';
-    return static_cast<char>(std::tolower(c));
-  });
-  return value;
-}
+hbm_sim::ResponseDeliveryMode parse_response_delivery_mode(const std::string& value);
 
 hbm_sim::SchedulerKind parse_scheduler(std::string value) {
   value = lower_value(std::move(value));
@@ -248,7 +177,7 @@ const char* stack_qos_policy_name(hbm_sim::StackQosPolicy policy) {
 }
 
 std::string stack_path(const std::string& path, int stack, int stack_count) {
-  if (path.empty() || stack_count == 1) return path;
+  if (path.empty()) return path;
   const std::string marker = "{stack}";
   std::string result = path;
   std::size_t pos = result.find(marker);
@@ -256,6 +185,7 @@ std::string stack_path(const std::string& path, int stack, int stack_count) {
     result.replace(pos, marker.size(), std::to_string(stack));
     return result;
   }
+  if (stack_count == 1) return path;
   std::size_t slash = result.find_last_of("/\\");
   std::size_t dot = result.find_last_of('.');
   if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
@@ -281,67 +211,6 @@ void prepare_stack_output_directories(const std::string& path,
   for (int stack = 0; stack < std::max(1, stack_count); stack++) {
     ensure_parent_directory(stack_path(path, stack, stack_count));
   }
-}
-
-hbm_sim::AddressMappingKind parse_address_mapping(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "default" || value == "legacy") return hbm_sim::AddressMappingKind::Default;
-  if (value == "robaracoch" || value == "ro_ba_ra_co_ch") return hbm_sim::AddressMappingKind::RoBaRaCoCh;
-  if (value == "chrabaroco" || value == "ch_ra_ba_ro_co") return hbm_sim::AddressMappingKind::ChRaBaRoCo;
-  if (value == "rocorabach" || value == "ro_co_ra_ba_ch") return hbm_sim::AddressMappingKind::RoCoRaBaCh;
-  throw std::invalid_argument("invalid address_mapping: " + value);
-}
-
-hbm_sim::LpddrEfficiencyMode parse_lpddr_efficiency(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "normal" || value == "off") return hbm_sim::LpddrEfficiencyMode::Normal;
-  if (value == "static" || value == "seff") return hbm_sim::LpddrEfficiencyMode::Static;
-  if (value == "dynamic" || value == "deff") return hbm_sim::LpddrEfficiencyMode::Dynamic;
-  throw std::invalid_argument("invalid lpddr_efficiency_mode: " + value);
-}
-
-hbm_sim::MaintenancePolicyKind parse_maintenance_policy(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "per_bank" || value == "perbank" || value == "pb") {
-    return hbm_sim::MaintenancePolicyKind::PerBank;
-  }
-  if (value == "all_bank" || value == "allbank" || value == "ab") {
-    return hbm_sim::MaintenancePolicyKind::AllBank;
-  }
-  throw std::invalid_argument("invalid maintenance policy: " + value);
-}
-
-hbm_sim::LpddrDvfsMode parse_lpddr_dvfs_mode(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "nominal" || value == "on") return hbm_sim::LpddrDvfsMode::Nominal;
-  if (value == "low" || value == "low_power") return hbm_sim::LpddrDvfsMode::Low;
-  if (value == "disabled" || value == "off") return hbm_sim::LpddrDvfsMode::Disabled;
-  throw std::invalid_argument("invalid lpddr_dvfs_mode: " + value);
-}
-
-hbm_sim::LpddrWckMode parse_lpddr_wck_mode(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "cas_sync" || value == "cas") return hbm_sim::LpddrWckMode::CasSync;
-  if (value == "always_on" || value == "alwayson") return hbm_sim::LpddrWckMode::AlwaysOn;
-  throw std::invalid_argument(
-      "invalid or unimplemented lpddr_wck_mode: " + value +
-      " (implemented: cas_sync, always_on)");
-}
-
-hbm_sim::LowPowerMode parse_low_power_mode(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "off" || value == "none") return hbm_sim::LowPowerMode::Off;
-  if (value == "power_down" || value == "powerdown" || value == "pd") return hbm_sim::LowPowerMode::PowerDown;
-  if (value == "self_refresh" || value == "selfrefresh" || value == "sr") return hbm_sim::LowPowerMode::SelfRefresh;
-  throw std::invalid_argument("invalid low_power_mode: " + value);
-}
-
-hbm_sim::RefreshTemperatureMode parse_refresh_temperature_mode(std::string value) {
-  value = lower_value(std::move(value));
-  if (value == "normal" || value == "1x") return hbm_sim::RefreshTemperatureMode::Normal;
-  if (value == "high" || value == "2x") return hbm_sim::RefreshTemperatureMode::High;
-  if (value == "extended" || value == "ext") return hbm_sim::RefreshTemperatureMode::Extended;
-  throw std::invalid_argument("invalid refresh_temperature_mode: " + value);
 }
 
 std::string normalize_key(std::string key) {
@@ -497,125 +366,6 @@ bool apply_storage_model_option(hbm_sim::StorageModelOptions& options,
   return true;
 }
 
-bool is_spec_override_key(const std::string& key) {
-  // 配置文件允许把 DramSpec 中的组织结构、开关和 timing 直接覆盖。
-  // 这里显式列白名单，而不是把未知 key 静默塞进 spec_overrides，原因有两个：
-  // 1. JEDEC/vendor timing 名称很多，拼错一个字符就会让数值对比失真；
-  // 2. CLI 仍处在小型研究工具阶段，明确报错比“容忍但忽略”更容易定位配置问题。
-  static const char* keys[] = {
-      "timing_profile", "timing_profile_file", "vendor_profile", "mode_profile",
-      "timing_source", "timing_override_source",
-      "speed_bin_mbps", "density_gb", "stack_height",
-      "data_rate_mbps", "data_bus_bits", "prefetch_size", "internal_prefetch_size",
-      "dfi_phase_count", "dfi_data_lane_bytes", "dfi_read_latency_nck", "dfi_write_latency_nck",
-      "dfi_read_latency_ns", "dfi_write_latency_ns",
-      "tick_multiplier", "full_stack_model", "supports_refresh", "refresh_policy",
-      "lpddr_dual_bank_refresh", "supports_rfm", "rfm_policy", "supports_ecc",
-      "hbm_full_32_channel_stack", "hbm_sid_interleave", "hbm_pc_interleave",
-      "hbm_edge_pairing", "hbm_strict_edge_pairing", "hbm_link_crc_bits_per_request",
-      "hbm_edge_pairing_matrix", "hbm_sid_mapping", "hbm_ecc_scheme", "hbm_ras_policy",
-      "hbm_link_crc_mode", "hbm_link_retry_enabled",
-      "hbm_ras_metadata_bits_per_request", "hbm_ecc_bits_per_request",
-      "rfm_act_threshold", "rfm_decrement",
-      "lpddr_link_protection", "lpddr_dynamic_efficiency", "lpddr_efficiency_mode",
-      "lpddr_dvfs_mode", "lpddr_low_data_rate_mbps", "lpddr_wck_mode", "lpddr_wck_ratio",
-      "lpddr_mode_register_profile", "lpddr_dbi_enabled", "lpddr_link_ecc_enabled",
-      "lpddr_wck_training_mode", "lpddr_dvfs_transition_policy", "lpddr_link_protection_mode",
-      "lpddr_low_power_state_policy", "lpddr_wck_training_required",
-      "lpddr_dbi_bits_per_request", "lpddr_link_ecc_bits_per_request",
-      "lpddr_ca_parity_enabled", "lpddr_ca_parity_bits_per_command",
-      "low_power_mode", "low_power_entry_cycles", "low_power_exit_cycles", "self_refresh_exit_cycles",
-      "refresh_postpone_limit", "refresh_pullin_limit", "refresh_credit_limit",
-      "refresh_temperature_mode", "refresh_high_temp_multiplier",
-      "address_mapping", "addr_mapping", "metadata_bits_per_request", "ecc_bits_per_request", "channels",
-      "pseudo_channels", "sids", "ranks", "bank_groups", "banks_per_group",
-      "rows", "columns", "line_size", "dram_transaction_bytes", "transaction_size",
-      "nbl", "ncl", "ncwl", "nrcdrd",
-      "nrcdwr", "nrp", "nras", "nrc", "nrtp", "nwr", "nccds", "nccdl",
-      "nrrds", "nrrdl", "nfaw", "naad", "naadmin", "naadmax",
-      "nwck2ck", "nwckpst", "ncas",
-      "ncs", "nppd", "nrpab", "nwtrs", "nwtrl", "nrtw", "nccdr",
-      "nrfc", "nrfcpb", "nrfmab", "nrfmpb", "nrrefd", "nrefi",
-      "nrefdb2act", "nrefdb2refdbs", "nrefdb2refdbl",
-      "nrefipb", "nmrw", "nmrr", "nwcksync", "nwcktrain", "ndvfs",
-      "npdex", "nsrefex", "neccscrub", "nraserr", "nlinkretry",
-      "tck_ps", "trc_ns", "tras_ns", "trcdrd_ns", "trcd_rd_ns",
-      "trcdwr_ns", "trcd_wr_ns", "trp_ns", "trpab_ns", "trppb_ns",
-      "trtp_ns", "twr_ns", "twtp_ns", "trrds_ns", "trrdl_ns", "trrd_ns",
-      "tfaw_ns", "twtrs_ns", "twtr_s_ns", "twtrl_ns", "twtr_l_ns",
-      "trtw_ns", "tccds_ns", "tccdl_ns", "tccdr_ns", "trfc_ns",
-      "trfcab_ns", "trfcpb_ns", "trfcdb_ns", "trfmab_ns", "trfmpb_ns", "trrefd_ns",
-      "tdbr2act_ns", "trefdb2act_ns", "tdbr2dbr_s_ns", "trefdb2refdb_s_ns",
-      "tdbr2dbr_l_ns", "trefdb2refdb_l_ns",
-      "trefi_us", "trefipb_us", "trefipb_ns", "trefidb_ns",
-      "twck2ck_ns", "twckpst_ns",
-      "tcas_ns", "tcs_ns", "tppd_ns", "taad_ns", "taad_min_ns",
-      "taad_max_ns", "tmrw_ns", "tmrr_ns",
-      "twcksync_ns", "twcktrain_ns", "tdvfs_ns", "tpdex_ns", "txp_ns",
-      "tsrefex_ns", "txs_ns", "teccscrub_ns", "traserr_ns", "tlinkretry_ns"};
-  return std::find(std::begin(keys), std::end(keys), key) != std::end(keys);
-}
-
-std::string canonical_timing_name_for_key(const std::string& key) {
-  // TimingTableEntry 使用统一的内部名称，例如 nRCDRD。用户配置可以写 nrcdrd，
-  // 也可以写更接近手册的 trcd_rd_ns。这个映射只负责“名字归一化”，真正的
-  // 数值换算在 apply_spec_overrides() 中根据 key 类型完成。
-  //
-  // 一旦某个 timing 被用户覆盖，main.cpp 会通过 set_timing_source() 记录来源。
-  // 默认来源是 Vendor；配置文件可用 timing_override_source 切换成 JEDEC/
-  // research_default/derived，避免模板值被误当成真实厂商数据。
-  if (key == "nbl") return "nBL";
-  if (key == "ncl") return "nCL";
-  if (key == "ncwl") return "nCWL";
-  if (key == "nrcdrd" || key == "trcdrd_ns" || key == "trcd_rd_ns") return "nRCDRD";
-  if (key == "nrcdwr" || key == "trcdwr_ns" || key == "trcd_wr_ns") return "nRCDWR";
-  if (key == "nrp" || key == "trp_ns" || key == "trppb_ns") return "nRP";
-  if (key == "nras" || key == "tras_ns") return "nRAS";
-  if (key == "nrc" || key == "trc_ns") return "nRC";
-  if (key == "nrtp" || key == "trtp_ns") return "nRTP";
-  if (key == "nwr" || key == "twr_ns" || key == "twtp_ns") return "nWR";
-  if (key == "nccds" || key == "tccds_ns") return "nCCDS";
-  if (key == "nccdl" || key == "tccdl_ns") return "nCCDL";
-  if (key == "nrrds" || key == "trrds_ns" || key == "trrd_ns") return "nRRDS";
-  if (key == "nrrdl" || key == "trrdl_ns") return "nRRDL";
-  if (key == "nfaw" || key == "tfaw_ns") return "nFAW";
-  if (key == "naadmin" || key == "taad_min_ns") return "nAADMin";
-  if (key == "naad" || key == "naadmax" || key == "taad_ns" ||
-      key == "taad_max_ns") return "nAADMax";
-  if (key == "nwck2ck" || key == "twck2ck_ns") return "nWCK2CK";
-  if (key == "nwckpst" || key == "twckpst_ns") return "nWCKPST";
-  if (key == "ncas" || key == "tcas_ns") return "nCAS";
-  if (key == "ncs" || key == "tcs_ns") return "nCS";
-  if (key == "nppd" || key == "tppd_ns") return "nPPD";
-  if (key == "nrpab" || key == "trpab_ns") return "nRPab";
-  if (key == "nwtrs" || key == "twtrs_ns" || key == "twtr_s_ns") return "nWTRS";
-  if (key == "nwtrl" || key == "twtrl_ns" || key == "twtr_l_ns") return "nWTRL";
-  if (key == "nrtw" || key == "trtw_ns") return "nRTW";
-  if (key == "nccdr" || key == "tccdr_ns") return "nCCDR";
-  if (key == "nrfc" || key == "trfc_ns" || key == "trfcab_ns") return "nRFC";
-  if (key == "nrfcpb" || key == "trfcpb_ns" || key == "trfcdb_ns") return "nRFCpb";
-  if (key == "nrfmab" || key == "trfmab_ns") return "nRFMab";
-  if (key == "nrfmpb" || key == "trfmpb_ns") return "nRFMpb";
-  if (key == "nrrefd" || key == "trrefd_ns") return "nRREFD";
-  if (key == "nrefdb2act" || key == "tdbr2act_ns" || key == "trefdb2act_ns") return "nREFDB2ACT";
-  if (key == "nrefdb2refdbs" || key == "tdbr2dbr_s_ns" || key == "trefdb2refdb_s_ns") return "nREFDB2REFDBS";
-  if (key == "nrefdb2refdbl" || key == "tdbr2dbr_l_ns" || key == "trefdb2refdb_l_ns") return "nREFDB2REFDBL";
-  if (key == "nrefi" || key == "trefi_us") return "nREFI";
-  if (key == "nrefipb" || key == "trefipb_us" ||
-      key == "trefipb_ns" || key == "trefidb_ns") return "nREFIpb";
-  if (key == "nmrw" || key == "tmrw_ns") return "nMRW";
-  if (key == "nmrr" || key == "tmrr_ns") return "nMRR";
-  if (key == "nwcksync" || key == "twcksync_ns") return "nWCKSYNC";
-  if (key == "nwcktrain" || key == "twcktrain_ns") return "nWCKTRAIN";
-  if (key == "ndvfs" || key == "tdvfs_ns") return "nDVFS";
-  if (key == "npdex" || key == "tpdex_ns" || key == "txp_ns") return "nPDEX";
-  if (key == "nsrefex" || key == "tsrefex_ns" || key == "txs_ns") return "nSREFEX";
-  if (key == "neccscrub" || key == "teccscrub_ns") return "nECCSCRUB";
-  if (key == "nraserr" || key == "traserr_ns") return "nRASERR";
-  if (key == "nlinkretry" || key == "tlinkretry_ns") return "nLINKRETRY";
-  return {};
-}
-
 void apply_option(Cli& cli, const std::string& raw_key, const std::string& value) {
   std::string key = normalize_key(raw_key);
   // apply_option() 同时服务 CLI 和 key=value 配置文件。为了让二者语义一致，
@@ -635,7 +385,7 @@ void apply_option(Cli& cli, const std::string& raw_key, const std::string& value
     cli.validation_mode = hbm_sim::config::parse_validation_mode(value);
   } else if (key == "schema_version") {
     cli.config_schema_version = parse_int(value);
-    if (cli.config_schema_version != 1 && cli.config_schema_version != 2) {
+    if (cli.config_schema_version < 1 || cli.config_schema_version > 3) {
       throw std::invalid_argument("unsupported config schema_version: " + value);
     }
   } else if (key == "phy_protocol") {
@@ -696,11 +446,15 @@ void apply_option(Cli& cli, const std::string& raw_key, const std::string& value
     cli.controller.write_high_watermark = parse_double(value);
   } else if (key == "max_cycles") {
     cli.max_cycles = parse_u64(value);
+  } else if (key == "stats_json") {
+    cli.stats_json_path = value;
+  } else if (key == "dump_resolved_config") {
+    cli.dump_resolved_config_path = value;
   } else if (key == "stats_view") {
     cli.stats_view = lower_value(value);
-    if (cli.stats_view != "full" && cli.stats_view != "summary") {
+    if (cli.stats_view != "summary" && cli.stats_view != "diagnostic") {
       throw std::invalid_argument(
-          "invalid stats_view: " + value + " (expected summary or full)");
+          "invalid stats_view: " + value + " (expected summary or diagnostic)");
     }
   } else if (key == "progress_interval") {
     cli.progress_interval = parse_u64(value);
@@ -781,299 +535,6 @@ void apply_option(Cli& cli, const std::string& raw_key, const std::string& value
   }
 }
 
-void apply_spec_overrides(hbm_sim::DramSpec& spec,
-                          const std::vector<std::pair<std::string, std::string>>& overrides) {
-  // 第一遍只收集会影响 profile 展开的选择项。组织/timing 的显式覆盖留到
-  // profile 之后，保证最终优先级固定为 traits < profile < config/CLI。
-  for (const auto& [key, value] : overrides) {
-    if (key == "timing_profile") {
-      spec.timing_profile = value;
-    } else if (key == "timing_profile_file") {
-      spec.timing_profile_file = value;
-    } else if (key == "vendor_profile") {
-      spec.vendor_profile = value;
-    } else if (key == "mode_profile") {
-      spec.mode_profile = value;
-    } else if (key == "speed_bin_mbps") {
-      spec.speed_bin_mbps = parse_int(value);
-    } else if (key == "density_gb") {
-      spec.density_gb = parse_int(value);
-    } else if (key == "stack_height") {
-      spec.stack_height = parse_int(value);
-    } else if (key == "lpddr_dvfs_mode") {
-      spec.lpddr_dvfs_mode = parse_lpddr_dvfs_mode(value);
-    } else if (key == "lpddr_efficiency_mode") {
-      spec.lpddr_efficiency_mode = parse_lpddr_efficiency(value);
-    } else if (key == "lpddr_dynamic_efficiency") {
-      spec.lpddr_dynamic_efficiency = parse_bool(value);
-      if (spec.lpddr_dynamic_efficiency) {
-        spec.lpddr_efficiency_mode = hbm_sim::LpddrEfficiencyMode::Dynamic;
-      }
-    } else if (key == "lpddr_link_protection") {
-      spec.lpddr_link_protection = parse_bool(value);
-    } else if (key == "lpddr_link_ecc_enabled") {
-      spec.lpddr_link_ecc_enabled = parse_bool(value);
-    } else if (key == "lpddr_dbi_enabled") {
-      spec.lpddr_dbi_enabled = parse_bool(value);
-    } else if (key == "lpddr_ca_parity_enabled") {
-      spec.lpddr_ca_parity_enabled = parse_bool(value);
-    } else if (key == "lpddr_wck_training_required") {
-      spec.lpddr_wck_training_required = parse_bool(value);
-    } else if (key == "lpddr_low_data_rate_mbps") {
-      spec.lpddr_low_data_rate_mbps = parse_int(value);
-    } else if (key == "lpddr_wck_mode") {
-      spec.lpddr_wck_mode = parse_lpddr_wck_mode(value);
-    } else if (key == "refresh_temperature_mode") {
-      spec.refresh_temperature_mode = parse_refresh_temperature_mode(value);
-    } else if (key == "low_power_mode") {
-      spec.low_power_mode = parse_low_power_mode(value);
-    } else if (key == "low_power_exit_cycles") {
-      spec.low_power_exit_cycles = parse_int(value);
-    } else if (key == "self_refresh_exit_cycles") {
-      spec.self_refresh_exit_cycles = parse_int(value);
-    } else if (key == "hbm_sid_interleave") {
-      spec.hbm_sid_interleave = parse_bool(value);
-    } else if (key == "hbm_link_crc_mode") {
-      spec.hbm_link_crc_mode = value;
-    } else if (key == "hbm_link_retry_enabled") {
-      spec.hbm_link_retry_enabled = parse_bool(value);
-    }
-  }
-
-  hbm_sim::apply_standard_timing_profile(spec);
-
-  // ns/us 覆盖项依赖最终 tCK。显式 tCK 的优先级高于 profile，并且与配置
-  // 文件中的书写顺序无关。
-  for (const auto& [key, value] : overrides) {
-    if (key == "tck_ps") {
-      spec.timing.tCK_ps = parse_double(value);
-    }
-  }
-
-  hbm_sim::TimingValueSource timing_override_source = hbm_sim::TimingValueSource::Vendor;
-  for (const auto& [key, value] : overrides) {
-    const std::string timing_name = canonical_timing_name_for_key(key);
-    if (key == "timing_source" || key == "timing_override_source") {
-      timing_override_source = parse_timing_value_source(value);
-      continue;
-    }
-    // 下方长 if/else 列表看起来朴素，但有意保持“每个配置 key 到字段”的
-    // 一对一关系。对标准模型来说，可审计性比过度抽象更重要：读者能直接查到
-    // tRFCpb_ns 最终改的是 spec.timing.nRFCpb，并且换算使用当前 tCK_ps。
-    if (key == "timing_profile") spec.timing_profile = value;
-    else if (key == "timing_profile_file") spec.timing_profile_file = value;
-    else if (key == "vendor_profile") spec.vendor_profile = value;
-    else if (key == "mode_profile") spec.mode_profile = value;
-    else if (key == "speed_bin_mbps") spec.speed_bin_mbps = parse_int(value);
-    else if (key == "density_gb") spec.density_gb = parse_int(value);
-    else if (key == "stack_height") spec.stack_height = parse_int(value);
-    else if (key == "data_rate_mbps") spec.data_rate_mbps = parse_int(value);
-    else if (key == "data_bus_bits") spec.data_bus_bits = parse_int(value);
-    else if (key == "prefetch_size" || key == "internal_prefetch_size") spec.internal_prefetch_size = parse_int(value);
-    else if (key == "dfi_phase_count") spec.dfi_phase_count = parse_int(value);
-    else if (key == "dfi_data_lane_bytes") spec.dfi_data_lane_bytes = parse_int(value);
-    else if (key == "dfi_read_latency_nck") spec.dfi_read_latency_nck = parse_int(value);
-    else if (key == "dfi_write_latency_nck") spec.dfi_write_latency_nck = parse_int(value);
-    else if (key == "dfi_read_latency_ns") spec.dfi_read_latency_nck = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "dfi_write_latency_ns") spec.dfi_write_latency_nck = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tick_multiplier") spec.tick_multiplier = parse_int(value);
-    else if (key == "full_stack_model") spec.full_stack_model = parse_bool(value);
-    else if (key == "supports_refresh") spec.supports_refresh = parse_bool(value);
-    else if (key == "refresh_policy") spec.refresh_policy = parse_maintenance_policy(value);
-    else if (key == "lpddr_dual_bank_refresh") spec.lpddr_dual_bank_refresh = parse_bool(value);
-    else if (key == "supports_rfm") spec.supports_rfm = parse_bool(value);
-    else if (key == "rfm_policy") spec.rfm_policy = parse_maintenance_policy(value);
-    else if (key == "supports_ecc") spec.supports_ecc = parse_bool(value);
-    else if (key == "hbm_full_32_channel_stack") spec.hbm_full_32_channel_stack = parse_bool(value);
-    else if (key == "hbm_sid_interleave") {
-      spec.hbm_sid_interleave = parse_bool(value);
-      spec.column_bus_scope = spec.hbm_sid_interleave ? hbm_sim::TimingScope::Sid
-                                                      : hbm_sim::TimingScope::PseudoChannel;
-    }
-    else if (key == "hbm_pc_interleave") spec.hbm_pc_interleave = parse_bool(value);
-    else if (key == "hbm_edge_pairing") spec.hbm_edge_pairing = parse_bool(value);
-    else if (key == "hbm_strict_edge_pairing") spec.hbm_strict_edge_pairing = parse_bool(value);
-    else if (key == "hbm_edge_pairing_matrix") spec.hbm_edge_pairing_matrix = value;
-    else if (key == "hbm_sid_mapping") spec.hbm_sid_mapping = value;
-    else if (key == "hbm_ecc_scheme") spec.hbm_ecc_scheme = value;
-    else if (key == "hbm_ras_policy") spec.hbm_ras_policy = value;
-    else if (key == "hbm_link_crc_mode") spec.hbm_link_crc_mode = value;
-    else if (key == "hbm_link_retry_enabled") spec.hbm_link_retry_enabled = parse_bool(value);
-    else if (key == "hbm_link_crc_bits_per_request") spec.hbm_link_crc_bits_per_request = parse_int(value);
-    else if (key == "hbm_ras_metadata_bits_per_request") spec.hbm_ras_metadata_bits_per_request = parse_int(value);
-    else if (key == "hbm_ecc_bits_per_request") spec.hbm_ecc_bits_per_request = parse_int(value);
-    else if (key == "rfm_act_threshold") spec.rfm_act_threshold = parse_int(value);
-    else if (key == "rfm_decrement") spec.rfm_decrement = parse_int(value);
-    else if (key == "lpddr_link_protection") spec.lpddr_link_protection = parse_bool(value);
-    else if (key == "lpddr_dynamic_efficiency") {
-      spec.lpddr_dynamic_efficiency = parse_bool(value);
-      if (spec.lpddr_dynamic_efficiency) spec.lpddr_efficiency_mode = hbm_sim::LpddrEfficiencyMode::Dynamic;
-    }
-    else if (key == "lpddr_efficiency_mode") spec.lpddr_efficiency_mode = parse_lpddr_efficiency(value);
-    else if (key == "lpddr_dvfs_mode") spec.lpddr_dvfs_mode = parse_lpddr_dvfs_mode(value);
-    else if (key == "lpddr_low_data_rate_mbps") spec.lpddr_low_data_rate_mbps = parse_int(value);
-    else if (key == "lpddr_wck_mode") spec.lpddr_wck_mode = parse_lpddr_wck_mode(value);
-    else if (key == "lpddr_wck_ratio") spec.lpddr_wck_ratio = parse_int(value);
-    else if (key == "lpddr_mode_register_profile") spec.lpddr_mode_register_profile = value;
-    else if (key == "lpddr_wck_training_mode") spec.lpddr_wck_training_mode = value;
-    else if (key == "lpddr_dvfs_transition_policy") spec.lpddr_dvfs_transition_policy = value;
-    else if (key == "lpddr_link_protection_mode") spec.lpddr_link_protection_mode = value;
-    else if (key == "lpddr_low_power_state_policy") spec.lpddr_low_power_state_policy = value;
-    else if (key == "lpddr_wck_training_required") spec.lpddr_wck_training_required = parse_bool(value);
-    else if (key == "lpddr_dbi_enabled") spec.lpddr_dbi_enabled = parse_bool(value);
-    else if (key == "lpddr_link_ecc_enabled") spec.lpddr_link_ecc_enabled = parse_bool(value);
-    else if (key == "lpddr_ca_parity_enabled") spec.lpddr_ca_parity_enabled = parse_bool(value);
-    else if (key == "lpddr_dbi_bits_per_request") spec.lpddr_dbi_bits_per_request = parse_int(value);
-    else if (key == "lpddr_link_ecc_bits_per_request") spec.lpddr_link_ecc_bits_per_request = parse_int(value);
-    else if (key == "lpddr_ca_parity_bits_per_command") spec.lpddr_ca_parity_bits_per_command = parse_int(value);
-    else if (key == "low_power_mode") spec.low_power_mode = parse_low_power_mode(value);
-    else if (key == "low_power_entry_cycles") spec.low_power_entry_cycles = parse_int(value);
-    else if (key == "low_power_exit_cycles") spec.low_power_exit_cycles = parse_int(value);
-    else if (key == "self_refresh_exit_cycles") spec.self_refresh_exit_cycles = parse_int(value);
-    else if (key == "refresh_postpone_limit") spec.refresh_postpone_limit = parse_int(value);
-    else if (key == "refresh_pullin_limit") spec.refresh_pullin_limit = parse_int(value);
-    else if (key == "refresh_credit_limit") spec.refresh_credit_limit = parse_int(value);
-    else if (key == "refresh_temperature_mode") spec.refresh_temperature_mode = parse_refresh_temperature_mode(value);
-    else if (key == "refresh_high_temp_multiplier") spec.refresh_high_temp_multiplier = parse_int(value);
-    else if (key == "address_mapping" || key == "addr_mapping") spec.address_mapping = parse_address_mapping(value);
-    else if (key == "metadata_bits_per_request") spec.metadata_bits_per_request = parse_int(value);
-    else if (key == "ecc_bits_per_request") spec.ecc_bits_per_request = parse_int(value);
-    else if (key == "channels") spec.org.channels = parse_int(value);
-    else if (key == "pseudo_channels") spec.org.pseudo_channels = parse_int(value);
-    else if (key == "sids") spec.org.sids = parse_int(value);
-    else if (key == "ranks") spec.org.ranks = parse_int(value);
-    else if (key == "bank_groups") spec.org.bank_groups = parse_int(value);
-    else if (key == "banks_per_group") spec.org.banks_per_group = parse_int(value);
-    else if (key == "rows") spec.org.rows = parse_int(value);
-    else if (key == "columns") spec.org.columns = parse_int(value);
-    else if (key == "line_size") spec.org.line_size = parse_int(value);
-    else if (key == "dram_transaction_bytes" || key == "transaction_size") {
-      spec.org.dram_transaction_bytes = parse_int(value);
-    }
-    else if (key == "nbl") spec.timing.nBL = parse_int(value);
-    else if (key == "ncl") spec.timing.nCL = parse_int(value);
-    else if (key == "ncwl") spec.timing.nCWL = parse_int(value);
-    else if (key == "nrcdrd") spec.timing.nRCDRD = parse_int(value);
-    else if (key == "nrcdwr") spec.timing.nRCDWR = parse_int(value);
-    else if (key == "nrp") spec.timing.nRP = parse_int(value);
-    else if (key == "nras") spec.timing.nRAS = parse_int(value);
-    else if (key == "nrc") spec.timing.nRC = parse_int(value);
-    else if (key == "nrtp") spec.timing.nRTP = parse_int(value);
-    else if (key == "nwr") spec.timing.nWR = parse_int(value);
-    else if (key == "nccds") spec.timing.nCCDS = parse_int(value);
-    else if (key == "nccdl") spec.timing.nCCDL = parse_int(value);
-    else if (key == "nrrds") spec.timing.nRRDS = parse_int(value);
-    else if (key == "nrrdl") spec.timing.nRRDL = parse_int(value);
-    else if (key == "nfaw") spec.timing.nFAW = parse_int(value);
-    else if (key == "naadmin") spec.timing.nAADMin = parse_int(value);
-    else if (key == "naad" || key == "naadmax") spec.timing.nAADMax = parse_int(value);
-    else if (key == "nwck2ck") spec.timing.nWCK2CK = parse_int(value);
-    else if (key == "nwckpst") spec.timing.nWCKPST = parse_int(value);
-    else if (key == "ncas") spec.timing.nCAS = parse_int(value);
-    else if (key == "ncs") spec.timing.nCS = parse_int(value);
-    else if (key == "nppd") spec.timing.nPPD = parse_int(value);
-    else if (key == "nrpab") spec.timing.nRPab = parse_int(value);
-    else if (key == "nwtrs") spec.timing.nWTRS = parse_int(value);
-    else if (key == "nwtrl") spec.timing.nWTRL = parse_int(value);
-    else if (key == "nrtw") spec.timing.nRTW = parse_int(value);
-    else if (key == "nccdr") spec.timing.nCCDR = parse_int(value);
-    else if (key == "nrfc") spec.timing.nRFC = parse_int(value);
-    else if (key == "nrfcpb") spec.timing.nRFCpb = parse_int(value);
-    else if (key == "nrfmab") spec.timing.nRFMab = parse_int(value);
-    else if (key == "nrfmpb") spec.timing.nRFMpb = parse_int(value);
-    else if (key == "nrrefd") spec.timing.nRREFD = parse_int(value);
-    else if (key == "nrefdb2act") spec.timing.nREFDB2ACT = parse_int(value);
-    else if (key == "nrefdb2refdbs") spec.timing.nREFDB2REFDBS = parse_int(value);
-    else if (key == "nrefdb2refdbl") spec.timing.nREFDB2REFDBL = parse_int(value);
-    else if (key == "nrefi") spec.timing.nREFI = parse_int(value);
-    else if (key == "nrefipb") spec.timing.nREFIpb = parse_int(value);
-    else if (key == "nmrw") spec.timing.nMRW = parse_int(value);
-    else if (key == "nmrr") spec.timing.nMRR = parse_int(value);
-    else if (key == "nwcksync") spec.timing.nWCKSYNC = parse_int(value);
-    else if (key == "nwcktrain") spec.timing.nWCKTRAIN = parse_int(value);
-    else if (key == "ndvfs") spec.timing.nDVFS = parse_int(value);
-    else if (key == "npdex") spec.timing.nPDEX = parse_int(value);
-    else if (key == "nsrefex") spec.timing.nSREFEX = parse_int(value);
-    else if (key == "neccscrub") spec.timing.nECCSCRUB = parse_int(value);
-    else if (key == "nraserr") spec.timing.nRASERR = parse_int(value);
-    else if (key == "nlinkretry") spec.timing.nLINKRETRY = parse_int(value);
-    else if (key == "tck_ps") spec.timing.tCK_ps = parse_double(value);
-    else if (key == "trc_ns") spec.timing.nRC = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tras_ns") spec.timing.nRAS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trcdrd_ns" || key == "trcd_rd_ns") spec.timing.nRCDRD = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trcdwr_ns" || key == "trcd_wr_ns") spec.timing.nRCDWR = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trp_ns" || key == "trppb_ns") spec.timing.nRP = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trpab_ns") spec.timing.nRPab = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trtp_ns") spec.timing.nRTP = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    // LPDDR 文档常把写到预充的约束写作 tWTP；本模型的终端 WR->PRE
-    // 路径统一保存在 nWR，因此与外部 profile 解析器保持同一别名语义。
-    else if (key == "twr_ns" || key == "twtp_ns") spec.timing.nWR = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trrds_ns" || key == "trrd_ns") spec.timing.nRRDS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trrdl_ns") spec.timing.nRRDL = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tfaw_ns") spec.timing.nFAW = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "twtrs_ns" || key == "twtr_s_ns") spec.timing.nWTRS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "twtrl_ns" || key == "twtr_l_ns") spec.timing.nWTRL = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trtw_ns") spec.timing.nRTW = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tccds_ns") spec.timing.nCCDS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tccdl_ns") spec.timing.nCCDL = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tccdr_ns") spec.timing.nCCDR = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trfc_ns" || key == "trfcab_ns") spec.timing.nRFC = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trfcpb_ns" || key == "trfcdb_ns") spec.timing.nRFCpb = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trfmab_ns") spec.timing.nRFMab = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trfmpb_ns") spec.timing.nRFMpb = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trrefd_ns") spec.timing.nRREFD = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tdbr2act_ns" || key == "trefdb2act_ns") {
-      spec.timing.nREFDB2ACT = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    }
-    else if (key == "tdbr2dbr_s_ns" || key == "trefdb2refdb_s_ns") {
-      spec.timing.nREFDB2REFDBS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    }
-    else if (key == "tdbr2dbr_l_ns" || key == "trefdb2refdb_l_ns") {
-      spec.timing.nREFDB2REFDBL = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    }
-    else if (key == "trefi_us") spec.timing.nREFI = hbm_sim::jedec::us_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trefipb_us") spec.timing.nREFIpb = hbm_sim::jedec::us_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "trefipb_ns" || key == "trefidb_ns") spec.timing.nREFIpb = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "twck2ck_ns") spec.timing.nWCK2CK = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "twckpst_ns") spec.timing.nWCKPST = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tcas_ns") spec.timing.nCAS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tcs_ns") spec.timing.nCS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tppd_ns") spec.timing.nPPD = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "taad_min_ns") spec.timing.nAADMin = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "taad_ns" || key == "taad_max_ns") spec.timing.nAADMax = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tmrw_ns") spec.timing.nMRW = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tmrr_ns") spec.timing.nMRR = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "twcksync_ns") spec.timing.nWCKSYNC = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "twcktrain_ns") spec.timing.nWCKTRAIN = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tdvfs_ns") spec.timing.nDVFS = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tpdex_ns" || key == "txp_ns") spec.timing.nPDEX = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tsrefex_ns" || key == "txs_ns") spec.timing.nSREFEX = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "teccscrub_ns") spec.timing.nECCSCRUB = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "traserr_ns") spec.timing.nRASERR = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else if (key == "tlinkretry_ns") spec.timing.nLINKRETRY = hbm_sim::jedec::ns_to_nck(parse_double(value), spec.timing.tCK_ps);
-    else throw std::invalid_argument("unknown spec override key: " + key);
-
-    if (!timing_name.empty()) {
-      hbm_sim::set_timing_source(
-          spec,
-          timing_name,
-          timing_override_source,
-          "Overridden by config/CLI as " + std::string(hbm_sim::to_string(timing_override_source)) + ".");
-    }
-  }
-  if (spec.supports_ecc && spec.hbm_ecc_bits_per_request == 0 && spec.ecc_bits_per_request == 0 &&
-      !spec.lpddr_family) {
-    spec.hbm_ecc_bits_per_request = spec.standard == hbm_sim::DramStandard::Hbm4 ? 16 : 64;
-  }
-  if (spec.lpddr_link_protection && spec.lpddr_link_ecc_bits_per_request == 0) {
-    spec.lpddr_link_ecc_bits_per_request = 16;
-  }
-  if (spec.lpddr_dbi_enabled && spec.lpddr_dbi_bits_per_request == 0) {
-    spec.lpddr_dbi_bits_per_request = 8;
-  }
-  hbm_sim::finalize_spec(spec);
-}
-
 void apply_config_documents(Cli& cli,
                             const std::vector<hbm_sim::config::ConfigDocument>& documents,
                             const hbm_sim::config::Selection& selection) {
@@ -1081,6 +542,8 @@ void apply_config_documents(Cli& cli,
   for (const auto& entry : entries) {
     try {
       apply_option(cli, entry.key, entry.value);
+      if (hbm_sim::config::is_timing_override_key(entry.key))
+        cli.spec_overrides.emplace_back("timing_source." + entry.key, entry.timing_source);
     } catch (const std::exception& error) {
       const std::string section = entry.section.empty() ? "" : " [" + entry.section + "]";
       throw std::runtime_error(entry.path + ":" + std::to_string(entry.line) + section +
@@ -1088,18 +551,6 @@ void apply_config_documents(Cli& cli,
     }
     cli.resolved_config_entries.push_back(entry);
   }
-}
-
-template <typename T>
-void print_field(std::ostream& os, const char* key, const T& value) {
-  // kOutputKeyWidth 统一控制 CLI 对齐宽度。左侧 key 固定宽度，冒号和值自然成列，
-  // 方便用户截图、复制到报告或用脚本按 key 解析。
-  os << std::left << std::setw(hbm_sim::kOutputKeyWidth) << key << ": " << std::right << value << '\n';
-}
-
-void print_section(std::ostream& os, int index, const char* title) {
-  os << "\n# ===== " << std::setfill('0') << std::setw(2) << index << ' '
-     << title << " =====\n" << std::setfill(' ');
 }
 
 const char* response_delivery_mode_name(hbm_sim::ResponseDeliveryMode mode) {
@@ -1517,6 +968,8 @@ Cli parse_args(int argc, char** argv) {
       cli.check_config = true;
     } else if (arg == "--dump-resolved-config") {
       cli.dump_resolved_config_path = need_value(arg);
+    } else if (arg == "--stats-json") {
+      apply_option(cli, "stats_json", need_value(arg));
     } else if (arg == "--compare-preset") {
       cli.compare_preset = true;
     } else if (arg == "--dump-config-diff") {
@@ -1535,8 +988,6 @@ Cli parse_args(int argc, char** argv) {
       cli.list_phy_modes = true;
     } else if (arg == "--timing-profile") {
       cli.spec_overrides.emplace_back("timing_profile", need_value(arg));
-    } else if (arg == "--timing-profile-file") {
-      cli.spec_overrides.emplace_back("timing_profile_file", need_value(arg));
     } else if (arg == "--vendor-profile") {
       cli.spec_overrides.emplace_back("vendor_profile", need_value(arg));
     } else if (arg == "--speed-bin-mbps") {
@@ -1816,12 +1267,16 @@ Cli parse_args(int argc, char** argv) {
   // spec_overrides 中新增的尾部元素来自 CLI。把它们也放入 provenance 链，
   // 这样 --compare-preset 和 standard/device 模式检查的是最终执行模型，而不是
   // 只检查配置文件；命令行位于固定 layer 60，高于 [override] 的 layer 50。
+  hbm_sim::config::ModelOverrides cli_timing_sources;
   for (std::size_t index = config_spec_override_count;
        index < cli.spec_overrides.size(); ++index) {
     const auto& [key, value] = cli.spec_overrides[index];
     cli.resolved_config_entries.push_back(
         {key, value, "command-line", "<command-line>", 0, 60});
+    if (hbm_sim::config::is_timing_override_key(key))
+      cli_timing_sources.emplace_back("timing_source." + key, "research_default");
   }
+  cli.spec_overrides.insert(cli.spec_overrides.end(), cli_timing_sources.begin(), cli_timing_sources.end());
 
   // 非 DramSpec 的 CLI 模型项（例如 scheduler、PHY、backend、stack_count）
   // 也进入审计链。这里不重新赋值，只记录已经由上方严格解析过的参数。
@@ -1891,7 +1346,7 @@ bool is_auditable_model_key(const std::string& key) {
       "schema_version", "standard", "model_name", "preset", "parameter_reference",
       "validation_mode", "pattern", "trace", "trace_path", "requests", "read_ratio",
       "seed", "random_address_space_bytes", "addr_stride", "inject_interval", "init_sequence",
-      "init_sequence_interval", "max_cycles", "progress_interval", "stats_view",
+      "init_sequence_interval", "max_cycles", "progress_interval", "stats_view", "stats_json",
       "strict_timing_table",
       "cmd_trace", "cmd_trace_path", "host_response_trace", "response_trace",
       "response_trace_path", "transaction_response_trace",
@@ -1966,6 +1421,10 @@ void explain_config(const Cli& cli, const std::string& requested_key) {
     std::cout << '\n';
   }
   if (!found) std::cout << "  no active config-file assignment; using built-in/CLI value\n";
+  for (const auto& derived : cli.derived_parameters) {
+    if (derived.key == key)
+      std::cout << "  derived value=" << derived.value << " formula=" << derived.formula << '\n';
+  }
 }
 
 bool handle_list_commands(const Cli& cli) {
@@ -2037,8 +1496,8 @@ std::vector<std::string> validate_runtime_config(const Cli& cli,
   const bool has_sectioned_config = std::any_of(
       cli.config_documents.begin(), cli.config_documents.end(),
       [](const auto& document) { return document.sectioned; });
-  if (has_sectioned_config && cli.config_schema_version != 2) {
-    errors.push_back("sectioned config documents require schema_version = 2");
+  if (has_sectioned_config && cli.config_schema_version != 2 && cli.config_schema_version != 3) {
+    errors.push_back("sectioned config documents require schema_version = 2 or 3");
   }
   const std::string protocol = lower_value(cli.phy_protocol);
   if (protocol != "auto" && protocol != "hbm" && protocol != "lpddr") {
@@ -2046,6 +1505,23 @@ std::vector<std::string> validate_runtime_config(const Cli& cli,
   } else if ((protocol == "hbm" && spec.lpddr_family) ||
              (protocol == "lpddr" && !spec.lpddr_family)) {
     errors.push_back("selected PHY protocol has no executable semantics for base standard " + spec.name);
+  }
+
+  const std::string init_sequence = lower_value(cli.init_sequence);
+  const bool init_disabled = init_sequence.empty() || init_sequence == "none" ||
+                             init_sequence == "off";
+  const bool init_auto = init_sequence == "auto";
+  const bool hbm_init = init_sequence == "hbm" || init_sequence == "hbm3" ||
+                        init_sequence == "hbm4";
+  const bool lpddr_init = init_sequence == "lpddr" || init_sequence == "lpddr5" ||
+                          init_sequence == "lpddr6" ||
+                          init_sequence == "lpddr6_full";
+  if (!init_disabled && !init_auto && !hbm_init && !lpddr_init) {
+    errors.push_back("unsupported init_sequence: " + cli.init_sequence);
+  } else if ((hbm_init && spec.lpddr_family) ||
+             (lpddr_init && !spec.lpddr_family)) {
+    errors.push_back("init_sequence '" + cli.init_sequence +
+                     "' is incompatible with base standard " + spec.name);
   }
 
   bool selected_preset_exists = cli.preset.empty();
@@ -2103,29 +1579,26 @@ std::vector<std::string> validate_runtime_config(const Cli& cli,
   return errors;
 }
 
-void write_resolved_config(const std::string& path,
-                           const Cli& cli,
-                           const hbm_sim::DramSpec& spec) {
-  ensure_parent_directory(path);
-  std::ofstream out(path);
-  if (!out) throw std::runtime_error("failed to open resolved config output: " + path);
-  out << std::boolalpha << std::setprecision(12);
+void write_resolved_config(const std::string&, const Cli&, const hbm_sim::DramSpec&);
+void serialize_resolved_config(std::ostream& out, const Cli& cli,
+                               const hbm_sim::DramSpec& spec) {
+  out << std::boolalpha << std::setprecision(std::numeric_limits<double>::max_digits10);
   out << "# Fully resolved hbm_sim configuration. Values below are the executed model,\n"
          "# including built-in defaults, active sections, overrides and CLI options.\n\n";
+  for (const auto& derived : cli.derived_parameters)
+    out << "# derived " << derived.key << " = " << derived.value
+        << " : " << derived.formula << '\n';
   out << "[meta]\n"
-      << "schema_version = 2\n\n";
+      << "schema_version = 3\n\n";
   out << "[model]\n"
       << "name = " << cli.model_name << '\n'
       << "base_standard = " << hbm_sim::config::canonical_standard(cli.standard) << '\n';
   if (!cli.preset.empty()) {
     out << "preset = " << cli.preset << '\n';
   }
-  out << "timing_profile = " << spec.timing_profile << '\n'
-      << "vendor_profile = " << spec.vendor_profile << '\n'
-      << "mode_profile = " << spec.mode_profile << '\n';
-  if (!spec.timing_profile_file.empty()) {
-    out << "timing_profile_file = " << spec.timing_profile_file << '\n';
-  }
+  out << "timing_profile = " << hbm_sim::config::model_field_text(spec, "timing_profile") << '\n'
+      << "vendor_profile = " << hbm_sim::config::model_field_text(spec, "vendor_profile") << '\n'
+      << "mode_profile = " << hbm_sim::config::model_field_text(spec, "mode_profile") << '\n';
   if (!cli.parameter_reference.empty()) {
     out << "parameter_reference = " << cli.parameter_reference << '\n';
   }
@@ -2186,90 +1659,70 @@ void write_resolved_config(const std::string& path,
       << "initialization_cycles = " << cli.controller.phy.initialization_cycles << '\n'
       << "training_cycles = " << cli.controller.phy.training_cycles << '\n'
       << "auto_train = " << cli.controller.phy.auto_train << "\n\n";
-  out << "[architecture]\n"
-      << "speed_bin_mbps = " << spec.speed_bin_mbps << '\n'
-      << "data_rate_mbps = " << spec.data_rate_mbps << '\n'
-      << "density_gb = " << spec.density_gb << '\n'
-      << "stack_height = " << spec.stack_height << '\n'
-      << "channels = " << spec.org.channels << '\n'
-      << "pseudo_channels = " << spec.org.pseudo_channels << '\n'
-      << "sids = " << spec.org.sids << '\n'
-      << "ranks = " << spec.org.ranks << '\n'
-      << "bank_groups = " << spec.org.bank_groups << '\n'
-      << "banks_per_group = " << spec.org.banks_per_group << '\n'
-      << "rows = " << spec.org.rows << '\n'
-      << "columns = " << spec.org.columns << '\n'
-      << "line_size = " << spec.org.line_size << '\n'
-      << "dram_transaction_bytes = " << spec.transaction_bytes() << '\n'
-      << "data_bus_bits = " << spec.data_bus_bits << '\n'
-      << "prefetch_size = " << spec.internal_prefetch_size << '\n'
-      << "dfi_phase_count = " << spec.dfi_phase_count << '\n'
-      << "dfi_data_lane_bytes = " << spec.dfi_data_lane_bytes << '\n'
-      << "dfi_read_latency_nck = " << spec.dfi_read_latency_nck << '\n'
-      << "dfi_write_latency_nck = " << spec.dfi_write_latency_nck << '\n'
-      << "tick_multiplier = " << spec.tick_multiplier << '\n'
-      << "full_stack_model = " << spec.full_stack_model << '\n'
-      << "tCK_ps = " << spec.timing.tCK_ps << "\n\n";
+  out << "[architecture]\n";
+  for (const auto key : {"speed_bin_mbps", "data_rate_mbps", "density_gb", "stack_height", "channels", "pseudo_channels", "sids", "ranks", "bank_groups", "banks_per_group", "rows", "columns", "line_size", "dram_transaction_bytes", "data_bus_bits", "prefetch_size", "dfi_phase_count", "dfi_data_lane_bytes", "dfi_read_latency_nck", "dfi_write_latency_nck", "tick_multiplier", "full_stack_model", "tck_ps"})
+    hbm_sim::config::write_model_field(out, spec, key);
+  out << '\n';
 
   out << "[maintenance]\n"
-      << "supports_refresh = " << spec.supports_refresh << '\n'
+      << "supports_refresh = " << hbm_sim::config::model_field_text(spec, "supports_refresh") << '\n'
       << "refresh_policy = " << hbm_sim::to_string(spec.refresh_policy) << '\n'
-      << "supports_rfm = " << spec.supports_rfm << '\n'
+      << "supports_rfm = " << hbm_sim::config::model_field_text(spec, "supports_rfm") << '\n'
       << "rfm_policy = " << hbm_sim::to_string(spec.rfm_policy) << '\n'
-      << "rfm_act_threshold = " << spec.rfm_act_threshold << '\n'
-      << "rfm_decrement = " << spec.rfm_decrement << '\n'
-      << "refresh_postpone_limit = " << spec.refresh_postpone_limit << '\n'
-      << "refresh_pullin_limit = " << spec.refresh_pullin_limit << '\n'
-      << "refresh_credit_limit = " << spec.refresh_credit_limit << '\n'
+      << "rfm_act_threshold = " << hbm_sim::config::model_field_text(spec, "rfm_act_threshold") << '\n'
+      << "rfm_decrement = " << hbm_sim::config::model_field_text(spec, "rfm_decrement") << '\n'
+      << "refresh_postpone_limit = " << hbm_sim::config::model_field_text(spec, "refresh_postpone_limit") << '\n'
+      << "refresh_pullin_limit = " << hbm_sim::config::model_field_text(spec, "refresh_pullin_limit") << '\n'
+      << "refresh_credit_limit = " << hbm_sim::config::model_field_text(spec, "refresh_credit_limit") << '\n'
       << "refresh_temperature_mode = " << hbm_sim::to_string(spec.refresh_temperature_mode) << '\n'
-      << "refresh_high_temp_multiplier = " << spec.refresh_high_temp_multiplier << '\n'
+      << "refresh_high_temp_multiplier = " << hbm_sim::config::model_field_text(spec, "refresh_high_temp_multiplier") << '\n'
       << "low_power_mode = " << hbm_sim::to_string(spec.low_power_mode) << '\n'
-      << "low_power_entry_cycles = " << spec.low_power_entry_cycles << '\n'
-      << "low_power_exit_cycles = " << spec.low_power_exit_cycles << '\n'
-      << "self_refresh_exit_cycles = " << spec.self_refresh_exit_cycles << "\n\n";
+      << "low_power_entry_cycles = " << hbm_sim::config::model_field_text(spec, "low_power_entry_cycles") << '\n'
+      << "low_power_exit_cycles = " << hbm_sim::config::model_field_text(spec, "low_power_exit_cycles") << '\n'
+      << "self_refresh_exit_cycles = " << hbm_sim::config::model_field_text(spec, "self_refresh_exit_cycles") << "\n\n";
   if (spec.lpddr_family) {
-    out << "lpddr_dual_bank_refresh = " << spec.lpddr_dual_bank_refresh << "\n\n";
+    out << "lpddr_dual_bank_refresh = " << hbm_sim::config::model_field_text(spec, "lpddr_dual_bank_refresh") << "\n\n";
   }
 
   out << "[reliability]\n"
-      << "supports_ecc = " << spec.supports_ecc << '\n'
-      << "metadata_bits_per_request = " << spec.metadata_bits_per_request << '\n'
-      << "ecc_bits_per_request = " << spec.ecc_bits_per_request << '\n';
+      << "supports_ecc = " << hbm_sim::config::model_field_text(spec, "supports_ecc") << '\n'
+      << "metadata_bits_per_request = " << hbm_sim::config::model_field_text(spec, "metadata_bits_per_request") << '\n'
+      << "ecc_bits_per_request = " << hbm_sim::config::model_field_text(spec, "ecc_bits_per_request") << '\n';
   if (!spec.lpddr_family) {
-    out << "hbm_full_32_channel_stack = " << spec.hbm_full_32_channel_stack << '\n'
+    out << "hbm_full_32_channel_stack = " << hbm_sim::config::model_field_text(spec, "hbm_full_32_channel_stack") << '\n'
         << "hbm_sid_interleave = " << spec.hbm_sid_interleave << '\n'
-        << "hbm_pc_interleave = " << spec.hbm_pc_interleave << '\n'
-        << "hbm_edge_pairing = " << spec.hbm_edge_pairing << '\n'
-        << "hbm_strict_edge_pairing = " << spec.hbm_strict_edge_pairing << '\n'
-        << "hbm_edge_pairing_matrix = " << spec.hbm_edge_pairing_matrix << '\n'
-        << "hbm_sid_mapping = " << spec.hbm_sid_mapping << '\n'
-        << "hbm_ecc_scheme = " << spec.hbm_ecc_scheme << '\n'
-        << "hbm_ras_policy = " << spec.hbm_ras_policy << '\n'
-        << "hbm_link_crc_mode = " << spec.hbm_link_crc_mode << '\n'
-        << "hbm_link_retry_enabled = " << spec.hbm_link_retry_enabled << '\n'
-        << "hbm_link_crc_bits_per_request = " << spec.hbm_link_crc_bits_per_request << '\n'
-        << "hbm_ras_metadata_bits_per_request = " << spec.hbm_ras_metadata_bits_per_request << '\n'
-        << "hbm_ecc_bits_per_request = " << spec.hbm_ecc_bits_per_request << '\n';
+        << "hbm_pc_interleave = " << hbm_sim::config::model_field_text(spec, "hbm_pc_interleave") << '\n'
+        << "hbm_edge_pairing = " << hbm_sim::config::model_field_text(spec, "hbm_edge_pairing") << '\n'
+        << "hbm_strict_edge_pairing = " << hbm_sim::config::model_field_text(spec, "hbm_strict_edge_pairing") << '\n'
+        << "hbm_edge_pairing_matrix = " << hbm_sim::config::model_field_text(spec, "hbm_edge_pairing_matrix") << '\n'
+        << "hbm_sid_mapping = " << hbm_sim::config::model_field_text(spec, "hbm_sid_mapping") << '\n'
+        << "hbm_ecc_scheme = " << hbm_sim::config::model_field_text(spec, "hbm_ecc_scheme") << '\n'
+        << "hbm_ras_policy = " << hbm_sim::config::model_field_text(spec, "hbm_ras_policy") << '\n'
+        << "hbm_link_crc_mode = " << hbm_sim::config::model_field_text(spec, "hbm_link_crc_mode") << '\n'
+        << "hbm_link_retry_enabled = " << hbm_sim::config::model_field_text(spec, "hbm_link_retry_enabled") << '\n'
+        << "hbm_link_crc_bits_per_request = " << hbm_sim::config::model_field_text(spec, "hbm_link_crc_bits_per_request") << '\n'
+        << "hbm_ras_metadata_bits_per_request = " << hbm_sim::config::model_field_text(spec, "hbm_ras_metadata_bits_per_request") << '\n'
+        << "hbm_ecc_bits_per_request = " << hbm_sim::config::model_field_text(spec, "hbm_ecc_bits_per_request") << '\n';
   } else {
-    out << "lpddr_link_protection = " << spec.lpddr_link_protection << '\n'
+    out << "lpddr_link_protection = " << hbm_sim::config::model_field_text(spec, "lpddr_link_protection") << '\n'
         << "lpddr_dynamic_efficiency = " << spec.lpddr_dynamic_efficiency << '\n'
         << "lpddr_efficiency_mode = " << hbm_sim::to_string(spec.lpddr_efficiency_mode) << '\n'
         << "lpddr_dvfs_mode = " << hbm_sim::to_string(spec.lpddr_dvfs_mode) << '\n'
-        << "lpddr_low_data_rate_mbps = " << spec.lpddr_low_data_rate_mbps << '\n'
+        << "lpddr_low_data_rate_mbps = " << hbm_sim::config::model_field_text(spec, "lpddr_low_data_rate_mbps") << '\n'
         << "lpddr_wck_mode = " << hbm_sim::to_string(spec.lpddr_wck_mode) << '\n'
-        << "lpddr_wck_ratio = " << spec.lpddr_wck_ratio << '\n'
-        << "lpddr_mode_register_profile = " << spec.lpddr_mode_register_profile << '\n'
-        << "lpddr_wck_training_mode = " << spec.lpddr_wck_training_mode << '\n'
-        << "lpddr_dvfs_transition_policy = " << spec.lpddr_dvfs_transition_policy << '\n'
-        << "lpddr_link_protection_mode = " << spec.lpddr_link_protection_mode << '\n'
-        << "lpddr_low_power_state_policy = " << spec.lpddr_low_power_state_policy << '\n'
-        << "lpddr_wck_training_required = " << spec.lpddr_wck_training_required << '\n'
-        << "lpddr_dbi_enabled = " << spec.lpddr_dbi_enabled << '\n'
-        << "lpddr_link_ecc_enabled = " << spec.lpddr_link_ecc_enabled << '\n'
-        << "lpddr_ca_parity_enabled = " << spec.lpddr_ca_parity_enabled << '\n'
-        << "lpddr_dbi_bits_per_request = " << spec.lpddr_dbi_bits_per_request << '\n'
-        << "lpddr_link_ecc_bits_per_request = " << spec.lpddr_link_ecc_bits_per_request << '\n'
-        << "lpddr_ca_parity_bits_per_command = " << spec.lpddr_ca_parity_bits_per_command << '\n';
+        << "lpddr_wck_ratio = " << hbm_sim::config::model_field_text(spec, "lpddr_wck_ratio") << '\n'
+        << "lpddr_mode_register_profile = " << hbm_sim::config::model_field_text(spec, "lpddr_mode_register_profile") << '\n'
+        << "lpddr_wck_training_mode = " << hbm_sim::config::model_field_text(spec, "lpddr_wck_training_mode") << '\n'
+        << "lpddr_dvfs_transition_policy = " << hbm_sim::config::model_field_text(spec, "lpddr_dvfs_transition_policy") << '\n'
+        << "lpddr_link_protection_mode = " << hbm_sim::config::model_field_text(spec, "lpddr_link_protection_mode") << '\n'
+        << "lpddr_low_power_state_policy = " << hbm_sim::config::model_field_text(spec, "lpddr_low_power_state_policy") << '\n'
+        << "lpddr_wck_training_required = " << hbm_sim::config::model_field_text(spec, "lpddr_wck_training_required") << '\n'
+        << "lpddr_dbi_enabled = " << hbm_sim::config::model_field_text(spec, "lpddr_dbi_enabled") << '\n'
+        << "lpddr_link_ecc_enabled = " << hbm_sim::config::model_field_text(spec, "lpddr_link_ecc_enabled") << '\n'
+        << "lpddr_ca_parity_enabled = " << hbm_sim::config::model_field_text(spec, "lpddr_ca_parity_enabled") << '\n'
+        << "lpddr_dbi_bits_per_request = " << hbm_sim::config::model_field_text(spec, "lpddr_dbi_bits_per_request") << '\n'
+        << "lpddr_link_ecc_bits_per_request = " << hbm_sim::config::model_field_text(spec, "lpddr_link_ecc_bits_per_request") << '\n'
+        << "lpddr_ca_parity_bits_per_command = " << hbm_sim::config::model_field_text(spec, "lpddr_ca_parity_bits_per_command") << '\n';
   }
 
   // 每种来源使用独立 timing subsection，使导出的配置重新加载后仍能保留
@@ -2381,6 +1834,7 @@ void write_resolved_config(const std::string& path,
   write_path("dfi_trace", cli.dfi_trace_path);
   write_path("dfi_signal_trace", cli.dfi_signal_trace_path);
   write_path("dump_timing_table", cli.timing_table_path);
+  write_path("stats_json", cli.stats_json_path);
   write_path("memory_image", cli.memory_image_path);
   write_path("dump_memory_image", cli.dump_memory_image_path);
   write_path("dump_memory_csv", cli.dump_memory_csv_path);
@@ -2389,17 +1843,72 @@ void write_resolved_config(const std::string& path,
   write_path("dump_thermal_map", cli.thermal_map_path);
 }
 
+void write_resolved_config(const std::string& path, const Cli& cli,
+                           const hbm_sim::DramSpec& spec) {
+  ensure_parent_directory(path);
+  std::ofstream out(path);
+  if (!out) throw std::runtime_error("failed to open resolved config output: " + path);
+  serialize_resolved_config(out, cli, spec);
+  out.close();
+  if (!out) throw std::runtime_error("failed to write resolved config: " + path);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  std::string result_path;
+  hbm_sim::ResultFields full_stats;
+  hbm_sim::ResultReport report;
   try {
     Cli cli = parse_args(argc, argv);
     if (handle_list_commands(cli)) return 0;
+    if (!cli.stats_json_path.empty()) {
+      const auto output = std::filesystem::weakly_canonical(cli.stats_json_path);
+      auto check_distinct = [&](const std::string& path) {
+        if (!path.empty() && output == std::filesystem::weakly_canonical(path))
+          throw std::invalid_argument("stats_json must not overwrite another input/output: " + path);
+      };
+      for (const auto& document : cli.config_documents) check_distinct(document.path);
+      for (const auto& path : {cli.trace_path, cli.memory_image_path, cli.verify_golden_path,
+                              cli.cmd_trace_path, cli.response_trace_path,
+                              cli.transaction_response_trace_path, cli.dfi_trace_path,
+                              cli.dfi_signal_trace_path, cli.timing_table_path,
+                              cli.dump_resolved_config_path, cli.dump_config_diff_path,
+                              cli.dump_memory_image_path, cli.dump_memory_csv_path,
+                              cli.mismatch_report_path, cli.thermal_map_path})
+        check_distinct(path);
+      const auto& backend_paths = cli.storage_model.memory_backend;
+      for (const auto& path : {backend_paths.data_file, backend_paths.init_file,
+                              backend_paths.meta_file, backend_paths.presence_file})
+        check_distinct(path);
+      if (!backend_paths.data_file.empty()) {
+        check_distinct(backend_paths.data_file + ".init");
+        check_distinct(backend_paths.data_file + ".meta");
+        check_distinct(backend_paths.data_file + ".present");
+      }
+      for (int stack = 0; stack < cli.stack_count; ++stack) {
+        for (const auto& path : {cli.dump_memory_image_path, cli.dump_memory_csv_path,
+                                cli.thermal_map_path, cli.verify_golden_path,
+                                backend_paths.data_file, backend_paths.init_file,
+                                backend_paths.meta_file, backend_paths.presence_file})
+          check_distinct(stack_path(path, stack, cli.stack_count));
+        const auto data = stack_path(backend_paths.data_file, stack, cli.stack_count);
+        if (!data.empty()) {
+          check_distinct(data + ".init");
+          check_distinct(data + ".meta");
+          check_distinct(data + ".present");
+        }
+      }
+    }
+    result_path = cli.stats_json_path;
+    // Invalidate an older result before execution so a failed rerun cannot leave
+    // an apparently successful artifact for experiment tools to consume.
+    hbm_sim::write_result_json(result_path, {}, "failed", "run has not completed");
     resolve_response_delivery(cli);
     // CLI 使用 draft，等 profile 选择项和显式覆盖全部就绪后只 finalize 一次。
     // 所有 HBM/LPDDR 差异仍从 DramSpec 传入共享 Controller。
-    hbm_sim::DramSpec spec = hbm_sim::make_spec_draft(cli.standard);
-    apply_spec_overrides(spec, cli.spec_overrides);
+    hbm_sim::DramSpec spec = hbm_sim::config::build_model(
+        cli.standard, cli.spec_overrides, cli.config_schema_version, &cli.derived_parameters);
     const bool require_device_timing =
         cli.validation_mode == hbm_sim::config::ValidationMode::Device;
     std::vector<std::string> timing_errors =
@@ -2637,87 +2146,31 @@ int main(int argc, char** argv) {
           write_transaction_response_csv_header(transaction_response_trace);
         }
 
-        // 这是 CLI 的真实异步运行路径：请求按 valid/ready 语义重试，系统每拍
-        // step，选中的响应队列在运行中 pop。未指定 trace 时也会消费响应，
-        // 表示一个始终 ready 的上层；有限容量仍会约束同一拍的完成收集。
-        hbm_sim::Request pending_request;
-        bool has_pending_request = false;
-        bool source_done = false;
-        bool saw_request = false;
-        hbm_sim::Cycle last_inject_cycle = 0;
-        while ((!source_done || has_pending_request || !memory.idle() ||
-                !memory.responses_drained()) &&
-               memory.clock() < cli.max_cycles) {
-          while (true) {
-            if (!has_pending_request && !source_done) {
-              if (!request_stream->next(pending_request)) {
-                source_done = true;
-                break;
-              }
-              if (saw_request &&
-                  pending_request.inject_cycle < last_inject_cycle) {
-                throw std::runtime_error(
-                    "streaming request source is not ordered by inject_cycle");
-              }
-              saw_request = true;
-              last_inject_cycle = pending_request.inject_cycle;
-              has_pending_request = true;
-            }
-            if (!has_pending_request ||
-                pending_request.inject_cycle > memory.clock()) {
-              break;
-            }
-            const bool accepted =
-                pending_request.type == hbm_sim::RequestType::Maintenance
-                    ? memory.try_submit_maintenance(pending_request)
-                    : memory.try_submit(pending_request);
-            if (!accepted) break;
-            has_pending_request = false;
-          }
-
-          memory.step();
-          if (cli.progress_interval != 0 &&
-              memory.clock() % cli.progress_interval == 0) {
-            hbm_sim::RunProgress progress;
-            progress.cycle = memory.clock();
-            for (const hbm_sim::Controller& controller : memory.controllers()) {
-              progress.completed_reads += controller.stats().completed_reads;
-              progress.completed_writes += controller.stats().completed_writes;
-            }
-            progress.remaining_frontend = has_pending_request ? 1 : 0;
-            if (!source_done) {
-              progress.remaining_frontend +=
-                  request_stream->remaining_hint().value_or(1);
-            }
-            progress_consumer(progress);
-          }
-          while (memory.has_response()) {
-            const hbm_sim::HostResponse response = memory.pop_response();
+        hbm_sim::MemorySystem::RunOptions run_options;
+        run_options.drain_responses = true;
+        run_options.progress_interval = cli.progress_interval;
+        run_options.progress = progress_consumer;
+        if (cli.response_delivery_mode == hbm_sim::ResponseDeliveryMode::HostOnly ||
+            cli.response_delivery_mode == hbm_sim::ResponseDeliveryMode::Both) {
+          run_options.host_response = [&](const hbm_sim::HostResponse& response) {
             consumed_host_responses++;
             if (host_response_trace.is_open()) {
               write_host_response_csv_row(host_response_trace, response);
               exported_host_responses++;
             }
-          }
-          while (memory.has_transaction_response()) {
-            const hbm_sim::TransactionResponse response =
-                memory.pop_transaction_response();
+          };
+        }
+        if (cli.response_delivery_mode == hbm_sim::ResponseDeliveryMode::TransactionOnly ||
+            cli.response_delivery_mode == hbm_sim::ResponseDeliveryMode::Both) {
+          run_options.transaction_response = [&](const hbm_sim::TransactionResponse& response) {
             consumed_transaction_responses++;
             if (transaction_response_trace.is_open()) {
-              write_transaction_response_csv_row(transaction_response_trace,
-                                                 response);
+              write_transaction_response_csv_row(transaction_response_trace, response);
               exported_transaction_responses++;
             }
-          }
+          };
         }
-
-        std::uint64_t remaining_frontend_requests =
-            has_pending_request ? 1 : 0;
-        if (!source_done) {
-          remaining_frontend_requests +=
-              request_stream->remaining_hint().value_or(1);
-        }
-        memory.finish(remaining_frontend_requests);
+        memory.run(*request_stream, cli.max_cycles, run_options);
       }
       stats = memory.stats();
       issued_commands = memory.issued_commands();
@@ -2903,11 +2356,13 @@ int main(int argc, char** argv) {
           }
         }
       }
-      print_field(std::cout, "golden_verified", verified);
-      print_field(std::cout, "golden_mismatches", mismatches);
-      print_field(std::cout, "golden_uninitialized_lines", golden_uninitialized_lines);
-      print_field(std::cout, "golden_actual_uninitialized_lines", actual_uninitialized_lines);
+      hbm_sim::record_field(full_stats, "golden_verified", verified);
+      hbm_sim::record_field(full_stats, "golden_mismatches", mismatches);
+      hbm_sim::record_field(full_stats, "golden_uninitialized_lines", golden_uninitialized_lines);
+      hbm_sim::record_field(full_stats, "golden_actual_uninitialized_lines", actual_uninitialized_lines);
       if (mismatches > 0) {
+        hbm_sim::print_diagnostics(cli.stats_view == "diagnostic" ? std::cout : std::cerr,
+                                   full_stats);
         for (const auto& line : mismatch_lines) {
           std::cerr << line << '\n';
         }
@@ -2918,9 +2373,8 @@ int main(int argc, char** argv) {
     // max_cycles 命中时，run() 会设置 hit_cycle_limit，main()
     // 最终用退出码 2 告诉脚本“不是语法错误，而是仿真未完成”。
 
-    // 输出保持 key: value 文本格式，方便 shell、Python 和表格工具后处理。
-    // key 使用固定宽度，使命令行中所有冒号和值都对齐，便于人工阅读。
-    // 前半部分是 spec/config 摘要，后半部分由 print_stats() 输出运行指标。
+    // Collect typed effective configuration and counters. The public report
+    // selects semantic fields; the complete catalog is diagnostic-only.
     const auto& storage_options = memory_image->options();
     const auto model_differences = config_differences(cli);
     const char* conformance =
@@ -2928,423 +2382,335 @@ int main(int argc, char** argv) {
             ? "device_checked"
             : (cli.validation_mode == hbm_sim::config::ValidationMode::Standard
                    ? "standard_checked"
-                   : (model_differences.empty() ? "standard_default"
-                                                : "custom_exploratory"));
-    if (cli.stats_view == "summary") {
-      print_section(std::cout, 1, "MODEL IDENTITY");
-      print_field(std::cout, "model_name", cli.model_name);
-      print_field(std::cout, "standard", spec.name);
-      print_field(std::cout, "selected_preset",
-                  cli.preset.empty() ? "none" : cli.preset);
-      print_field(std::cout, "validation_mode",
-                  hbm_sim::config::to_string(cli.validation_mode));
-      print_field(std::cout, "model_conformance", conformance);
-
-      print_section(std::cout, 2, "STRUCTURE AND INTERFACE");
-      print_field(std::cout, "stack_count", stats.stack_count);
-      print_field(std::cout, "controller_count", stats.controller_count);
-      print_field(std::cout, "channels", spec.org.channels);
-      print_field(std::cout, "pseudo_channels", spec.org.pseudo_channels);
-      print_field(std::cout, "sids", spec.org.sids);
-      print_field(std::cout, "banks", spec.total_banks());
-      print_field(std::cout, "line_size", spec.org.line_size);
-      print_field(std::cout, "dram_transaction_bytes", spec.transaction_bytes());
-      print_field(std::cout, "data_rate_mbps", spec.data_rate_mbps);
-      print_field(std::cout, "data_bus_bits", spec.data_bus_bits);
-
-      print_section(std::cout, 3, "TIMING PROVENANCE");
-      print_field(std::cout, "timing_profile", spec.timing_profile);
-      print_field(std::cout, "vendor_profile", spec.vendor_profile);
-      print_field(std::cout, "timing_source_jedec",
-                  spec.timing_table.source_count(hbm_sim::TimingValueSource::JEDEC));
-      print_field(std::cout, "timing_source_vendor",
-                  spec.timing_table.source_count(hbm_sim::TimingValueSource::Vendor));
-      print_field(std::cout, "timing_source_reference",
-                  spec.timing_table.source_count(
-                      hbm_sim::TimingValueSource::ExternalReference));
-      print_field(std::cout, "timing_source_research",
-                  spec.timing_table.source_count(
-                      hbm_sim::TimingValueSource::ResearchDefault));
-      print_field(std::cout, "timing_vendor_required",
-                  spec.timing_table.provisional_count());
-
-      print_section(std::cout, 4, "RUN CONFIGURATION");
-      print_field(std::cout, "pattern", cli.pattern);
-      print_field(std::cout, "requests", cli.requests);
-      print_field(std::cout, "read_ratio", cli.read_ratio);
-      print_field(std::cout, "seed", cli.seed);
-      print_field(std::cout, "random_address_space_bytes",
-                  cli.random_address_space_bytes);
-      print_field(std::cout, "inject_interval", cli.inject_interval);
-      print_field(std::cout, "progress_interval", cli.progress_interval);
-      print_field(std::cout, "scheduler",
-                  hbm_sim::to_string(cli.controller.scheduler));
-      print_field(std::cout, "row_policy",
-                  hbm_sim::to_string(cli.controller.row_policy));
-      print_field(std::cout, "mem_phy_mode",
-                  hbm_sim::to_string(cli.controller.phy.mode));
-      print_field(std::cout, "response_delivery_mode",
-                  response_delivery_mode_name(cli.response_delivery_mode));
-      print_field(std::cout, "memory_backend",
-                  hbm_sim::to_string(storage_options.memory_backend.kind));
-
-      print_section(std::cout, 5, "COMPLETION AND VALIDITY");
-      print_field(std::cout, "host_requests", stats.host_requests);
-      print_field(std::cout, "dram_transactions", stats.dram_transactions);
-      print_field(std::cout, "completed_reads", stats.completed_reads);
-      print_field(std::cout, "completed_writes", stats.completed_writes);
-      print_field(std::cout, "remaining_requests", stats.remaining_requests);
-      print_field(std::cout, "remaining_pending", stats.remaining_pending);
-      print_field(std::cout, "hit_cycle_limit",
-                  stats.hit_cycle_limit ? "true" : "false");
-      print_field(std::cout, "data_mismatches", stats.data_mismatches);
-      print_field(std::cout, "cmd_validation",
-                  cli.validate_cmd_trace ? "pass" : "off");
-      print_field(std::cout, "dfi_validation",
-                  cli.validate_dfi_trace ? "pass" : "off");
-      print_field(std::cout, "host_responses_consumed",
-                  consumed_host_responses);
-      print_field(std::cout, "transaction_responses_consumed",
-                  consumed_transaction_responses);
-
-      print_section(std::cout, 6, "KEY PERFORMANCE");
-      print_field(std::cout, "system_cycles", stats.system_cycles);
-      print_field(std::cout, "aggregate_ctrl_cycles",
-                  stats.aggregate_controller_cycles);
-      std::cout << std::fixed << std::setprecision(3);
-      print_field(std::cout, "peak_bandwidth_GBps", stats.peak_bandwidth_GBps);
-      print_field(std::cout, "achieved_bw_GBps",
-                  stats.achieved_bandwidth_GBps);
-      print_field(std::cout, "achieved_if_bw_GBps",
-                  stats.achieved_interface_bandwidth_GBps);
-      std::cout << std::fixed << std::setprecision(2);
-      print_field(std::cout, "bandwidth_util_pct", stats.bandwidth_utilization);
-      print_field(std::cout, "payload_efficiency_pct", stats.payload_efficiency);
-      print_field(std::cout, "avg_read_latency", stats.avg_read_latency());
-      print_field(std::cout, "read_queue_len_avg", stats.read_queue_len_avg());
-      print_field(std::cout, "write_queue_len_avg", stats.write_queue_len_avg());
-      print_field(std::cout, "phy_command_backpressure",
-                  stats.phy_command_backpressure);
-      print_field(std::cout, "phy_data_backpressure",
-                  stats.phy_data_backpressure);
-      print_field(std::cout, "power_energy_pJ", stats.power_energy_pj);
-      print_field(std::cout, "thermal_peak_temp_C", stats.thermal_peak_temp_c);
-
-      if (per_stack_stats.size() > 1) {
-        print_section(std::cout, 7, "PER-STACK SUMMARY");
-        for (std::size_t stack = 0; stack < per_stack_stats.size(); ++stack) {
-          const auto& per = per_stack_stats[stack];
-          const std::string prefix = "stack_" + std::to_string(stack) + "_";
-          print_field(std::cout, (prefix + "reads").c_str(), per.completed_reads);
-          print_field(std::cout, (prefix + "writes").c_str(), per.completed_writes);
-          print_field(std::cout, (prefix + "bw_GBps").c_str(),
-                      per.achieved_bandwidth_GBps);
-          const double avg_latency =
-              per.completed_reads == 0
-                  ? 0.0
-                  : static_cast<double>(per.total_read_latency) /
-                        per.completed_reads;
-          print_field(std::cout, (prefix + "avg_read_latency").c_str(),
-                      avg_latency);
-        }
-      }
-    } else {
-    print_section(std::cout, 1, "MODEL IDENTITY");
-    print_field(std::cout, "model_name", cli.model_name);
-    print_field(std::cout, "base_standard", spec.name);
-    print_field(std::cout, "selected_preset", cli.preset.empty() ? "none" : cli.preset);
-    print_field(std::cout, "validation_mode", hbm_sim::config::to_string(cli.validation_mode));
-    print_field(std::cout, "model_conformance", conformance);
-    print_field(std::cout, "modified_parameters", model_differences.size());
-    print_field(std::cout, "standard", spec.name);
-    print_section(std::cout, 2, "STRUCTURE, PROTOCOL AND INTERFACE");
-    print_field(std::cout, "timing_profile", spec.timing_profile);
-    print_field(std::cout, "timing_profile_file", spec.timing_profile_file.empty() ? "off" : spec.timing_profile_file);
-    print_field(std::cout, "vendor_profile", spec.vendor_profile);
-    print_field(std::cout, "mode_profile", spec.mode_profile);
-    print_field(std::cout, "speed_bin_mbps", spec.speed_bin_mbps);
-    print_field(std::cout, "density_gb", spec.density_gb);
-    print_field(std::cout, "stack_height", spec.stack_height);
-    print_field(std::cout, "stack_mapping", stack_mapping_name(cli.stack_mapping));
-    print_field(std::cout, "stack_interleave_bytes", cli.stack_interleave_bytes);
-    print_field(std::cout, "stack_ingress_buffer_size", cli.stack_ingress_buffer_size);
-    print_field(std::cout, "stack_dispatch_width", cli.stack_dispatch_width);
-    print_field(std::cout, "stack_qos_policy", stack_qos_policy_name(cli.stack_qos_policy));
-    print_field(std::cout, "aggregate_capacity_bytes",
+                   : "custom_exploratory");
+    const std::string run_status =
+        stats.hit_cycle_limit ? "truncated" :
+        (stats.data_mismatches > 0 || stats.remaining_requests > 0 ||
+         stats.remaining_pending > 0) ? "failed" : "completed";
+    hbm_sim::record_field(full_stats, "run_status", run_status);
+    hbm_sim::record_field(full_stats, "tick_duration_ps", spec.timing.tCK_ps / spec.tick_multiplier);
+    hbm_sim::record_field(full_stats, "model_name", cli.model_name);
+    hbm_sim::record_field(full_stats, "base_standard", spec.name);
+    hbm_sim::record_field(full_stats, "selected_preset", cli.preset.empty() ? "none" : cli.preset);
+    hbm_sim::record_field(full_stats, "validation_mode", hbm_sim::config::to_string(cli.validation_mode));
+    hbm_sim::record_field(full_stats, "model_conformance", conformance);
+    hbm_sim::record_field(full_stats, "modified_parameters", model_differences.size());
+    // Output names may differ from configuration aliases; typed values share
+    // the registry used to construct and export the executed model.
+    for (const auto& [output_key, config_key] : {
+        std::pair{"timing_profile", "timing_profile"},
+        std::pair{"vendor_profile", "vendor_profile"},
+        std::pair{"mode_profile", "mode_profile"},
+        std::pair{"speed_bin_mbps", "speed_bin_mbps"},
+        std::pair{"density_gb", "density_gb"},
+        std::pair{"stack_height", "stack_height"},
+        std::pair{"data_rate_mbps", "data_rate_mbps"},
+        std::pair{"data_bus_bits", "data_bus_bits"},
+        std::pair{"rows", "rows"},
+        std::pair{"columns", "columns"},
+        std::pair{"ranks", "ranks"},
+        std::pair{"bank_groups", "bank_groups"},
+        std::pair{"banks_per_group", "banks_per_group"},
+        std::pair{"prefetch_size", "prefetch_size"},
+        std::pair{"tick_multiplier", "tick_multiplier"},
+        std::pair{"tCK_ps", "tck_ps"},
+        std::pair{"full_stack_model", "full_stack_model"},
+        std::pair{"supports_refresh", "supports_refresh"},
+        std::pair{"lpddr_dual_bank_refresh", "lpddr_dual_bank_refresh"},
+        std::pair{"supports_rfm", "supports_rfm"},
+        std::pair{"supports_ecc", "supports_ecc"},
+        std::pair{"hbm_full_32ch_stack", "hbm_full_32_channel_stack"},
+        std::pair{"hbm_pc_interleave", "hbm_pc_interleave"},
+        std::pair{"hbm_edge_pairing", "hbm_edge_pairing"},
+        std::pair{"hbm_strict_edge_pairing", "hbm_strict_edge_pairing"},
+        std::pair{"hbm_pairing_matrix", "hbm_edge_pairing_matrix"},
+        std::pair{"hbm_sid_mapping", "hbm_sid_mapping"},
+        std::pair{"hbm_ecc_scheme", "hbm_ecc_scheme"},
+        std::pair{"hbm_ras_policy", "hbm_ras_policy"},
+        std::pair{"hbm_link_crc_mode", "hbm_link_crc_mode"},
+        std::pair{"hbm_link_retry", "hbm_link_retry_enabled"},
+        std::pair{"rfm_act_threshold", "rfm_act_threshold"},
+        std::pair{"rfm_decrement", "rfm_decrement"},
+        std::pair{"lpddr_link_protection", "lpddr_link_protection"},
+        std::pair{"lpddr_low_rate_mbps", "lpddr_low_data_rate_mbps"},
+        std::pair{"lpddr_wck_ratio", "lpddr_wck_ratio"},
+        std::pair{"lpddr_mr_profile", "lpddr_mode_register_profile"},
+        std::pair{"lpddr_wck_training", "lpddr_wck_training_mode"},
+        std::pair{"lpddr_dvfs_policy", "lpddr_dvfs_transition_policy"},
+        std::pair{"lpddr_link_mode", "lpddr_link_protection_mode"},
+        std::pair{"lpddr_low_power_policy", "lpddr_low_power_state_policy"},
+        std::pair{"lpddr_wck_train_req", "lpddr_wck_training_required"},
+        std::pair{"lpddr_dbi_enabled", "lpddr_dbi_enabled"},
+        std::pair{"lpddr_link_ecc_enabled", "lpddr_link_ecc_enabled"},
+        std::pair{"lpddr_ca_parity", "lpddr_ca_parity_enabled"},
+        std::pair{"low_power_entry_cycles", "low_power_entry_cycles"},
+        std::pair{"low_power_exit_cycles", "low_power_exit_cycles"},
+        std::pair{"self_refresh_exit_cycles", "self_refresh_exit_cycles"},
+        std::pair{"refresh_postpone_limit", "refresh_postpone_limit"},
+        std::pair{"refresh_pullin_limit", "refresh_pullin_limit"},
+        std::pair{"refresh_credit_limit", "refresh_credit_limit"},
+        std::pair{"refresh_high_temp_mult", "refresh_high_temp_multiplier"},
+        std::pair{"metadata_bits_per_req", "metadata_bits_per_request"},
+        std::pair{"ecc_bits_per_req", "ecc_bits_per_request"},
+        std::pair{"hbm_link_crc_bits_req", "hbm_link_crc_bits_per_request"},
+        std::pair{"hbm_ras_meta_bits_req", "hbm_ras_metadata_bits_per_request"},
+        std::pair{"hbm_ecc_bits_req", "hbm_ecc_bits_per_request"},
+        std::pair{"lpddr_dbi_bits_req", "lpddr_dbi_bits_per_request"},
+        std::pair{"lpddr_link_ecc_bits_req", "lpddr_link_ecc_bits_per_request"},
+        std::pair{"lpddr_ca_parity_bits_cmd", "lpddr_ca_parity_bits_per_command"},
+        std::pair{"line_size", "line_size"},
+        std::pair{"channels", "channels"},
+        std::pair{"pseudo_channels", "pseudo_channels"},
+        std::pair{"sids", "sids"}}) {
+      std::visit([&](const auto& value) {
+        hbm_sim::record_field(full_stats, output_key, value);
+      }, hbm_sim::config::model_field_value(spec, config_key));
+    }
+    hbm_sim::record_field(full_stats, "standard", spec.name);
+    hbm_sim::record_field(full_stats, "stack_mapping", stack_mapping_name(cli.stack_mapping));
+    hbm_sim::record_field(full_stats, "stack_interleave_bytes", cli.stack_interleave_bytes);
+    hbm_sim::record_field(full_stats, "stack_ingress_buffer_size", cli.stack_ingress_buffer_size);
+    hbm_sim::record_field(full_stats, "stack_dispatch_width", cli.stack_dispatch_width);
+    hbm_sim::record_field(full_stats, "stack_qos_policy", stack_qos_policy_name(cli.stack_qos_policy));
+    hbm_sim::record_field(full_stats, "aggregate_capacity_bytes",
                 spec.addressable_capacity_bytes() * static_cast<std::uint64_t>(cli.stack_count));
-    print_field(std::cout, "dual_command_bus", spec.dual_command_bus ? "true" : "false");
-    print_field(std::cout, "split_activate", spec.split_activate ? "true" : "false");
-    print_field(std::cout, "lpddr_family", spec.lpddr_family ? "true" : "false");
-    print_field(std::cout, "data_rate_mbps", spec.data_rate_mbps);
-    print_field(std::cout, "data_bus_bits", spec.data_bus_bits);
-    print_field(std::cout, "prefetch_size", spec.internal_prefetch_size);
-    print_field(std::cout, "dfi_phase_count", hbm_sim::dfi_phase_count(spec));
-    print_field(std::cout, "dfi_data_lane_bytes", hbm_sim::dfi_payload_beat_bytes(spec));
-    print_field(std::cout, "dfi_read_latency_nck",
+    hbm_sim::record_field(full_stats, "dual_command_bus", spec.dual_command_bus);
+    hbm_sim::record_field(full_stats, "split_activate", spec.split_activate);
+    hbm_sim::record_field(full_stats, "lpddr_family", spec.lpddr_family);
+    hbm_sim::record_field(full_stats, "dfi_phase_count", hbm_sim::dfi_phase_count(spec));
+    hbm_sim::record_field(full_stats, "dfi_data_lane_bytes", hbm_sim::dfi_payload_beat_bytes(spec));
+    hbm_sim::record_field(full_stats, "dfi_read_latency_nck",
                 spec.dfi_read_latency_nck > 0 ? spec.dfi_read_latency_nck : spec.timing.nCL);
-    print_field(std::cout, "dfi_write_latency_nck",
+    hbm_sim::record_field(full_stats, "dfi_write_latency_nck",
                 spec.dfi_write_latency_nck > 0 ? spec.dfi_write_latency_nck : spec.timing.nCWL);
-    print_field(std::cout, "mem_phy_mode", hbm_sim::to_string(cli.controller.phy.mode));
-    print_field(std::cout, "phy_protocol", spec.lpddr_family ? "lpddr" : "hbm");
-    print_field(std::cout, "dfi_version", cli.controller.phy.dfi_version);
-    print_field(std::cout, "phy_command_fifo_depth", cli.controller.phy.command_fifo_depth);
-    print_field(std::cout, "phy_read_fifo_depth", cli.controller.phy.read_fifo_depth);
-    print_field(std::cout, "phy_write_fifo_depth", cli.controller.phy.write_fifo_depth);
-    print_field(std::cout, "phy_command_pipeline", cli.controller.phy.command_pipeline_cycles);
-    print_field(std::cout, "phy_read_return_pipeline", cli.controller.phy.read_return_pipeline_cycles);
-    print_field(std::cout, "phy_write_data_pipeline", cli.controller.phy.write_data_pipeline_cycles);
-    print_field(std::cout, "phy_reset_config_cycles", cli.controller.phy.reset_cycles);
-    print_field(std::cout, "phy_init_config_cycles", cli.controller.phy.initialization_cycles);
-    print_field(std::cout, "phy_train_config_cycles", cli.controller.phy.training_cycles);
-    print_field(std::cout, "phy_auto_train", cli.controller.phy.auto_train ? "true" : "false");
-    print_field(std::cout, "tick_multiplier", spec.tick_multiplier);
-    print_field(std::cout, "tCK_ps", spec.timing.tCK_ps);
-    print_field(std::cout, "full_stack_model", spec.full_stack_model ? "true" : "false");
-    print_field(std::cout, "supports_refresh", spec.supports_refresh ? "true" : "false");
-    print_field(std::cout, "refresh_policy", hbm_sim::to_string(spec.refresh_policy));
-    print_field(std::cout, "lpddr_dual_bank_refresh", spec.lpddr_dual_bank_refresh ? "true" : "false");
-    print_field(std::cout, "supports_rfm", spec.supports_rfm ? "true" : "false");
-    print_field(std::cout, "rfm_policy", hbm_sim::to_string(spec.rfm_policy));
-    print_field(std::cout, "supports_ecc", spec.supports_ecc ? "true" : "false");
-    print_field(std::cout, "hbm_full_32ch_stack", spec.hbm_full_32_channel_stack ? "true" : "false");
-    print_field(std::cout, "hbm_sid_interleave", spec.hbm_sid_interleave ? "true" : "false");
-    print_field(std::cout, "hbm_pc_interleave", spec.hbm_pc_interleave ? "true" : "false");
-    print_field(std::cout, "hbm_edge_pairing", spec.hbm_edge_pairing ? "true" : "false");
-    print_field(std::cout, "hbm_strict_edge_pairing", spec.hbm_strict_edge_pairing ? "true" : "false");
-    print_field(std::cout, "hbm_pairing_matrix", spec.hbm_edge_pairing_matrix);
-    print_field(std::cout, "hbm_sid_mapping", spec.hbm_sid_mapping);
-    print_field(std::cout, "hbm_ecc_scheme", spec.hbm_ecc_scheme);
-    print_field(std::cout, "hbm_ras_policy", spec.hbm_ras_policy);
-    print_field(std::cout, "hbm_link_crc_mode", spec.hbm_link_crc_mode);
-    print_field(std::cout, "hbm_link_retry", spec.hbm_link_retry_enabled ? "true" : "false");
-    print_field(std::cout, "rfm_act_threshold", spec.rfm_act_threshold);
-    print_field(std::cout, "rfm_decrement", spec.rfm_decrement);
-    print_field(std::cout, "lpddr_link_protection", spec.lpddr_link_protection ? "true" : "false");
-    print_field(std::cout, "lpddr_efficiency_mode", hbm_sim::to_string(spec.lpddr_efficiency_mode));
-    print_field(std::cout, "lpddr_dvfs_mode", hbm_sim::to_string(spec.lpddr_dvfs_mode));
-    print_field(std::cout, "lpddr_low_rate_mbps", spec.lpddr_low_data_rate_mbps);
-    print_field(std::cout, "lpddr_wck_mode", hbm_sim::to_string(spec.lpddr_wck_mode));
-    print_field(std::cout, "lpddr_wck_ratio", spec.lpddr_wck_ratio);
-    print_field(std::cout, "lpddr_mr_profile", spec.lpddr_mode_register_profile);
-    print_field(std::cout, "lpddr_wck_training", spec.lpddr_wck_training_mode);
-    print_field(std::cout, "lpddr_dvfs_policy", spec.lpddr_dvfs_transition_policy);
-    print_field(std::cout, "lpddr_link_mode", spec.lpddr_link_protection_mode);
-    print_field(std::cout, "lpddr_low_power_policy", spec.lpddr_low_power_state_policy);
-    print_field(std::cout, "lpddr_wck_train_req", spec.lpddr_wck_training_required ? "true" : "false");
-    print_field(std::cout, "lpddr_dbi_enabled", spec.lpddr_dbi_enabled ? "true" : "false");
-    print_field(std::cout, "lpddr_link_ecc_enabled", spec.lpddr_link_ecc_enabled ? "true" : "false");
-    print_field(std::cout, "lpddr_ca_parity", spec.lpddr_ca_parity_enabled ? "true" : "false");
-    print_field(std::cout, "low_power_mode", hbm_sim::to_string(spec.low_power_mode));
-    print_field(std::cout, "low_power_entry_cycles", spec.low_power_entry_cycles);
-    print_field(std::cout, "low_power_exit_cycles", spec.low_power_exit_cycles);
-    print_field(std::cout, "self_refresh_exit_cycles", spec.self_refresh_exit_cycles);
-    print_field(std::cout, "refresh_postpone_limit", spec.refresh_postpone_limit);
-    print_field(std::cout, "refresh_pullin_limit", spec.refresh_pullin_limit);
-    print_field(std::cout, "refresh_credit_limit", spec.refresh_credit_limit);
-    print_field(std::cout, "refresh_temperature", hbm_sim::to_string(spec.refresh_temperature_mode));
-    print_field(std::cout, "refresh_high_temp_mult", spec.refresh_high_temp_multiplier);
-    print_field(std::cout, "metadata_bits_per_req", spec.metadata_bits_per_request);
-    print_field(std::cout, "ecc_bits_per_req", spec.ecc_bits_per_request);
-    print_field(std::cout, "hbm_link_crc_bits_req", spec.hbm_link_crc_bits_per_request);
-    print_field(std::cout, "hbm_ras_meta_bits_req", spec.hbm_ras_metadata_bits_per_request);
-    print_field(std::cout, "hbm_ecc_bits_req", spec.hbm_ecc_bits_per_request);
-    print_field(std::cout, "lpddr_dbi_bits_req", spec.lpddr_dbi_bits_per_request);
-    print_field(std::cout, "lpddr_link_ecc_bits_req", spec.lpddr_link_ecc_bits_per_request);
-    print_field(std::cout, "lpddr_metadata_bits_req", hbm_sim::lpddr_metadata_lane_bits_per_request(spec));
-    print_field(std::cout, "lpddr_ca_parity_bits_cmd", spec.lpddr_ca_parity_bits_per_command);
-    print_section(std::cout, 3, "TIMING PROVENANCE");
-    print_field(std::cout, "timing_table_entries", spec.timing_table.entries.size());
-    print_field(std::cout, "timing_vendor_required", spec.timing_table.provisional_count());
-    print_field(std::cout, "timing_source_jedec",
+    hbm_sim::record_field(full_stats, "mem_phy_mode", hbm_sim::to_string(cli.controller.phy.mode));
+    hbm_sim::record_field(full_stats, "phy_protocol", spec.lpddr_family ? "lpddr" : "hbm");
+    hbm_sim::record_field(full_stats, "dfi_version", cli.controller.phy.dfi_version);
+    hbm_sim::record_field(full_stats, "phy_command_fifo_depth", cli.controller.phy.command_fifo_depth);
+    hbm_sim::record_field(full_stats, "phy_read_fifo_depth", cli.controller.phy.read_fifo_depth);
+    hbm_sim::record_field(full_stats, "phy_write_fifo_depth", cli.controller.phy.write_fifo_depth);
+    hbm_sim::record_field(full_stats, "phy_command_pipeline", cli.controller.phy.command_pipeline_cycles);
+    hbm_sim::record_field(full_stats, "phy_read_return_pipeline", cli.controller.phy.read_return_pipeline_cycles);
+    hbm_sim::record_field(full_stats, "phy_write_data_pipeline", cli.controller.phy.write_data_pipeline_cycles);
+    hbm_sim::record_field(full_stats, "phy_reset_config_cycles", cli.controller.phy.reset_cycles);
+    hbm_sim::record_field(full_stats, "phy_init_config_cycles", cli.controller.phy.initialization_cycles);
+    hbm_sim::record_field(full_stats, "phy_train_config_cycles", cli.controller.phy.training_cycles);
+    hbm_sim::record_field(full_stats, "phy_auto_train", cli.controller.phy.auto_train);
+    hbm_sim::record_field(full_stats, "refresh_policy", hbm_sim::to_string(spec.refresh_policy));
+    hbm_sim::record_field(full_stats, "rfm_policy", hbm_sim::to_string(spec.rfm_policy));
+    hbm_sim::record_field(full_stats, "hbm_sid_interleave", spec.hbm_sid_interleave);
+    hbm_sim::record_field(full_stats, "lpddr_efficiency_mode", hbm_sim::to_string(spec.lpddr_efficiency_mode));
+    hbm_sim::record_field(full_stats, "lpddr_dvfs_mode", hbm_sim::to_string(spec.lpddr_dvfs_mode));
+    hbm_sim::record_field(full_stats, "lpddr_wck_mode", hbm_sim::to_string(spec.lpddr_wck_mode));
+    hbm_sim::record_field(full_stats, "low_power_mode", hbm_sim::to_string(spec.low_power_mode));
+    hbm_sim::record_field(full_stats, "refresh_temperature", hbm_sim::to_string(spec.refresh_temperature_mode));
+    hbm_sim::record_field(full_stats, "lpddr_metadata_bits_req", hbm_sim::lpddr_metadata_lane_bits_per_request(spec));
+    hbm_sim::record_field(full_stats, "timing_table_entries", spec.timing_table.entries.size());
+    hbm_sim::record_field(full_stats, "timing_vendor_required", spec.timing_table.provisional_count());
+    hbm_sim::record_field(full_stats, "timing_source_jedec",
                 spec.timing_table.source_count(hbm_sim::TimingValueSource::JEDEC));
-    print_field(std::cout, "timing_source_vendor",
+    hbm_sim::record_field(full_stats, "timing_source_vendor",
                 spec.timing_table.source_count(hbm_sim::TimingValueSource::Vendor));
-    print_field(std::cout, "timing_source_derived",
+    hbm_sim::record_field(full_stats, "timing_source_derived",
                 spec.timing_table.source_count(hbm_sim::TimingValueSource::Derived));
-    print_field(std::cout, "timing_source_reference",
+    hbm_sim::record_field(full_stats, "timing_source_reference",
                 spec.timing_table.source_count(hbm_sim::TimingValueSource::ExternalReference));
-    print_field(std::cout, "timing_source_research",
+    hbm_sim::record_field(full_stats, "timing_source_research",
                 spec.timing_table.source_count(hbm_sim::TimingValueSource::ResearchDefault));
-    print_field(std::cout, "timing_vendor_required_only", spec.timing_table.vendor_required_count());
-    print_field(std::cout, "timing_table_dump", cli.timing_table_path.empty() ? "off" : cli.timing_table_path);
-    print_section(std::cout, 4, "RUN CONFIGURATION AND ARTIFACTS");
-    print_field(std::cout, "memory_system",
+    hbm_sim::record_field(full_stats, "timing_vendor_required_only", spec.timing_table.vendor_required_count());
+    hbm_sim::record_field(full_stats, "timing_table_dump", cli.timing_table_path.empty() ? "off" : cli.timing_table_path);
+    hbm_sim::record_field(full_stats, "memory_system",
                 cli.single_controller
                     ? "single_controller"
                     : (cli.stack_count > 1 ? "multi_stack_multi_controller"
                                            : "multi_controller"));
-    print_field(std::cout, "request_source", "streaming");
-    print_field(std::cout, "command_trace_retained",
-                cli.controller.retain_command_trace ? "true" : "false");
-    print_field(std::cout, "scheduler", hbm_sim::to_string(cli.controller.scheduler));
-    print_field(std::cout, "row_policy", hbm_sim::to_string(cli.controller.row_policy));
-    print_field(std::cout, "row_policy_cap", cli.controller.row_policy_cap);
-    print_field(std::cout, "address_mapping", hbm_sim::to_string(spec.address_mapping));
-    print_field(std::cout, "channel_mapper", hbm_sim::to_string(cli.channel_mapper));
-    print_field(std::cout, "cmd_trace", cli.cmd_trace_path.empty() ? "off" : cli.cmd_trace_path);
-    print_field(std::cout, "response_trace",
+    hbm_sim::record_field(full_stats, "request_source", "streaming");
+    hbm_sim::record_field(full_stats, "command_trace_retained",
+                cli.controller.retain_command_trace);
+    hbm_sim::record_field(full_stats, "scheduler", hbm_sim::to_string(cli.controller.scheduler));
+    hbm_sim::record_field(full_stats, "row_policy", hbm_sim::to_string(cli.controller.row_policy));
+    hbm_sim::record_field(full_stats, "row_policy_cap", cli.controller.row_policy_cap);
+    hbm_sim::record_field(full_stats, "address_mapping", hbm_sim::to_string(spec.address_mapping));
+    hbm_sim::record_field(full_stats, "channel_mapper", hbm_sim::to_string(cli.channel_mapper));
+    hbm_sim::record_field(full_stats, "cmd_trace", cli.cmd_trace_path.empty() ? "off" : cli.cmd_trace_path);
+    hbm_sim::record_field(full_stats, "response_trace",
                 cli.response_trace_path.empty() ? "off" : cli.response_trace_path);
-    print_field(std::cout, "transaction_response_trace",
+    hbm_sim::record_field(full_stats, "transaction_response_trace",
                 cli.transaction_response_trace_path.empty()
                     ? "off"
                     : cli.transaction_response_trace_path);
-    print_field(std::cout, "response_delivery_mode",
+    hbm_sim::record_field(full_stats, "response_delivery_mode",
                 response_delivery_mode_name(cli.response_delivery_mode));
-    print_field(std::cout, "host_response_queue_capacity",
+    hbm_sim::record_field(full_stats, "host_response_queue_capacity",
                 cli.host_response_queue_capacity);
-    print_field(std::cout, "transaction_response_queue_capacity",
+    hbm_sim::record_field(full_stats, "transaction_response_queue_capacity",
                 cli.transaction_response_queue_capacity);
-    print_field(std::cout, "host_responses_consumed",
+    hbm_sim::record_field(full_stats, "host_responses_consumed",
                 consumed_host_responses);
-    print_field(std::cout, "host_responses_exported", exported_host_responses);
-    print_field(std::cout, "transaction_responses_consumed",
+    hbm_sim::record_field(full_stats, "host_responses_exported", exported_host_responses);
+    hbm_sim::record_field(full_stats, "transaction_responses_consumed",
                 consumed_transaction_responses);
-    print_field(std::cout, "transaction_responses_exported",
+    hbm_sim::record_field(full_stats, "transaction_responses_exported",
                 exported_transaction_responses);
-    print_field(std::cout, "dfi_trace", cli.dfi_trace_path.empty() ? "off" : cli.dfi_trace_path);
-    print_field(std::cout, "dfi_signal_trace",
+    hbm_sim::record_field(full_stats, "dfi_trace", cli.dfi_trace_path.empty() ? "off" : cli.dfi_trace_path);
+    hbm_sim::record_field(full_stats, "dfi_signal_trace",
                 cli.dfi_signal_trace_path.empty() ? "off" : cli.dfi_signal_trace_path);
-    print_field(std::cout, "memory_image", cli.memory_image_path.empty() ? "off" : cli.memory_image_path);
-    print_field(std::cout, "memory_image_dump",
+    hbm_sim::record_field(full_stats, "memory_image", cli.memory_image_path.empty() ? "off" : cli.memory_image_path);
+    hbm_sim::record_field(full_stats, "memory_image_dump",
                 cli.dump_memory_image_path.empty() ? "off" : cli.dump_memory_image_path);
-    print_field(std::cout, "memory_csv_dump",
+    hbm_sim::record_field(full_stats, "memory_csv_dump",
                 cli.dump_memory_csv_path.empty() ? "off" : cli.dump_memory_csv_path);
-    print_field(std::cout, "mismatch_report", cli.mismatch_report_path.empty() ? "off" : cli.mismatch_report_path);
-    print_field(std::cout, "thermal_map_dump", cli.thermal_map_path.empty() ? "off" : cli.thermal_map_path);
-    print_field(std::cout, "memory_backend",
+    hbm_sim::record_field(full_stats, "mismatch_report", cli.mismatch_report_path.empty() ? "off" : cli.mismatch_report_path);
+    hbm_sim::record_field(full_stats, "thermal_map_dump", cli.thermal_map_path.empty() ? "off" : cli.thermal_map_path);
+    hbm_sim::record_field(full_stats, "memory_backend",
                 hbm_sim::to_string(storage_options.memory_backend.kind));
-    print_field(std::cout, "memory_backend_line_bytes", memory_image->line_size());
-    print_field(std::cout, "memory_capacity_bytes",
+    hbm_sim::record_field(full_stats, "memory_backend_line_bytes", memory_image->line_size());
+    hbm_sim::record_field(full_stats, "memory_capacity_bytes",
                 storage_options.memory_backend.capacity_bytes);
-    print_field(std::cout, "memory_data_file",
+    hbm_sim::record_field(full_stats, "memory_data_file",
                 storage_options.memory_backend.data_file.empty()
                     ? "off"
                     : storage_options.memory_backend.data_file);
-    print_field(std::cout, "memory_chunk_size",
+    hbm_sim::record_field(full_stats, "memory_chunk_size",
                 storage_options.memory_backend.chunk_size_bytes);
-    print_field(std::cout, "memory_chunk_cache_entries",
+    hbm_sim::record_field(full_stats, "memory_chunk_cache_entries",
                 storage_options.memory_backend.chunk_cache_entries);
-    print_field(std::cout, "sparse_density_warning_pct",
+    hbm_sim::record_field(full_stats, "sparse_density_warning_pct",
                 storage_options.sparse_density_warning_pct);
-    print_field(std::cout, "topology_stats_scan_limit",
+    hbm_sim::record_field(full_stats, "topology_stats_scan_limit",
                 storage_options.topology_stats_scan_limit);
     const bool sparse_density_warning =
         storage_options.memory_backend.kind == hbm_sim::MemoryBackendKind::Sparse &&
         stats.storage_density_pct >= storage_options.sparse_density_warning_pct;
-    print_field(std::cout, "storage_backend_recommendation",
+    hbm_sim::record_field(full_stats, "storage_backend_recommendation",
                 sparse_density_warning ? "switch_to_mmap_sparse_or_chunk_file" : "current_backend_ok");
-    print_field(std::cout, "floorplan_enabled", storage_options.floorplan_enabled ? "true" : "false");
-    print_field(std::cout, "power_model_enabled", storage_options.power_enabled ? "true" : "false");
-    print_field(std::cout, "thermal_model_enabled", storage_options.thermal_enabled ? "true" : "false");
-    print_field(std::cout, "thermal_model_kind", "behavioral_sparse_coupling");
-    print_field(std::cout, "power_source", storage_options.power_source);
-    print_field(std::cout, "power_scale", storage_options.power_scale);
-    print_field(std::cout, "thermal_ambient_C", storage_options.thermal_ambient_c);
-    print_field(std::cout, "thermal_cooling_per_cycle", storage_options.thermal_cooling_per_cycle);
-    print_field(std::cout, "thermal_rise_C_per_pJ", storage_options.thermal_rise_c_per_pj);
-    print_field(std::cout, "thermal_grid_cols_tile", storage_options.thermal_grid_cols_per_tile);
-    print_field(std::cout, "thermal_grid_rows_tile", storage_options.thermal_grid_rows_per_tile);
-    print_field(std::cout, "thermal_coupling", storage_options.thermal_coupling_enabled ? "true" : "false");
-    print_field(std::cout, "thermal_lateral_coupling", storage_options.thermal_lateral_coupling);
-    print_field(std::cout, "thermal_vertical_coupling", storage_options.thermal_vertical_coupling);
-    print_field(std::cout, "thermal_tsv_coupling_scale", storage_options.thermal_tsv_coupling_scale);
-    print_field(std::cout, "thermal_tsvs_per_grid", storage_options.thermal_tsvs_per_grid);
-    print_field(std::cout, "subarrays_per_bank", storage_options.subarrays_per_bank);
-    print_field(std::cout, "mats_per_subarray_x", storage_options.mats_per_subarray_x);
-    print_field(std::cout, "mats_per_subarray_y", storage_options.mats_per_subarray_y);
-    print_field(std::cout, "cells_per_mat_x", storage_options.cells_per_mat_x);
-    print_field(std::cout, "cells_per_mat_y", storage_options.cells_per_mat_y);
-    print_field(std::cout, "microbumps_x", storage_options.microbumps_x);
-    print_field(std::cout, "microbumps_y", storage_options.microbumps_y);
-    print_field(std::cout, "ecc_shadow", storage_options.ecc_shadow_enabled ? "true" : "false");
-    print_field(std::cout, "ecc_check_on_read", storage_options.ecc_check_on_read ? "true" : "false");
-    print_field(std::cout, "ecc_correct_single_bit", storage_options.ecc_correct_single_bit ? "true" : "false");
-    print_field(std::cout, "ecc_inject_period", storage_options.ecc_inject_period);
-    print_field(std::cout, "power_act_pJ", storage_options.act_energy_pj);
-    print_field(std::cout, "power_read_pJ", storage_options.read_energy_pj);
-    print_field(std::cout, "power_write_pJ", storage_options.write_energy_pj);
-    print_field(std::cout, "power_refab_pJ", storage_options.refab_energy_pj);
-    print_field(std::cout, "power_refpb_pJ", storage_options.refpb_energy_pj);
-    print_field(std::cout, "power_vdd", storage_options.idd_vdd);
-    print_field(std::cout, "idd_devices_per_rank", storage_options.idd_devices_per_rank);
-    print_section(std::cout, 5, "VALIDATION EVIDENCE");
-    print_field(std::cout, "cmd_validation", cli.validate_cmd_trace ? "pass" : "off");
-    print_field(std::cout, "cmd_validation_checked",
+    hbm_sim::record_field(full_stats, "floorplan_enabled", storage_options.floorplan_enabled);
+    hbm_sim::record_field(full_stats, "power_model_enabled", storage_options.power_enabled);
+    hbm_sim::record_field(full_stats, "thermal_model_enabled", storage_options.thermal_enabled);
+    hbm_sim::record_field(full_stats, "thermal_model_kind", "behavioral_sparse_coupling");
+    hbm_sim::record_field(full_stats, "power_source", storage_options.power_source);
+    hbm_sim::record_field(full_stats, "power_scale", storage_options.power_scale);
+    hbm_sim::record_field(full_stats, "thermal_ambient_C", storage_options.thermal_ambient_c);
+    hbm_sim::record_field(full_stats, "thermal_cooling_per_cycle", storage_options.thermal_cooling_per_cycle);
+    hbm_sim::record_field(full_stats, "thermal_rise_C_per_pJ", storage_options.thermal_rise_c_per_pj);
+    hbm_sim::record_field(full_stats, "thermal_grid_cols_tile", storage_options.thermal_grid_cols_per_tile);
+    hbm_sim::record_field(full_stats, "thermal_grid_rows_tile", storage_options.thermal_grid_rows_per_tile);
+    hbm_sim::record_field(full_stats, "thermal_coupling", storage_options.thermal_coupling_enabled);
+    hbm_sim::record_field(full_stats, "thermal_lateral_coupling", storage_options.thermal_lateral_coupling);
+    hbm_sim::record_field(full_stats, "thermal_vertical_coupling", storage_options.thermal_vertical_coupling);
+    hbm_sim::record_field(full_stats, "thermal_tsv_coupling_scale", storage_options.thermal_tsv_coupling_scale);
+    hbm_sim::record_field(full_stats, "thermal_tsvs_per_grid", storage_options.thermal_tsvs_per_grid);
+    hbm_sim::record_field(full_stats, "subarrays_per_bank", storage_options.subarrays_per_bank);
+    hbm_sim::record_field(full_stats, "mats_per_subarray_x", storage_options.mats_per_subarray_x);
+    hbm_sim::record_field(full_stats, "mats_per_subarray_y", storage_options.mats_per_subarray_y);
+    hbm_sim::record_field(full_stats, "cells_per_mat_x", storage_options.cells_per_mat_x);
+    hbm_sim::record_field(full_stats, "cells_per_mat_y", storage_options.cells_per_mat_y);
+    hbm_sim::record_field(full_stats, "microbumps_x", storage_options.microbumps_x);
+    hbm_sim::record_field(full_stats, "microbumps_y", storage_options.microbumps_y);
+    hbm_sim::record_field(full_stats, "ecc_shadow", storage_options.ecc_shadow_enabled);
+    hbm_sim::record_field(full_stats, "ecc_check_on_read", storage_options.ecc_check_on_read);
+    hbm_sim::record_field(full_stats, "ecc_correct_single_bit", storage_options.ecc_correct_single_bit);
+    hbm_sim::record_field(full_stats, "ecc_inject_period", storage_options.ecc_inject_period);
+    hbm_sim::record_field(full_stats, "power_act_pJ", storage_options.act_energy_pj);
+    hbm_sim::record_field(full_stats, "power_read_pJ", storage_options.read_energy_pj);
+    hbm_sim::record_field(full_stats, "power_write_pJ", storage_options.write_energy_pj);
+    hbm_sim::record_field(full_stats, "power_refab_pJ", storage_options.refab_energy_pj);
+    hbm_sim::record_field(full_stats, "power_refpb_pJ", storage_options.refpb_energy_pj);
+    hbm_sim::record_field(full_stats, "power_vdd", storage_options.idd_vdd);
+    hbm_sim::record_field(full_stats, "idd_devices_per_rank", storage_options.idd_devices_per_rank);
+    hbm_sim::record_field(full_stats, "cmd_validation", cli.validate_cmd_trace ? "pass" : "off");
+    hbm_sim::record_field(full_stats, "cmd_validation_checked",
                 cli.validate_cmd_trace ? validation_report.checked_commands : 0);
-    print_field(std::cout, "cmd_validation_bus_checks",
+    hbm_sim::record_field(full_stats, "cmd_validation_bus_checks",
                 cli.validate_cmd_trace ? validation_report.bus_checks : 0);
-    print_field(std::cout, "cmd_validation_edge_checks",
+    hbm_sim::record_field(full_stats, "cmd_validation_edge_checks",
                 cli.validate_cmd_trace ? validation_report.edge_checks : 0);
-    print_field(std::cout, "cmd_validation_pair_checks",
+    hbm_sim::record_field(full_stats, "cmd_validation_pair_checks",
                 cli.validate_cmd_trace ? validation_report.edge_pairing_checks : 0);
-    print_field(std::cout, "cmd_validation_state_checks",
+    hbm_sim::record_field(full_stats, "cmd_validation_state_checks",
                 cli.validate_cmd_trace ? validation_report.state_checks : 0);
-    print_field(std::cout, "cmd_validation_timing_checks",
+    hbm_sim::record_field(full_stats, "cmd_validation_timing_checks",
                 cli.validate_cmd_trace ? validation_report.timing_constraint_checks : 0);
-    print_field(std::cout, "cmd_validation_timing_updates",
+    hbm_sim::record_field(full_stats, "cmd_validation_timing_updates",
                 cli.validate_cmd_trace ? validation_report.timing_constraint_updates : 0);
-    print_field(std::cout, "cmd_validation_faw_events",
+    hbm_sim::record_field(full_stats, "cmd_validation_faw_events",
                 cli.validate_cmd_trace ? validation_report.faw_events_checked : 0);
-    print_field(std::cout, "cmd_validation_wck_checks",
+    hbm_sim::record_field(full_stats, "cmd_validation_wck_checks",
                 cli.validate_cmd_trace ? validation_report.wck_window_checks : 0);
-    print_field(std::cout, "dfi_validation", cli.validate_dfi_trace ? "pass" : "off");
-    print_field(std::cout, "dfi_validation_events",
+    hbm_sim::record_field(full_stats, "dfi_validation", cli.validate_dfi_trace ? "pass" : "off");
+    hbm_sim::record_field(full_stats, "dfi_validation_events",
                 cli.validate_dfi_trace ? dfi_validation_report.checked_events : 0);
-    print_field(std::cout, "dfi_validation_command_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_command_checks",
                 cli.validate_dfi_trace ? dfi_validation_report.command_checks : 0);
-    print_field(std::cout, "dfi_validation_data_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_data_checks",
                 cli.validate_dfi_trace ? dfi_validation_report.data_beat_checks : 0);
-    print_field(std::cout, "dfi_validation_latency_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_latency_checks",
                 cli.validate_dfi_trace ? dfi_validation_report.latency_checks : 0);
-    print_field(std::cout, "dfi_validation_phase_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_phase_checks",
                 cli.validate_dfi_trace ? dfi_validation_report.phase_checks : 0);
-    print_field(std::cout, "dfi_validation_signal_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_signal_checks",
                 cli.validate_dfi_trace ? dfi_validation_report.signal_checks : 0);
-    print_field(std::cout, "dfi_validation_payload_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_payload_checks",
                 cli.validate_dfi_trace ? dfi_validation_report.payload_checks : 0);
-    print_field(std::cout, "dfi_validation_expected_checks",
+    hbm_sim::record_field(full_stats, "dfi_validation_expected_checks",
                 cli.validate_dfi_trace
                     ? dfi_validation_report.expected_payload_checks
                     : 0);
-    print_section(std::cout, 6, "WORKLOAD AND PER-STACK SUMMARY");
-    print_field(std::cout, "pattern", cli.pattern);
-    print_field(std::cout, "requests", cli.requests);
-    print_field(std::cout, "read_ratio", cli.read_ratio);
-    print_field(std::cout, "seed", cli.seed);
-    print_field(std::cout, "random_address_space_bytes",
+    hbm_sim::record_field(full_stats, "pattern", cli.pattern);
+    hbm_sim::record_field(full_stats, "requests", cli.requests);
+    hbm_sim::record_field(full_stats, "read_ratio", cli.read_ratio);
+    hbm_sim::record_field(full_stats, "seed", cli.seed);
+    hbm_sim::record_field(full_stats, "random_address_space_bytes",
                 cli.random_address_space_bytes);
-    print_field(std::cout, "addr_stride", cli.addr_stride);
-    print_field(std::cout, "max_cycles", cli.max_cycles);
-    print_field(std::cout, "progress_interval", cli.progress_interval);
-    print_field(std::cout, "stats_view", cli.stats_view);
-    print_field(std::cout, "inject_interval", cli.inject_interval);
-    print_field(std::cout, "init_sequence", cli.init_sequence);
-    print_field(std::cout, "init_sequence_interval", cli.init_sequence_interval);
-    print_field(std::cout, "read_buffer_size", cli.controller.read_buffer_size);
-    print_field(std::cout, "write_buffer_size", cli.controller.write_buffer_size);
-    print_field(std::cout, "line_size", spec.org.line_size);
-    print_field(std::cout, "dram_transaction_bytes", spec.transaction_bytes());
-    print_field(std::cout, "channels", spec.org.channels);
-    print_field(std::cout, "pseudo_channels", spec.org.pseudo_channels);
-    print_field(std::cout, "sids", spec.org.sids);
-    print_field(std::cout, "banks", spec.total_banks());
+    hbm_sim::record_field(full_stats, "addr_stride", cli.addr_stride);
+    hbm_sim::record_field(full_stats, "max_cycles", cli.max_cycles);
+    hbm_sim::record_field(full_stats, "progress_interval", cli.progress_interval);
+    hbm_sim::record_field(full_stats, "stats_view", cli.stats_view);
+    hbm_sim::record_field(full_stats, "inject_interval", cli.inject_interval);
+    hbm_sim::record_field(full_stats, "init_sequence", cli.init_sequence);
+    hbm_sim::record_field(full_stats, "init_sequence_interval", cli.init_sequence_interval);
+    hbm_sim::record_field(full_stats, "read_buffer_size", cli.controller.read_buffer_size);
+    hbm_sim::record_field(full_stats, "write_buffer_size", cli.controller.write_buffer_size);
+    hbm_sim::record_field(full_stats, "dram_transaction_bytes", spec.transaction_bytes());
+    hbm_sim::record_field(full_stats, "banks", spec.total_banks());
     for (std::size_t stack = 0; stack < per_stack_stats.size(); stack++) {
       const auto& per = per_stack_stats[stack];
       const std::string prefix = "stack_" + std::to_string(stack) + "_";
-      print_field(std::cout, (prefix + "active_ctrls").c_str(), per.active_controllers);
-      print_field(std::cout, (prefix + "reads").c_str(), per.completed_reads);
-      print_field(std::cout, (prefix + "writes").c_str(), per.completed_writes);
-      print_field(std::cout, (prefix + "bw_GBps").c_str(), per.achieved_bandwidth_GBps);
+      hbm_sim::record_field(full_stats, (prefix + "active_ctrls").c_str(), per.active_controllers);
+      hbm_sim::record_field(full_stats, (prefix + "reads").c_str(), per.completed_reads);
+      hbm_sim::record_field(full_stats, (prefix + "writes").c_str(), per.completed_writes);
+      hbm_sim::record_field(full_stats, (prefix + "bw_GBps").c_str(), per.achieved_bandwidth_GBps);
       const double avg_latency = per.completed_reads == 0 ? 0.0 :
           static_cast<double>(per.total_read_latency) / per.completed_reads;
-      print_field(std::cout, (prefix + "avg_read_latency").c_str(), avg_latency);
-      print_field(std::cout, (prefix + "ingress_stalls").c_str(), per.stack_ingress_stall_cycles);
-      print_field(std::cout, (prefix + "qos_dispatches").c_str(), per.qos_priority_dispatches);
-      print_field(std::cout, (prefix + "power_pJ").c_str(), per.power_energy_pj);
-      print_field(std::cout, (prefix + "peak_temp_C").c_str(), per.thermal_peak_temp_c);
+      hbm_sim::record_field(full_stats, (prefix + "avg_read_latency").c_str(), avg_latency);
+      hbm_sim::record_field(full_stats, (prefix + "ingress_stalls").c_str(), per.stack_ingress_stall_cycles);
+      hbm_sim::record_field(full_stats, (prefix + "qos_dispatches").c_str(), per.qos_priority_dispatches);
+      hbm_sim::record_field(full_stats, (prefix + "power_pJ").c_str(), per.power_energy_pj);
+      hbm_sim::record_field(full_stats, (prefix + "peak_temp_C").c_str(), per.thermal_peak_temp_c);
     }
-    hbm_sim::print_stats(std::cout, stats);
-    }
+    full_stats.merge(hbm_sim::collect_stats(stats));
+    hbm_sim::record_field(full_stats, "capacity_per_instance_bytes", spec.addressable_capacity_bytes());
+    hbm_sim::record_field(full_stats, "input_kind", cli.trace_path.empty() ? "synthetic" : "trace");
+    hbm_sim::record_field(full_stats, "effective_random_address_space_bytes",
+        cli.random_address_space_bytes == 0
+          ? spec.addressable_capacity_bytes() * static_cast<std::uint64_t>(cli.stack_count)
+          : cli.random_address_space_bytes);
+    report = hbm_sim::make_result_report(full_stats);
+    report.validation["run_status"] = run_status;
+    Cli baseline_cli;
+    baseline_cli.standard = cli.standard;
+    const auto baseline_spec = hbm_sim::config::build_model(cli.standard, {}, 3);
+    std::ostringstream baseline_config, effective_config;
+    serialize_resolved_config(baseline_config, baseline_cli, baseline_spec);
+    serialize_resolved_config(effective_config, cli, spec);
+    report.baseline = "built-in " + spec.name + " (schema 3)";
+    report.changes = hbm_sim::compare_resolved_parameters(
+        baseline_config.str(), effective_config.str());
+    hbm_sim::write_result_json(result_path, report, run_status);
+    if (cli.stats_view == "diagnostic")
+      hbm_sim::print_diagnostics(std::cout, full_stats);
+    else
+      hbm_sim::print_result(std::cout, report);
 
     if (stats.hit_cycle_limit) {
       return 2;
@@ -3354,6 +2720,13 @@ int main(int argc, char** argv) {
     }
     return 0;
   } catch (const std::exception& e) {
+    try {
+      // Keep partial verification evidence without inventing missing counters.
+      if (report.validation.empty()) report = hbm_sim::make_result_report(full_stats);
+      hbm_sim::write_result_json(result_path, report, "failed", e.what());
+    } catch (const std::exception& report_error) {
+      std::cerr << "result error: " << report_error.what() << '\n';
+    }
     std::cerr << "error: " << e.what() << '\n';
     return 1;
   }

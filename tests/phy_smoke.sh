@@ -18,7 +18,7 @@ for standard in hbm3 hbm4 lpddr5 lpddr6; do
     family_config=lpddr.cfg
   fi
   output=$(
-    "$phy_bin" \
+    "$phy_bin" --stats-view diagnostic \
       --config "$phy_source/configs/$family_config" \
       --standard "$standard" \
       --requests 24 \
@@ -38,7 +38,7 @@ for standard in hbm3 hbm4 lpddr5 lpddr6; do
 done
 
 multi_output=$(
-  "$phy_bin" \
+  "$phy_bin" --stats-view diagnostic \
     --config "$phy_source/configs/hbm.cfg" --standard hbm4 --stack-count 6 \
     --requests 24 \
     --read-ratio 50 \
@@ -60,7 +60,7 @@ printf '%s\n' \
   '401 R 0x0000 stack=5 qos=7 expect=f0f1f2f3f4f5f6f7f8f9fafbfcfdfeffe0e1e2e3e4e5e6e7e8e9eaebecedeeef' \
   > "$phy_tmp_dir/multistack_data.trace"
 multi_data_output=$(
-  "$phy_bin" \
+  "$phy_bin" --stats-view diagnostic \
     --config "$phy_source/configs/hbm.cfg" --standard hbm4 --stack-count 6 \
     --trace "$phy_tmp_dir/multistack_data.trace" \
     --requests 0 --max-cycles 500000 \

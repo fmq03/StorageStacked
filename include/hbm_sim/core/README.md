@@ -11,9 +11,13 @@ frontend、stats、validation 多层共同依赖。
 - `request.hpp`：读写请求、维护请求和 decoded address 的请求封装。
 - `response.hpp`：Controller transaction completion、MemorySystem host response、状态、ECC 结果和读数据/初始化掩码。
 - `addr_map.hpp`：单 stack DRAM 地址映射和系统地址到 stack-local 地址映射接口。
-- `data.hpp`：真实存储区、payload、SECDED shadow、数据校验、bank/row/column/subarray/mat/cell/microbump 存储键、floorplan、tile 内 thermal grid、DRAMsim3-style IDD 功耗校准、TSV-aware sparse 3D RC 热模型接口。
+- `data.hpp`：真实存储区、payload、SECDED shadow、数据校验、bank/row/column/subarray/mat/cell/microbump 存储键、floorplan、tile 内 thermal grid、DRAMsim3-style IDD 功耗参数、TSV-aware 行为级稀疏三维热模型接口。`ecc_status_counters()` 提供不扫描存储区的 ECC 状态快照，完整统计由 `storage_stats()` 提供。
 - `stack_model.hpp`：被动多 stack 器件数组接口。当前默认规模为 6 个 stack。`StackModel` 接受 transaction-level 读写或 command-level `ACT/PRE/RD/WR/REF` 事件，`MultiStackMemoryModel` 只按 `stack_id` 分发并汇总 per-stack 统计；它不实现 UCIe、Bridge 或 MC frontend 调度。
 - `system.hpp`：主动多 stack / 多 channel controller system 顶层接口；负责 stack ingress、反压、QoS、并行 tick、异步响应重组和聚合统计。
+
+`MemorySystem::RunOptions` 为流式 `run()` 提供 Host/transaction 消费回调、
+进度回调和 `drain_responses`。CLI 与库共用注入、重试、step 和收尾驱动。
+回调模式假设消费者 always-ready；需要响应反压时调用逐拍接口，并自行控制 pop。
 
 修改建议：
 

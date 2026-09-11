@@ -1303,10 +1303,27 @@ void MemoryImage::couple_thermal_neighbor(const ThermalGridKey &source_key,
   auto &dst = dst_it->second;
   if (inserted) {
     dst.physical = src_physical;
-    dst.physical.layer = neighbor_key.layer;
-    dst.physical.thermal_z = neighbor_key.layer;
-    dst.physical.thermal_x = neighbor_key.x;
-    dst.physical.thermal_y = neighbor_key.y;
+    auto &p = dst.physical;
+    p.stack = neighbor_key.stack;
+    p.layer = p.die = p.tile_z = p.thermal_z = neighbor_key.layer;
+    p.thermal_x = neighbor_key.x;
+    p.thermal_y = neighbor_key.y;
+    const int grid_cols = std::max(1, options_.thermal_grid_cols_per_tile);
+    const int grid_rows = std::max(1, options_.thermal_grid_rows_per_tile);
+    p.tile_x = neighbor_key.x / grid_cols;
+    p.tile_y = neighbor_key.y / grid_rows;
+    p.thermal_grid_x = neighbor_key.x % grid_cols;
+    p.thermal_grid_y = neighbor_key.y % grid_rows;
+    p.tile_id = (p.tile_z * p.floorplan_rows + p.tile_y) * p.floorplan_cols + p.tile_x;
+    p.microbump_x = p.tile_x % std::max(1, options_.microbumps_x);
+    p.microbump_y = (p.tile_y + p.layer) % std::max(1, options_.microbumps_y);
+    // A thermal grid cell has no unique inverse DRAM address. Preserve grid
+    // geometry, not the source node's channel/bank/row as a fictitious neighbor.
+    p.logical_line_base = 0;
+    p.byte_offset = 0;
+    p.channel = p.pseudo_channel = p.sid = p.rank = -1;
+    p.bank_group = p.bank = p.row = p.column = -1;
+    p.subarray = p.mat_x = p.mat_y = p.mat_id = p.cell_x = p.cell_y = -1;
     dst.temperature_c = options_.thermal_ambient_c;
     dst.last_cycle = cycle;
   }
@@ -1352,12 +1369,15 @@ void MemoryImage::apply_thermal_event(const PhysicalAddress &physical,
     return;
   }
   ThermalGridKey key = thermal_grid_key(physical);
-  auto &tile = thermal_tiles_[key];
-  if (tile.events == 0) {
-    tile.physical = physical;
+  auto [it, inserted] = thermal_tiles_.try_emplace(key);
+  auto &tile = it->second;
+  if (inserted) {
     tile.last_cycle = cycle;
     tile.temperature_c = options_.thermal_ambient_c;
   }
+  // Zero direct events does not imply a new node: it may already carry heat
+  // received from neighbors. Only attach its first representative address.
+  if (tile.events == 0) tile.physical = physical;
 
   relax_thermal_tile(tile, cycle);
   tile.temperature_c += energy_pj * options_.thermal_rise_c_per_pj;
@@ -2273,7 +2293,7 @@ void MemoryImage::dump_thermal_text(const std::string &path) const {
          "grid_y tile_id temperature_c energy_pj events thermal_cols "
          "thermal_rows "
       << "ch pc sid rank bg bank row col subarray mat_x mat_y mat_id cell_x "
-         "cell_y microbump_x microbump_y\n";
+         "cell_y microbump_x microbump_y address_kind\n";
 
   std::vector<ThermalGridKey> keys;
   keys.reserve(thermal_tiles_.size());
@@ -2305,7 +2325,8 @@ void MemoryImage::dump_thermal_text(const std::string &path) const {
         << ' ' << p.bank_group << ' ' << p.bank << ' ' << p.row << ' '
         << p.column << ' ' << p.subarray << ' ' << p.mat_x << ' ' << p.mat_y
         << ' ' << p.mat_id << ' ' << p.cell_x << ' ' << p.cell_y << ' '
-        << p.microbump_x << ' ' << p.microbump_y << '\n';
+        << p.microbump_x << ' ' << p.microbump_y << ' '
+        << (tile.events == 0 ? "coupling_only" : "direct_event") << '\n';
   }
 }
 

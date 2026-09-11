@@ -8,7 +8,8 @@ backend_tmp=$(mktemp -d)
 trap 'rm -rf -- "$backend_tmp"' EXIT
 
 common=(
-  --config "$backend_source/configs/usecases/hbm_nstacks.cfg" --standard hbm4
+  --stats-view diagnostic
+  --config "$backend_source/configs/hbm.cfg" --standard hbm4
   --stack-count 2 --requests 0 --max-cycles 10000
   --memory-capacity-bytes 1048576
 )

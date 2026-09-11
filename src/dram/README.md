@@ -54,15 +54,19 @@ LPDDR6 当前按用户提供的 JESD209-6 路线补入了 REFdb 相关字段：
 - `nREFDB2REFDBS`：dual-bank refresh 到短间隔下一次 REFdb。
 - `nREFDB2REFDBL`：dual-bank refresh 到长间隔下一次 REFdb。
 
-调度器目前还没有 bank-pair 级 REFdb short/long predicate，因此保守地使用长间隔约束
-REFdb 到 REFdb。这样数值偏保守，但不会比标准短。后续如果补充 bank-pair 拓扑，可在
-`state.cpp` 或 timing constraint predicate 层把 short/long 精确拆开。
+TimingEngine 与离线 validator 分别重放每 Subchannel/SID/Rank 的刷新计数器：
+同一刷新行内用短间隔，完成所有 Bank 对后到下一行用长间隔（JESD209-6 §7.6.1/7.6.2）。
+一轮完成前禁止重复 Bank；REFab 和自刷新退出重置计数。两个目标 Bank 都保留 nRFCpb 恢复。
+当前只表达相同 BA、相邻 BG 的固定配对（0↔1、2↔3），不表达标准允许的全部 dBG 组合；
+非标准组织按实际 Bank 数/2 推进，是研究扩展。短/长选择本身不再无条件使用长间隔。
 
 ## `profiles.cpp`
 
-`profiles.cpp` 用于把 `speed_bin_mbps + density_gb + stack_height + mode_profile + vendor_profile`
-展开成一组具体参数。它适合放通用规则或经常复用的 profile。单个实验临时表格更适合放在
-`configs/hbm.cfg` 或 `configs/lpddr.cfg` 的命名 preset；仓库不再维护独立 profile `.cfg`。
+`profiles.cpp` 将速率、几何折算密度、堆叠高度和实际功能参数展开成具体时序。
+mode_profile/vendor_profile 是名称标签，不会自动生成对应功能或厂商校准证据。
+实验复制 `configs/hbm.cfg` 或 `configs/lpddr.cfg` 后在配置内覆盖时序。
+`spec.cpp` 共用密度公式并兜底校验几何/时钟/nRC 一致性，
+内部单 Channel 视图通过父 Channel 数保留完整器件密度，而不重查刷新表。
 
 ## `state.cpp`
 
@@ -100,12 +104,18 @@ HBM CRC/ECC/RAS metadata、LPDDR DBI/link ECC/CA parity 都应通过这里进入
 - `dfi_write_latency_nck`
 
 这些字段描述 Behavioral PHY 和 DFI 输出所需的相位、data beat 粒度及读写延迟。
+版本标签统一为 `6.0.1`，但不按字符串切换实现。`dfi_phase_count` 仍用于事件相位；
+适配器中无消费者的 `dfi_phases` 已删除，二者不是同一个字段。
 `validation/dfi.cpp` 会基于它们生成两类输出：
 
 - beat CSV：`COMMAND`、`READ_DATA`、`WRITE_DATA` 事件。
 - signal-like CSV：`dfi_reset_n`、`dfi_cs_n`、`dfi_cke`、`dfi_odt`、`dfi_address`、
   `dfi_bank`、`dfi_rddata_en`、`dfi_wrdata_en`、`dfi_rddata_valid`、`dfi_wrdata_mask`、
   `dfi_wrdata`、`dfi_rddata` 等字段。
+
+signal-like CSV 保留上述历史字段供现有工具读取，并非 DFI 6.0.1 端口原名。
+规范使用 `dfi_cmdaddr`、`dfi_cs`、`dfi_reset`、`dfi_wrdata_dbi_mask`；项目的
+address/bank/cke/odt 等是解码后的行为摘要，不能通过简单改名获得规范 packing 或极性语义。
 
 真实 write/read payload 与 Behavioral PHY completion cycle 由 controller 回填到
 `IssuedCommand`，DFI builder 按真实长度切分 beat；没有 payload 快照时才使用

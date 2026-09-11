@@ -36,7 +36,9 @@ bool is_common_section(const std::string& section) {
       "common", "system", "workload", "architecture", "timing", "protocol", "controller", "controller.scheduler",
       "controller.row_policy", "mapping", "phy", "maintenance", "storage",
       "power", "thermal", "reliability", "reliability.payload",
-      "fault_injection", "outputs", "validation"};
+      "fault_injection", "outputs", "validation", "frontend", "memory_system",
+      "dram.organization", "dram.timing", "dram.protocol", "controller.refresh",
+      "controller.addr_mapper", "audit"};
   return sections.contains(section) || section.starts_with("timing.");
 }
 
@@ -80,6 +82,7 @@ bool is_selector_entry(const ConfigEntry& entry) {
 std::string canonical_entry_key(const ConfigEntry& entry) {
   const std::string& section = entry.section;
   const std::string& key = entry.key;
+  if (key == "timing_source") return "timing_override_source";
   if (section == "model") {
     if (key == "name") return "model_name";
     if (key == "base_standard") return "standard";
@@ -226,12 +229,11 @@ ConfigDocument load_document(const std::string& path) {
                                ": config key and value must not be empty");
     }
     const auto identity = std::make_pair(entry.section, entry.key);
-    if (document.sectioned && !seen_section_keys.insert(identity).second) {
+    if (!seen_section_keys.insert(identity).second) {
       throw std::runtime_error(path + ":" + std::to_string(lineno) +
                                ": duplicate key '" + entry.key + "' in section [" +
                                entry.section + "]");
     }
-    seen_section_keys.insert(identity);
     if (entry.section == "meta" && entry.key == "extends") {
       document.extends.push_back(entry.value);
       continue;
@@ -291,9 +293,19 @@ Selection discover_selection(const std::vector<ConfigDocument>& documents,
 
 std::vector<ConfigEntry> resolve_document(const ConfigDocument& document,
                                           const Selection& selection) {
+  std::map<std::string, std::string> section_sources;
+  for (const auto& entry : document.entries) {
+    const auto key = canonical_entry_key(entry);
+    if (key == "timing_source" || key == "timing_override_source")
+      section_sources[entry.section] = entry.value;
+  }
+  auto bind_source = [&](ConfigEntry& entry) {
+    if (const auto it = section_sources.find(entry.section); it != section_sources.end())
+      entry.timing_source = it->second;
+  };
   if (!document.sectioned) {
     std::vector<ConfigEntry> entries = document.entries;
-    for (auto& entry : entries) entry.layer = 40;
+    for (auto& entry : entries) { entry.layer = 40; bind_source(entry); }
     return entries;
   }
 
@@ -301,6 +313,7 @@ std::vector<ConfigEntry> resolve_document(const ConfigDocument& document,
   staged.reserve(document.entries.size());
   for (std::size_t index = 0; index < document.entries.size(); ++index) {
     ConfigEntry entry = document.entries[index];
+    bind_source(entry);
     bool active = true;
     entry.layer = section_layer(entry.section, selection, active);
     if (active) staged.emplace_back(index, std::move(entry));

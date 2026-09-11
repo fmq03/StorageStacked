@@ -1,3 +1,5 @@
+#include "spec_fixture.hpp"
+#include "hbm_sim/config/model.hpp"
 // 轻量序列测试入口。项目保持零外部测试依赖，因此这里用 require()
 // 直接断言关键命令序列、timing 间隔、维护路径和 validator 行为。
 // 测试目标不是覆盖性能，而是守住协议状态机和 Ramulator 风格模块边界。
@@ -8,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -942,6 +945,7 @@ void test_control_command_state_and_validator() {
 void test_initialization_control_sequence_execution() {
   DramSpec hbm4 = hbm_sim::make_spec("hbm4");
   hbm4.org.channels = 2;
+  set_fixture_density_from_geometry(hbm4);
   hbm4.supports_refresh = false;
   hbm4.supports_rfm = false;
   hbm4.hbm_edge_pairing = false;
@@ -1003,6 +1007,28 @@ void test_initialization_control_sequence_execution() {
   auto report =
       hbm_sim::validate_command_trace(lpddr, lpddr_memory.issued_commands());
   require(report.ok(), "validator rejected LPDDR6 full init sequence trace");
+
+  bool rejected_cross_family = false;
+  try {
+    hbm_sim::TrafficOptions wrong;
+    wrong.init_sequence = "lpddr6";
+    (void)hbm_sim::generate_control_sequence(hbm4, wrong);
+  } catch (const std::invalid_argument&) {
+    rejected_cross_family = true;
+  }
+  require(rejected_cross_family,
+          "HBM model accepted an LPDDR initialization sequence");
+
+  rejected_cross_family = false;
+  try {
+    hbm_sim::TrafficOptions wrong;
+    wrong.init_sequence = "hbm4";
+    (void)hbm_sim::generate_control_sequence(lpddr, wrong);
+  } catch (const std::invalid_argument&) {
+    rejected_cross_family = true;
+  }
+  require(rejected_cross_family,
+          "LPDDR model accepted an HBM initialization sequence");
 }
 
 void test_hbm4_scoped_timing() {
@@ -1067,6 +1093,7 @@ void test_hbm4_refresh_manager() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.timing.nREFIpb = 16;
   spec.timing.nRFCpb = 2;
   hbm_sim::refresh_timing_constraints(spec);
@@ -1093,6 +1120,7 @@ void test_hbm4_all_bank_refresh_policy() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.hbm_edge_pairing = false;
   spec.refresh_policy = hbm_sim::MaintenancePolicyKind::AllBank;
   spec.supports_rfm = false;
@@ -1141,6 +1169,7 @@ void test_hbm4_all_bank_rfm_policy() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = true;
   spec.rfm_policy = hbm_sim::MaintenancePolicyKind::AllBank;
@@ -1195,6 +1224,7 @@ void test_timing_profile_dimensions() {
   spec.density_gb = 48;
   spec.stack_height = 16;
   hbm_sim::apply_standard_timing_profile(spec);
+  spec.org.rows = 24576;  // 48 Gibit/die with this 16Hi/4-SID geometry.
   hbm_sim::finalize_spec(spec);
 
   require(spec.data_rate_mbps == 9000,
@@ -1203,13 +1233,13 @@ void test_timing_profile_dimensions() {
           "HBM4 timing profile did not derive SID count from stack height");
   require(spec.timing.nRFC > hbm_sim::make_spec("hbm4").timing.nRFC,
           "HBM4 timing profile did not apply density-dependent tRFC");
-  require(hbm_sim::validate_timing_table(spec, true).empty(),
-          "vendor-calibrated HBM4 timing profile should satisfy strict timing "
-          "validation");
+  require(!hbm_sim::validate_timing_table(spec, true).empty(),
+          "a vendor profile name alone must not certify uncalibrated timings");
 
   DramSpec generic_again = spec;
   generic_again.vendor_profile = "generic";
   hbm_sim::apply_standard_timing_profile(generic_again);
+  generic_again.org.rows = 24576;
   hbm_sim::finalize_spec(generic_again);
   require(!hbm_sim::validate_timing_table(generic_again, true).empty(),
           "reapplying a generic profile retained stale vendor timing sources");
@@ -1227,13 +1257,13 @@ void test_timing_profile_dimensions() {
   require(hbm3.timing.nRFCpb ==
               hbm_sim::jedec::ns_to_nck(200.0, hbm3.timing.tCK_ps),
           "HBM3 profile did not apply 16Gb tRFCpb from standard table");
-  require(hbm3.timing.nRREFD ==
-              hbm_sim::jedec::max_ns_or_nck(8.0, 3, hbm3.timing.tCK_ps),
-          "HBM3 profile did not apply tRREFD Max(3nCK, 8ns)");
+  require(hbm3.timing.nRREFD == 8,
+          "HBM3 external-reference baseline changed its 8 nCK tRREFD");
 
   DramSpec hbm3_16hi = hbm3;
   hbm3_16hi.stack_height = 16;
   hbm_sim::apply_standard_timing_profile(hbm3_16hi);
+  hbm3_16hi.org.sids = 4;
   hbm_sim::finalize_spec(hbm3_16hi);
   require(hbm3_16hi.timing.nREFIpb < hbm3.timing.nREFIpb,
           "HBM3 profile did not scale tREFIpb with stack height");
@@ -1277,47 +1307,28 @@ void test_timing_profile_dimensions() {
   DramSpec lpddr8 = hbm_sim::make_spec("lpddr6");
   lpddr8.density_gb = 8;
   hbm_sim::apply_standard_timing_profile(lpddr8);
+  lpddr8.org.rows = 32768;
   hbm_sim::finalize_spec(lpddr8);
   require(lpddr8.timing.nRFC ==
-              hbm_sim::jedec::ns_to_nck(210.0, lpddr8.timing.tCK_ps),
-          "LPDDR6 8Gb profile did not apply density-dependent tRFCab");
+              hbm_sim::jedec::ns_to_nck(280.0, lpddr8.timing.tCK_ps),
+          "LPDDR6 8Gb/subchannel must use Table 302's 16Gb pair density");
 
-  const std::string profile_path = "/tmp/hbm_sim_timing_profile_unit.cfg";
-  {
-    std::ofstream profile(profile_path);
-    profile << "source = vendor\n";
-    profile << "note = unit-test external timing profile\n";
-    profile << "timing_profile = external_hbm3_unit\n";
-    profile << "speed_bin_mbps = 6400\n";
-    profile << "density_gb = 24\n";
-    profile << "stack_height = 12\n";
-    profile << "tCK_ps = 625\n";
-    profile << "tRFCab_ns = 450\n";
-    profile << "tRFCpb_ns = 240\n";
-    profile << "nCL = 28\n";
-  }
-  DramSpec external = hbm_sim::make_spec("hbm3");
-  external.timing_profile_file = profile_path;
-  hbm_sim::apply_standard_timing_profile(external);
-  hbm_sim::finalize_spec(external);
-  require(external.timing_profile == "external_hbm3_unit",
-          "external timing profile file did not update profile name");
-  require(external.timing.nRFC ==
-              hbm_sim::jedec::ns_to_nck(450.0, external.timing.tCK_ps),
-          "external timing profile file did not override tRFCab");
-  require(external.timing.nRFCpb ==
-              hbm_sim::jedec::ns_to_nck(240.0, external.timing.tCK_ps),
-          "external timing profile file did not override tRFCpb");
-  bool external_ncl_vendor = false;
-  for (const auto &entry : external.timing_table.entries) {
-    if (entry.name == "nCL") {
-      external_ncl_vendor =
-          entry.source == hbm_sim::TimingValueSource::Vendor &&
-          !entry.vendor_required_for_numeric;
-    }
-  }
-  require(external_ncl_vendor,
-          "external timing profile file did not mark timing source");
+  const auto configured = hbm_sim::config::build_model("hbm3", {
+      {"speed_bin_mbps", "6400"}, {"density_gb", "24"}, {"stack_height", "12"},
+      {"sids", "3"}, {"rows", "24576"}, {"tck_ps", "625"},
+      {"trrd_s_ns", "5"}, {"trrd_l_ns", "7.5"}, {"trfcab_ns", "450"},
+      {"trfcpb_ns", "240"}, {"ncl", "28"}, {"timing_override_source", "vendor"}});
+  require(configured.timing.nRFC == hbm_sim::jedec::ns_to_nck(450, 625) &&
+              configured.timing.nRFCpb == hbm_sim::jedec::ns_to_nck(240, 625),
+          "inline timing config did not override refresh durations");
+  require(configured.timing.nRRDS == 8 && configured.timing.nRRDL == 12,
+          "inline timing config did not accept time-unit aliases");
+  bool ncl_vendor = false;
+  for (const auto& entry : configured.timing_table.entries)
+    if (entry.name == "nCL")
+      ncl_vendor = entry.source == hbm_sim::TimingValueSource::Vendor &&
+                   !entry.vendor_required_for_numeric;
+  require(ncl_vendor, "inline config lost explicit timing source");
 }
 
 void test_multi_controller_parallel_channels() {
@@ -1327,6 +1338,7 @@ void test_multi_controller_parallel_channels() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   spec.hbm_edge_pairing = false;
@@ -1435,6 +1447,7 @@ void test_active_six_stack_memory_system_routing_qos_and_stats() {
   spec.org.banks_per_group = 2;
   spec.org.rows = 64;
   spec.org.columns = 16;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   hbm_sim::refresh_timing_constraints(spec);
@@ -1612,6 +1625,7 @@ void test_write_forward_and_coalesce() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   hbm_sim::refresh_timing_constraints(spec);
@@ -1673,6 +1687,7 @@ void test_closed_page_row_policy() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   spec.hbm_edge_pairing = false;
@@ -1703,6 +1718,7 @@ void test_closed_cap_row_policy() {
   spec.org.sids = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   spec.hbm_edge_pairing = false;
@@ -1726,6 +1742,212 @@ void test_closed_cap_row_policy() {
   require(controller.stats().rda >= 1, "closed-cap policy did not issue RDA");
 }
 
+void test_maintenance_progress_dependencies() {
+  DramSpec spec = hbm_sim::make_spec("hbm4");
+  spec.org.channels = spec.org.pseudo_channels = spec.org.sids = 1;
+  spec.org.bank_groups = spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
+  spec.supports_refresh = false;
+  spec.supports_rfm = false;  // explicit maintenance below, no automatic stream
+  spec.hbm_edge_pairing = false;
+  spec.tick_multiplier = 1;
+  hbm_sim::finalize_spec(spec);
+
+  // Two queued PRE requests become redundant after the first closes the bank.
+  Controller pre(spec);
+  require(pre.enqueue(make_request(9100, RequestType::Read, 0, 0, 0, 1)), "enqueue PRE setup read");
+  pre.run_until_done(5000);
+  Request close = make_request(9101, RequestType::Maintenance, 0, 0, 0, 1);
+  close.next = Command::PREPB;
+  require(pre.enqueue(close), "enqueue first PRE");
+  ++close.id;
+  require(pre.enqueue(close), "enqueue redundant PRE");
+  pre.run_until_done(5000);
+  require(pre.done(), "redundant PRE to closed bank blocked priority queue");
+  require(hbm_sim::validate_command_trace(spec, pre.issued_commands()).ok(),
+          "retiring redundant PRE must not emit an illegal command");
+
+  // A write-drain watermark prefers the younger write, but the older read must
+  // complete before this write acquires an active bank that RFM needs to close.
+  hbm_sim::ControllerOptions options;
+  options.write_buffer_size = 1;
+  Controller dependency(spec, options);
+  auto read = make_request(9200, RequestType::Read, 0, 0, 0, 2);
+  auto write = read;
+  write.id = 9201;
+  write.type = RequestType::Write;
+  require(dependency.enqueue(read) && dependency.enqueue(write), "enqueue ordered read/write");
+  for (int tick = 0; tick < 100 && dependency.issued_commands().empty(); ++tick)
+    dependency.tick();
+  require(!dependency.issued_commands().empty(), "dependency must make initial progress");
+  auto maintenance = make_request(9202, RequestType::Maintenance, 0, 0, 0, 2);
+  maintenance.next = Command::RFMPB;
+  require(dependency.enqueue(maintenance), "enqueue RFM");
+  dependency.run_until_done(5000);
+  require(dependency.done() && dependency.stats().completed_reads == 1 &&
+              dependency.stats().completed_writes == 1,
+          "RFM/active-write/older-read circular dependency prevented completion");
+  require(hbm_sim::validate_command_trace(spec, dependency.issued_commands()).ok(),
+          "maintenance dependency progress violated command timing");
+}
+
+void test_lpddr6_refdb_counter_boundaries() {
+  auto spec = hbm_sim::make_spec("lpddr6");
+  spec.org.channels = 1;
+  spec.org.ranks = 2;
+  set_fixture_density_from_geometry(spec);
+  const Cycle scale = spec.tick_multiplier;
+  const Cycle short_gap = spec.timing.nREFDB2REFDBS * scale;
+  const Cycle long_gap = spec.timing.nREFDB2REFDBL * scale;
+  const int pairs = spec.org.bank_groups * spec.org.banks_per_group / 2;
+  hbm_sim::TimingEngine engine(spec);
+  std::vector<IssuedCommand> trace;
+  Cycle time = 1000;
+  auto address_for = [&](int pair) {
+    DecodedAddress d;
+    d.bank_group = (pair / spec.org.banks_per_group) * 2;
+    d.bank = pair % spec.org.banks_per_group;
+    return d;
+  };
+  // Two complete sweeps: the 8th->9th interval must be L, all others S.
+  for (int i = 0; i < 2 * pairs; ++i) {
+    auto d = address_for(i % pairs);
+    if (i > 0) {
+      require(!engine.constraint_ready(spec, d, Command::REFDB, time - 1),
+              "REFdb accepted one tick before counter-dependent boundary");
+      require(engine.constraint_ready_at(spec, d, Command::REFDB) == time,
+              "REFdb ready_at disagrees with refresh-counter boundary");
+    }
+    require(engine.constraint_ready(spec, d, Command::REFDB, time),
+            "REFdb rejected at counter-dependent boundary");
+    trace.emplace_back(time, i + 1, Command::REFDB, hbm_sim::BusClass::Unified, d);
+    engine.apply_constraints(spec, d, Command::REFDB, time);
+    auto other_pc = d;
+    other_pc.pseudo_channel = 1;
+    auto other_rank = d;
+    other_rank.rank = 1;
+    require(engine.constraint_ready(spec, other_pc, Command::REFDB, time) &&
+                engine.constraint_ready(spec, other_rank, Command::REFDB, time),
+            "REFdb counters leaked across subchannels or ranks");
+    time += (i + 1) % pairs == 0 ? long_gap : short_gap;
+  }
+  require(hbm_sim::validate_command_trace(spec, trace).ok(),
+          "validator rejected legal REFdb short/long sweeps");
+  for (int bad_index : {1, pairs}) {
+    auto bad = trace;
+    --bad[bad_index].cycle;
+    require(!hbm_sim::validate_command_trace(spec, bad).ok(),
+            "validator missed an early REFdb S/L transition");
+  }
+  // REFab synchronizes a partial sweep; the following REFdb starts at count 0.
+  trace.resize(3);
+  engine.reset(spec);
+  for (const auto &event : trace)
+    engine.apply_constraints(spec, event.decoded, event.command, event.cycle);
+  time = trace.back().cycle + spec.timing.nRFCpb * scale;
+  const auto d = address_for(0);
+  trace.emplace_back(time, 100, Command::REFAB, hbm_sim::BusClass::Unified, d);
+  engine.apply_constraints(spec, d, Command::REFAB, time);
+  time += spec.timing.nRFC * scale;
+  for (int i = 0; i < pairs; ++i) {
+    auto target = address_for(i);
+    require(engine.constraint_ready(spec, target, Command::REFDB, time),
+            "REFab did not reset the partial REFdb counter");
+    trace.emplace_back(time, 101 + i, Command::REFDB, hbm_sim::BusClass::Unified, target);
+    engine.apply_constraints(spec, target, Command::REFDB, time);
+    time += short_gap;
+  }
+  require(hbm_sim::validate_command_trace(spec, trace).ok(),
+          "validator failed to synchronize REFdb counter on REFab");
+  // Both members, including the implicit partner, retain tRFCdb recovery.
+  engine.reset(spec);
+  engine.apply_constraints(spec, d, Command::REFDB, 1000);
+  const auto partner = hbm_sim::lpddr_refdb_partner(spec, d);
+  const Cycle recovery = 1000 + spec.timing.nRFCpb * scale;
+  require(!engine.constraint_ready(spec, partner, Command::ACT1, recovery - 1) &&
+              engine.constraint_ready(spec, partner, Command::ACT1, recovery),
+          "implicit REFdb partner lost tRFCdb recovery");
+  require(!engine.constraint_ready(spec, partner, Command::REFDB, recovery + long_gap),
+          "REFdb repeated a bank pair before the sweep completed");
+  std::vector<IssuedCommand> duplicate{
+      {1000, 1, Command::REFDB, hbm_sim::BusClass::Unified, d},
+      {recovery + long_gap, 2, Command::REFDB, hbm_sim::BusClass::Unified, partner}};
+  require(!hbm_sim::validate_command_trace(spec, duplicate).ok(),
+          "validator accepted a repeated bank despite a long enough time gap");
+  // SRX resets every subchannel/rank in this model's channel-level control domain.
+  auto other_pc = d;
+  other_pc.pseudo_channel = 1;
+  auto other_rank = d;
+  other_rank.rank = 1;
+  std::vector<IssuedCommand> isolated;
+  for (int sweep_step = 0; sweep_step < 2; ++sweep_step) {
+    int offset = 0;
+    for (auto target : {d, other_pc, other_rank}) {
+      target.bank = sweep_step;
+      isolated.emplace_back(1000 + sweep_step * short_gap + offset,
+                            10 + sweep_step * 3 + offset,
+                            Command::REFDB, hbm_sim::BusClass::Unified, target);
+      ++offset;
+    }
+  }
+  require(hbm_sim::validate_command_trace(spec, isolated).ok(),
+          "validator shared a REFdb counter across subchannels/ranks");
+  engine.apply_constraints(spec, other_pc, Command::REFDB, 1000);
+  engine.apply_constraints(spec, other_rank, Command::REFDB, 1000);
+  const Cycle exit = recovery + 10000;
+  engine.apply_constraints(spec, d, Command::SREFEX, exit);
+  for (const auto &target : {d, other_pc, other_rank})
+    require(engine.constraint_ready(spec, target, Command::REFDB, exit + 10000),
+            "SREFEX did not synchronize all channel-local REFdb counters");
+  std::vector<IssuedCommand> self_refresh{
+      {1000, 1, Command::REFDB, hbm_sim::BusClass::Unified, d},
+      {1001, 5, Command::REFDB, hbm_sim::BusClass::Unified, other_pc},
+      {1002, 6, Command::REFDB, hbm_sim::BusClass::Unified, other_rank},
+      {exit, 2, Command::SREFEN, hbm_sim::BusClass::Unified, d},
+      {exit + 10000, 3, Command::SREFEX, hbm_sim::BusClass::Unified, d},
+      {exit + 20000, 4, Command::REFDB, hbm_sim::BusClass::Unified, d},
+      {exit + 20001, 7, Command::REFDB, hbm_sim::BusClass::Unified, other_pc},
+      {exit + 20002, 8, Command::REFDB, hbm_sim::BusClass::Unified, other_rank}};
+  require(hbm_sim::validate_command_trace(spec, self_refresh).ok(),
+          "validator failed to reset REFdb state at self-refresh exit");
+
+  engine.reset(spec);
+  engine.apply_constraints(spec, partner, Command::PREPB, 1000);
+  const Cycle precharge_ready = 1000 + spec.timing.nRP * scale;
+  require(!engine.constraint_ready(spec, d, Command::REFDB, precharge_ready - 1) &&
+              engine.constraint_ready(spec, d, Command::REFDB, precharge_ready) &&
+              engine.constraint_ready_at(spec, d, Command::REFDB) == precharge_ready,
+          "REFdb ignored its implicit partner's precharge recovery");
+  const Cycle act2 = 100 + spec.timing.nAADMin * scale;
+  const Cycle precharge = act2 + spec.timing.nRAS * scale + 100;
+  std::vector<IssuedCommand> precharged{
+      {100, 1, Command::ACT1, hbm_sim::BusClass::Unified, partner},
+      {act2, 1, Command::ACT2, hbm_sim::BusClass::Unified, partner},
+      {precharge, 2, Command::PREPB, hbm_sim::BusClass::Unified, partner},
+      {precharge + spec.timing.nRP * scale, 3, Command::REFDB, hbm_sim::BusClass::Unified, d}};
+  require(hbm_sim::validate_command_trace(spec, precharged).ok(),
+          "validator rejected exact implicit-partner precharge boundary");
+  --precharged.back().cycle;
+  require(!hbm_sim::validate_command_trace(spec, precharged).ok(),
+          "validator missed early REFdb after implicit-partner precharge");
+
+  spec.supports_refresh = false;
+  spec.supports_rfm = false;
+  Controller controller(spec);
+  for (int i = 0; i < 2 * pairs; ++i) {
+    auto target = address_for(i % pairs);
+    auto request = make_request(200 + i, RequestType::Maintenance, 0,
+                                target.bank_group, target.bank, 0);
+    request.next = Command::REFDB;
+    require(controller.enqueue(request), "failed to enqueue REFdb sweep");
+  }
+  controller.run_until_done(20000);
+  require(controller.done() && controller.stats().refdb == static_cast<std::uint64_t>(2 * pairs),
+          "online controller failed to complete two legal REFdb sweeps");
+  require(hbm_sim::validate_command_trace(spec, controller.issued_commands()).ok(),
+          "online REFdb schedule failed independent validation");
+}
+
 void test_lpddr6_refresh_manager() {
   DramSpec spec = hbm_sim::make_spec("lpddr6");
   spec.org.channels = 1;
@@ -1733,6 +1955,7 @@ void test_lpddr6_refresh_manager() {
   spec.org.sids = 1;
   spec.org.bank_groups = 2;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.timing.nREFIpb = 32;
   spec.timing.nRFCpb = 2;
   spec.timing.nRREFD = 1;
@@ -1762,6 +1985,7 @@ void test_lpddr6_dual_bank_refresh_pair() {
   spec.org.sids = 1;
   spec.org.bank_groups = 2;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.supports_rfm = false;
   spec.timing.nREFIpb = 32;
   spec.timing.nRFCpb = 8;
@@ -1809,6 +2033,7 @@ void test_refdb_does_not_precharge_other_pseudo_channel() {
   spec.org.ranks = 1;
   spec.org.bank_groups = 2;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.supports_refresh = false;
   spec.supports_rfm = false;
   spec.timing.nREFDB2ACT = 1;
@@ -1964,6 +2189,7 @@ void test_refresh_credit_and_low_power() {
   refresh_spec.org.sids = 1;
   refresh_spec.org.bank_groups = 1;
   refresh_spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(refresh_spec);
   refresh_spec.supports_rfm = false;
   refresh_spec.hbm_edge_pairing = false;
   refresh_spec.tick_multiplier = 1;
@@ -1991,6 +2217,7 @@ void test_refresh_credit_and_low_power() {
   low_power_spec.org.sids = 1;
   low_power_spec.org.bank_groups = 1;
   low_power_spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(low_power_spec);
   low_power_spec.supports_refresh = false;
   low_power_spec.supports_rfm = false;
   low_power_spec.hbm_edge_pairing = false;
@@ -2021,6 +2248,7 @@ void test_refresh_credit_conservation_and_rank_rotation() {
   spec.org.ranks = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.tick_multiplier = 1;
   spec.timing.nREFIpb = 10;
   spec.refresh_postpone_limit = 2;
@@ -2053,6 +2281,7 @@ void test_refresh_credit_conservation_and_rank_rotation() {
 
   DramSpec ranked = spec;
   ranked.org.ranks = 2;
+  set_fixture_density_from_geometry(ranked);
   ranked.refresh_postpone_limit = 0;
   ranked.refresh_pullin_limit = 0;
   hbm_sim::RefreshManager ranks;
@@ -2116,7 +2345,7 @@ void test_lpddr6_host_line_transaction_split() {
           "two 16Gb LPDDR6 subchannels should expose a 4 GiB device");
   require(
       hbm_sim::request_interface_bytes(spec) == 32,
-      "LPDDR6 link-protection-off transaction should carry 32 interface bytes");
+      "LPDDR6 protection-off accounting is 32B demand, not 36B physical DQ occupancy");
 
   hbm_sim::TrafficOptions options;
   options.pattern = "stream";
@@ -2548,6 +2777,7 @@ void test_async_ecc_response_status() {
     spec.org.sids = 1;
     spec.org.bank_groups = 1;
     spec.org.banks_per_group = 1;
+    set_fixture_density_from_geometry(spec);
     spec.supports_refresh = false;
     spec.supports_rfm = false;
     hbm_sim::refresh_timing_constraints(spec);
@@ -2622,6 +2852,7 @@ void test_address_mapping_templates() {
   spec.org.rows = 64;
   spec.org.line_size = 64;
   spec.org.dram_transaction_bytes = 64;
+  set_fixture_density_from_geometry(spec);
 
   spec.address_mapping = hbm_sim::AddressMappingKind::Default;
   hbm_sim::AddressMapper mapper_default(spec);
@@ -2893,6 +3124,7 @@ void test_physical_storage_coordinates_and_stats() {
   spec.org.rows = 64;
   spec.org.columns = 4;
   spec.org.line_size = 64;
+  set_fixture_density_from_geometry(spec);
   spec.stack_height = 8;
   spec.address_mapping = hbm_sim::AddressMappingKind::RoBaRaCoCh;
 
@@ -2953,6 +3185,7 @@ void test_memory_image_cross_line_read_uses_each_line_address() {
   DramSpec spec = hbm_sim::make_spec("hbm4");
   spec.org.line_size = 16;
   spec.org.dram_transaction_bytes = 16;
+  set_fixture_density_from_geometry(spec);
   hbm_sim::MemoryImage image(spec);
   hbm_sim::AddressMapper mapper(spec);
   const DecodedAddress first = mapper.decode(0);
@@ -2985,6 +3218,7 @@ void test_all_bank_refresh_covers_every_pc_and_sid() {
   spec.org.ranks = 1;
   spec.org.bank_groups = 1;
   spec.org.banks_per_group = 1;
+  set_fixture_density_from_geometry(spec);
   spec.refresh_policy = hbm_sim::MaintenancePolicyKind::AllBank;
   spec.timing.nREFI = 1;
 
@@ -3014,7 +3248,9 @@ void test_passive_multistack_memory_model_isolation() {
   spec.org.rows = 128;
   spec.org.columns = 16;
   spec.org.line_size = 64;
+  set_fixture_density_from_geometry(spec);
   spec.stack_height = 4;
+  set_fixture_density_from_geometry(spec);
 
   hbm_sim::StorageModelOptions options;
   options.thermal_grid_cols_per_tile = 2;
@@ -3138,6 +3374,113 @@ void test_passive_multistack_memory_model_isolation() {
           "passive multi-stack model accepted an invalid stack_id");
 }
 
+void test_thermal_neighbor_state_and_coordinates() {
+  char directory[] = "/tmp/hbm_thermal_contract_XXXXXX";
+  require(mkdtemp(directory) != nullptr, "cannot create thermal test directory");
+  const std::string path = std::string(directory) + "/map.txt";
+  using Row = std::map<std::string, std::string>;
+  auto read_map = [&]() {
+    std::ifstream input(path);
+    std::vector<std::string> header;
+    std::vector<Row> rows;
+    for (std::string line; std::getline(input, line);) {
+      if (line.rfind("# stack layer", 0) == 0) {
+        std::istringstream fields(line.substr(2));
+        for (std::string key; fields >> key;) header.push_back(key);
+      } else if (!line.empty() && line[0] != '#') {
+        std::istringstream fields(line);
+        Row row;
+        for (const auto& key : header) {
+          require(static_cast<bool>(fields >> row[key]), "short thermal row");
+        }
+        rows.push_back(std::move(row));
+      }
+    }
+    require(!rows.empty(), "empty thermal map");
+    return rows;
+  };
+  auto total_excess = [&]() {
+    double total = 0;
+    for (const auto& row : read_map()) total += std::stod(row.at("temperature_c")) - 40;
+    return total;
+  };
+  for (bool vertical : {false, true}) {
+    for (double cooling : {0.0, 0.01}) {
+      hbm_sim::StorageModelOptions options;
+      options.thermal_cooling_per_cycle = cooling;
+      options.thermal_rise_c_per_pj = 0.01;
+      options.floorplan_enabled = !vertical;
+      options.thermal_lateral_coupling = vertical ? 0 : 0.1;
+      options.thermal_vertical_coupling = vertical ? 0.1 : 0;
+      options.thermal_tsv_coupling_scale = 0;
+      options.act_energy_pj = 1000;
+      hbm_sim::MemoryImage image(hbm_sim::make_spec(vertical ? "hbm4" : "lpddr5"), 0, options);
+      DecodedAddress source{};
+      image.record_command_event(Command::ACT, source, 10);
+      // With all nodes relaxed to the same time, pairwise coupling must only
+      // redistribute temperature; first direct access must retain preheating.
+      image.advance_thermal(20);
+      image.dump_thermal_text(path);
+      const double before = total_excess();
+      const auto nodes = read_map();
+      require(std::any_of(nodes.begin(), nodes.end(), [&](const Row& node) {
+        return std::stoi(node.at("layer")) == (vertical ? 1 : 0) &&
+               std::stoi(node.at("thermal_x")) == (vertical ? 0 : 1) &&
+               std::stoi(node.at("thermal_y")) == 0 &&
+               std::stoi(node.at("events")) == 0 &&
+               std::stod(node.at("temperature_c")) > 40;
+      }), "first-access test must target a preheated coupling-only node");
+      source.bank = 1;
+      image.record_command_event(Command::ACT, source, 20);
+      image.dump_thermal_text(path);
+      require(std::abs(total_excess() - before - 10) < 0.001,
+              "first direct event discarded an existing neighbor's temperature");
+    }
+  }
+  for (const char* standard : {"hbm3", "hbm4", "lpddr5", "lpddr6"}) {
+    for (bool floorplan : {false, true}) {
+      auto spec = hbm_sim::make_spec(standard);
+      hbm_sim::StorageModelOptions options;
+      options.stack_id = 2;
+      options.floorplan_enabled = floorplan;
+      options.thermal_grid_cols_per_tile = 2;
+      options.thermal_grid_rows_per_tile = 3;
+      hbm_sim::MemoryImage image(spec, 0, options);
+      DecodedAddress source{};
+      source.row = spec.org.rows - 1;
+      source.column = spec.org.columns - 1;
+      image.record_command_event(Command::ACT, source, 10);
+      image.dump_thermal_text(path);
+      bool neighbor_seen = false, vertical_seen = false, cross_tile_seen = false;
+      for (const auto& row : read_map()) {
+        auto n = [&](const char* key) { return std::stoi(row.at(key)); };
+        require(n("stack") == 2 && n("thermal_z") == n("layer"), "thermal stack/layer mismatch");
+        require(n("thermal_x") == n("tile_x") * 2 + n("grid_x") &&
+                    n("thermal_y") == n("tile_y") * 3 + n("grid_y"), "neighbor tile/grid mismatch");
+        require(n("grid_x") >= 0 && n("grid_x") < 2 && n("grid_y") >= 0 && n("grid_y") < 3,
+                "invalid local thermal grid");
+        require(n("tile_id") == (n("layer") * (n("thermal_rows") / 3) + n("tile_y")) *
+                    (n("thermal_cols") / 2) + n("tile_x"), "neighbor tile ID mismatch");
+        if (n("events") == 0) {
+          neighbor_seen = true;
+          vertical_seen |= n("layer") != 0;
+          cross_tile_seen |= n("tile_x") != 0 || n("tile_y") != 0;
+          require(row.at("address_kind") == "coupling_only" && n("ch") == -1 && n("bank") == -1,
+                  "coupling-only node must not impersonate a source DRAM address");
+        } else {
+          require(row.at("address_kind") == "direct_event" && n("ch") == 0,
+                  "direct node lost its representative address");
+        }
+      }
+      require(neighbor_seen, "coupling test did not create a neighbor");
+      require(spec.lpddr_family || vertical_seen, "HBM test missed vertical coupling");
+      require(!floorplan || cross_tile_seen, "test missed cross-tile coupling");
+    }
+  }
+  std::remove(path.c_str());
+  std::remove(directory);
+}
+
 void test_floorplan_power_and_thermal_model() {
   const std::string thermal_path = "/tmp/hbm_sim_thermal_map.txt";
   DramSpec spec = hbm_sim::make_spec("hbm4");
@@ -3146,6 +3489,7 @@ void test_floorplan_power_and_thermal_model() {
   spec.org.sids = 2;
   spec.org.bank_groups = 2;
   spec.org.banks_per_group = 2;
+  set_fixture_density_from_geometry(spec);
   spec.stack_height = 8;
 
   hbm_sim::Address address = 0x7000;
@@ -3262,6 +3606,7 @@ void test_dramsim3_idd_power_and_grid_thermal() {
   spec.org.banks_per_group = 2;
   spec.org.rows = 64;
   spec.org.columns = 16;
+  set_fixture_density_from_geometry(spec);
   spec.timing.tCK_ps = 500.0;
   spec.timing.nBL = 2;
   spec.timing.nRAS = 42;
@@ -3334,8 +3679,10 @@ void test_tsv_thermal_coupling_and_ecc_shadow() {
   spec.org.rows = 64;
   spec.org.columns = 16;
   spec.org.line_size = 64;
+  set_fixture_density_from_geometry(spec);
   spec.stack_height = 4;
 
+  set_fixture_density_from_geometry(spec);
   hbm_sim::StorageModelOptions options;
   options.thermal_grid_cols_per_tile = 2;
   options.thermal_grid_rows_per_tile = 2;
@@ -3361,6 +3708,8 @@ void test_tsv_thermal_coupling_and_ecc_shadow() {
   hbm_sim::ByteVector payload = hbm_sim::parse_hex_bytes("0011223344556677");
 
   image.write(address, payload, nullptr, &decoded, 1700, 5);
+  const auto ecc_before = image.ecc_status_counters();
+  static_assert(noexcept(image.ecc_status_counters()));
   bool initialized = false;
   hbm_sim::ByteVector actual =
       image.read(address, payload.size(), &initialized, &decoded);
@@ -3371,6 +3720,13 @@ void test_tsv_thermal_coupling_and_ecc_shadow() {
   image.record_command_event(Command::RD, decoded, 20, 64);
   hbm_sim::PhysicalStorageStats stats = image.storage_stats();
   hbm_sim::PhysicalAddress physical = image.physical_address(address, &decoded);
+
+  const auto ecc_after = image.ecc_status_counters();
+  require(ecc_before.ecc_corrected_errors == 0 &&
+              ecc_after.ecc_corrected_errors == 1 &&
+              ecc_after.ecc_corrected_errors == stats.ecc_corrected_errors &&
+              ecc_after.ecc_uncorrectable_errors == stats.ecc_uncorrectable_errors,
+          "lightweight ECC snapshot differs from full storage statistics");
 
   require(stats.ecc_injected_errors == 1 && stats.ecc_checked_reads >= 1 &&
               stats.ecc_corrected_errors == 1 &&
@@ -3392,6 +3748,7 @@ void test_tsv_thermal_coupling_and_ecc_shadow() {
 void test_memory_image_row_buffer_writeback() {
   DramSpec spec = hbm_sim::make_spec("hbm4");
   spec.org.line_size = 64;
+  set_fixture_density_from_geometry(spec);
 
   hbm_sim::Address address = 0x4800;
   hbm_sim::AddressMapper mapper(spec);
@@ -3507,6 +3864,7 @@ void test_auto_precharge_storage_timing_matches_phy_modes() {
     spec.org.ranks = 1;
     spec.org.bank_groups = 1;
     spec.org.banks_per_group = 1;
+    set_fixture_density_from_geometry(spec);
     spec.supports_refresh = false;
     spec.supports_rfm = false;
     spec.hbm_edge_pairing = false;
@@ -3584,6 +3942,7 @@ void test_physical_storage_multichannel_memory_system() {
   spec.org.rows = 64;
   spec.org.columns = 4;
   spec.org.line_size = 64;
+  set_fixture_density_from_geometry(spec);
   spec.address_mapping = hbm_sim::AddressMappingKind::RoBaRaCoCh;
   spec.supports_refresh = false;
   spec.supports_rfm = false;
@@ -3638,6 +3997,7 @@ void test_memory_image_text_checkpoint_and_mismatch_report() {
 
   DramSpec spec = hbm_sim::make_spec("hbm4");
   spec.org.line_size = 64;
+  set_fixture_density_from_geometry(spec);
   hbm_sim::MemoryImage image(spec);
   image.load_text(image_path);
 
@@ -4012,9 +4372,11 @@ int main() {
   test_write_forward_and_coalesce();
   test_closed_page_row_policy();
   test_closed_cap_row_policy();
+  test_maintenance_progress_dependencies();
 
   // 第五组：LPDDR6/LPDDR5 专用路径，包括 REFdb、PRAC/RFM、CAS/WCK 和 efficiency
   // mapping。
+  test_lpddr6_refdb_counter_boundaries();
   test_lpddr6_refresh_manager();
   test_lpddr6_dual_bank_refresh_pair();
   test_refdb_does_not_precharge_other_pseudo_channel();
@@ -4050,6 +4412,7 @@ int main() {
   test_all_bank_refresh_covers_every_pc_and_sid();
   test_passive_multistack_memory_model_isolation();
   test_floorplan_power_and_thermal_model();
+  test_thermal_neighbor_state_and_coordinates();
   test_dramsim3_idd_power_and_grid_thermal();
   test_tsv_thermal_coupling_and_ecc_shadow();
   test_memory_image_row_buffer_writeback();

@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 from config_selection import DRAMSIM3_HBM2, explicit_selection_args
+from result_io import run_simulator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,15 +38,6 @@ def parse_args() -> argparse.Namespace:
 
 def add(checks: list[dict], name: str, passed: bool, detail: str) -> None:
     checks.append({"name": name, "passed": bool(passed), "detail": detail})
-
-
-def parse_project_stats(text: str) -> dict[str, str]:
-    result = {}
-    for line in text.splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            result[key.strip()] = value.strip()
-    return result
 
 
 def dramsim_env(root: Path, build_name: str) -> dict[str, str]:
@@ -128,13 +120,24 @@ def main() -> int:
         project_trace = temp / "project.trace"
         project_trace.write_text("0 R 0x0\n", encoding="ascii")
         project_csv = temp / "project_commands.csv"
-        project_run = subprocess.run(
+        project_stats, _ = run_simulator(
             [str(binary), *PROJECT_SELECTION, "--trace", str(project_trace),
-             "--cmd-trace", str(project_csv), "--validate-cmd-trace"], cwd=ROOT,
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-        if project_run.returncode:
-            raise RuntimeError(project_run.stdout + project_run.stderr)
-        project_stats = parse_project_stats(project_run.stdout)
+             "--cmd-trace", str(project_csv), "--validate-cmd-trace"], cwd=ROOT, diagnostic=True)
+        # DRAMsim3 normalizes HBM input columns by *2, then divides by BL
+        # for transaction addressing (configuration.cc InitDRAMParams /
+        # SetAddressMapping). Do not equate the raw INI count with our slots.
+        transaction_bytes = int(system["bus_width"]) // 8 * int(structure["BL"])
+        transaction_columns = int(structure["columns"]) * 2 // int(structure["BL"])
+        row_bytes = transaction_columns * transaction_bytes
+        capacity_bytes = (row_bytes * int(structure["rows"]) *
+                          int(structure["bankgroups"]) * int(structure["banks_per_group"]))
+        add(checks, "older_hbm_transaction_geometry",
+            int(project_stats["columns"]) == transaction_columns and
+            int(project_stats["dram_transaction_bytes"]) == transaction_bytes and
+            int(project_stats["capacity_per_instance_bytes"]) == capacity_bytes and
+            int(project_stats["stack_height"]) == int(structure["num_dies"]),
+            f"reference slots={transaction_columns}, transaction={transaction_bytes}B, "
+            f"row={row_bytes}B, channel capacity={capacity_bytes}B, dies={structure['num_dies']}")
         with project_csv.open(newline="", encoding="utf-8") as stream:
             project_commands = [{"cycle": int(row["cycle"]), "command": row["command"]}
                                 for row in csv.DictReader(stream)]
@@ -183,13 +186,9 @@ def main() -> int:
         dram_write_stats = json.loads((dram_write_out / "dramsim3.json").read_text())["0"]
         project_write_trace = temp / "project_write.trace"
         project_write_trace.write_text("0 W 0x0\n", encoding="ascii")
-        project_write_run = subprocess.run(
+        project_write_stats, _ = run_simulator(
             [str(binary), *PROJECT_SELECTION, "--trace",
-             str(project_write_trace)], cwd=ROOT, text=True, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, check=False)
-        if project_write_run.returncode:
-            raise RuntimeError(project_write_run.stdout + project_write_run.stderr)
-        project_write_stats = parse_project_stats(project_write_run.stdout)
+             str(project_write_trace)], cwd=ROOT, diagnostic=True)
         observed["write_energy_pJ"] = float(project_write_stats["power_write_energy_pJ"])
         write_count = int(dram_write_stats["num_write_cmds"])
         external_write_per_command = (
@@ -215,13 +214,9 @@ def main() -> int:
         dram_refresh_stats = json.loads((dram_refresh_out / "dramsim3.json").read_text())["0"]
         project_refresh_trace = temp / "project_refresh.trace"
         project_refresh_trace.write_text("0 M REFab 0x0\n", encoding="ascii")
-        project_refresh_run = subprocess.run(
+        project_refresh_stats, _ = run_simulator(
             [str(binary), *PROJECT_SELECTION, "--trace",
-             str(project_refresh_trace)], cwd=ROOT, text=True, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, check=False)
-        if project_refresh_run.returncode:
-            raise RuntimeError(project_refresh_run.stdout + project_refresh_run.stderr)
-        project_refresh_stats = parse_project_stats(project_refresh_run.stdout)
+             str(project_refresh_trace)], cwd=ROOT, diagnostic=True)
         observed["refresh_energy_pJ"] = float(
             project_refresh_stats["power_refresh_energy_pJ"])
         refresh_count = int(dram_refresh_stats["num_ref_cmds"])
@@ -251,14 +246,10 @@ def main() -> int:
             with (thermal_out / "dramsim3final_temp.csv").open(
                     newline="", encoding="utf-8") as stream:
                 external_peak = max(float(row["temperature"]) for row in csv.DictReader(stream))
-            project_thermal = subprocess.run(
+            project_thermal_stats, _ = run_simulator(
                 [str(binary), *PROJECT_SELECTION, "--requests", "2000",
                  "--pattern", "random", "--read-ratio", "70", "--inject-interval", "1",
-                 "--seed", "20260816", "--max-cycles", "100000000"], cwd=ROOT,
-                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            if project_thermal.returncode:
-                raise RuntimeError(project_thermal.stdout + project_thermal.stderr)
-            project_thermal_stats = parse_project_stats(project_thermal.stdout)
+                 "--seed", "20260816", "--max-cycles", "100000000"], cwd=ROOT, diagnostic=True)
             project_peak = float(project_thermal_stats["thermal_peak_temp_C"])
             thermal_ini = read_ini(hbm_thermal_ini)
             ambient = ini_float(thermal_ini["thermal"]["amb_temp"])

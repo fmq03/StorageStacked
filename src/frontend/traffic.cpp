@@ -1000,6 +1000,22 @@ std::vector<Request> generate_control_sequence(const DramSpec& spec, const Traff
     }
   }
 
+  const bool hbm_sequence = sequence == "hbm" || sequence == "hbm3" ||
+                            sequence == "hbm4";
+  const bool lpddr_sequence = sequence == "lpddr" || sequence == "lpddr5" ||
+                              sequence == "lpddr6" ||
+                              sequence == "lpddr6_full";
+  if (!hbm_sequence && !lpddr_sequence) {
+    throw std::invalid_argument("unsupported init_sequence: " +
+                                options.init_sequence);
+  }
+  if ((hbm_sequence && spec.lpddr_family) ||
+      (lpddr_sequence && !spec.lpddr_family)) {
+    throw std::invalid_argument("init_sequence '" + options.init_sequence +
+                                "' is incompatible with base standard " +
+                                spec.name);
+  }
+
   const int channels = std::max(1, spec.org.channels);
   const int stacks = std::max(1, options.stack_count);
   const Cycle interval = std::max<Cycle>(1, options.init_sequence_interval);
@@ -1010,7 +1026,7 @@ std::vector<Request> generate_control_sequence(const DramSpec& spec, const Traff
 
   for (int stack = 0; stack < stacks; stack++) {
     for (int ch = 0; ch < channels; ch++) {
-      if (sequence == "hbm" || sequence == "hbm3" || sequence == "hbm4") {
+      if (hbm_sequence) {
         // HBM 侧先覆盖 mode register 访问；如果启用了 ECC 或链路 retry/CRC/RAS
         // metadata，再加入对应的 scrub/error-report 抽象命令。这里按 channel
         // 复制，是为了让 full-stack 多 controller 模式能观察每个 channel
@@ -1029,8 +1045,7 @@ std::vector<Request> generate_control_sequence(const DramSpec& spec, const Traff
           append_control(out, id, inject_cycle, interval, stack, ch,
                          Command::RASERR);
         }
-      } else if (sequence == "lpddr" || sequence == "lpddr5" ||
-                 sequence == "lpddr6" || sequence == "lpddr6_full") {
+      } else if (lpddr_sequence) {
         // LPDDR 侧显式建模 MR programming、WCK training 和 DVFS。lpddr6_full
         // 额外走 PDE/PDX 与 SREFEN/SREFEX 往返路径，用于测试低功耗状态机和
         // validator 对 power-down/self-refresh 状态的重放能力。

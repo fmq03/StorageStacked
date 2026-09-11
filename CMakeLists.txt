@@ -18,6 +18,7 @@ set(HBM_SIM_CONTROLLER_SOURCES
 
 set(HBM_SIM_CONFIG_SOURCES
   src/config/document.cpp
+  src/config/model.cpp
 )
 
 set(HBM_SIM_CORE_SOURCES
@@ -45,6 +46,7 @@ set(HBM_SIM_FRONTEND_SOURCES
 
 set(HBM_SIM_STATS_SOURCES
   src/stats/stats.cpp
+  src/stats/result.cpp
 )
 
 set(HBM_SIM_VALIDATION_SOURCES
@@ -93,11 +95,28 @@ add_executable(config_tests tests/config_tests.cpp)
 target_link_libraries(config_tests PRIVATE hbm_sim_core)
 target_compile_options(config_tests PRIVATE -Wall -Wextra -pedantic)
 
+add_executable(model_config_tests tests/model_config_tests.cpp)
+target_link_libraries(model_config_tests PRIVATE hbm_sim_core)
+target_compile_options(model_config_tests PRIVATE -Wall -Wextra -pedantic)
+add_executable(scheduler_contract_tests tests/scheduler_contract_tests.cpp)
+target_link_libraries(scheduler_contract_tests PRIVATE hbm_sim_core)
+target_compile_options(scheduler_contract_tests PRIVATE -Wall -Wextra -pedantic)
+
 enable_testing()
+add_executable(refactor_tests tests/refactor_tests.cpp)
+target_link_libraries(refactor_tests PRIVATE hbm_sim_core)
+target_compile_options(refactor_tests PRIVATE -Wall -Wextra -pedantic)
+add_test(NAME refactor_tests COMMAND refactor_tests)
+add_executable(result_value_tests tests/result_value_tests.cpp)
+target_link_libraries(result_value_tests PRIVATE hbm_sim_core)
+target_compile_options(result_value_tests PRIVATE -Wall -Wextra -pedantic)
+add_test(NAME result_value_tests COMMAND result_value_tests)
 add_test(NAME sequence_tests COMMAND sequence_tests)
 add_test(NAME timing_boundary_tests COMMAND timing_boundary_tests)
 add_test(NAME phy_tests COMMAND phy_tests)
 add_test(NAME config_tests COMMAND config_tests ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME model_config_tests COMMAND model_config_tests)
+add_test(NAME scheduler_contract_tests COMMAND scheduler_contract_tests)
 add_test(NAME phy_smoke COMMAND ${CMAKE_COMMAND} -E env
   HBM_SIM_BIN=$<TARGET_FILE:hbm_sim>
   HBM_SIM_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -132,6 +151,8 @@ add_test(NAME smoke COMMAND ${CMAKE_COMMAND} -E env
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME result_contract COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/result_tests.py $<TARGET_FILE:hbm_sim>)
   add_test(NAME timing_boundary_validation
     COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tools/timing_boundary_validation.py

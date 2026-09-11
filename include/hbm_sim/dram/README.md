@@ -38,6 +38,7 @@ controller 层再消费这些描述做调度和发射。
 ## 核心数据结构
 
 - `DramSpec`：单次仿真的标准、组织、timing 和协议开关快照。
+- `density_reference_channels`：仅内部单 Channel 视图记录父 Channel 数；用户完整模型保持 0，不通过 cfg 设置。
 - `TimingTable`：带来源标注的 timing 条目集合。
 - `BankState`：bank-local open row、状态、last command 等信息。
 - `CommandMetadata`：命令类别、bus、scope、是否 row/column/maintenance 命令。

@@ -5,18 +5,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from result_io import read_result
 
 
 def parse_stats(path: Path) -> dict[str, str]:
-    stats: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if ":" not in raw:
-            continue
-        key, value = raw.split(":", 1)
-        key = key.strip()
-        if key:
-            stats[key] = value.strip()
-    return stats
+    return read_result(path)
 
 
 def split_csv(value: str) -> list[str]:

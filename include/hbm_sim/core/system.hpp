@@ -73,6 +73,18 @@ class MemorySystem {
       std::function<void(const TransactionResponse&)>;
   using HostResponseCallback = std::function<void(const HostResponse&)>;
 
+  // A single streaming driver serves batch experiments and response-exporting hosts.
+  // drain_responses models an always-ready host: every retained response is popped,
+  // including views without a callback. Callbacks observe responses after each tick.
+  struct RunOptions {
+    bool drain_responses = false;
+    HostResponseConsumer host_response;
+    TransactionResponseCallback transaction_response;
+    Cycle progress_interval = 0;
+    RunProgressConsumer progress;
+  };
+  void run(RequestSource& source, Cycle max_cycles, const RunOptions& options);
+
   // 按 stack_count * spec.org.channels 创建 channel-local Controller。每个
   // Controller 的 channel 数会被 localize 成 1，因此内部 bank 下标是局部视角。
   explicit MemorySystem(DramSpec spec, MemorySystemOptions options = {});
@@ -208,9 +220,7 @@ class MemorySystem {
   bool enqueue(Request req);
   void dispatch_stack_ingress();
   void collect_responses();
-  void run_source(RequestSource& source, Cycle max_cycles,
-                  HostResponseConsumer* consumer, Cycle progress_interval = 0,
-                  RunProgressConsumer* progress_consumer = nullptr);
+  void run_source(RequestSource& source, Cycle max_cycles, const RunOptions& options);
   void record_submitted_transaction(const Request& request);
   void record_completed_transaction(const TransactionResponse& response);
   void aggregate_response(const TransactionResponse& response);

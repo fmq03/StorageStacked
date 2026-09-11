@@ -24,6 +24,20 @@ bool has_entry(const std::vector<hbm_sim::config::ConfigEntry> &entries,
   });
 }
 
+void require_complete_example(
+    const hbm_sim::config::ConfigDocument &master,
+    const hbm_sim::config::ConfigDocument &example,
+    const std::string &label) {
+  for (const auto &entry : master.entries) {
+    if (entry.section == "model" || entry.section == "override" ||
+        entry.key == "stats_view")
+      continue;
+    require(has_entry(example.entries, entry.section, entry.key, entry.value),
+            label + " is missing or changed master field [" + entry.section +
+                "] " + entry.key);
+  }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -35,10 +49,10 @@ int main(int argc, char **argv) {
     const auto lpddr =
         hbm_sim::config::load_document(root + "/configs/lpddr.cfg");
     require(hbm.sectioned && lpddr.sectioned,
-            "master configs must use schema-v2 sections");
+            "master configs must use sectioned schema syntax");
 
-    // 配置库存是公开接口：两份标准主配置、四份验证集、四份完整用例和
-    // 一份开发者参数集。目录中不得悄悄增加用途不明的 cfg。
+    // 配置库存是公开接口：两份可复制的标准主配置和四份内部验证集。
+    // 用户模型放在 experiments/local，不再依赖 developer/usecase 配置层。
     std::vector<std::string> config_files;
     for (const auto &item :
          std::filesystem::recursive_directory_iterator(root + "/configs")) {
@@ -51,13 +65,10 @@ int main(int argc, char **argv) {
     std::sort(config_files.begin(), config_files.end());
     require(config_files ==
                 std::vector<std::string>(
-                    {"developer.cfg", "hbm.cfg", "lpddr.cfg",
-                     "usecases/hbm.cfg", "usecases/hbm_nstacks.cfg",
-                     "usecases/lpddr.cfg", "usecases/lpddr_nstacks.cfg",
-                     "validation/hbm3.cfg", "validation/hbm4.cfg",
+                    {"hbm.cfg", "lpddr.cfg", "validation/hbm3.cfg",
+                     "validation/hbm4.cfg",
                      "validation/lpddr5.cfg", "validation/lpddr6.cfg"}),
-            "config inventory must be 2 masters + 4 validation + 4 usecases + "
-            "1 developer");
+            "config inventory must be 2 masters + 4 validation fixtures");
 
     // 每一个真正赋值的配置行必须带中文说明。这里不判断自然语言质量，但阻止
     // 后续新增无注释参数；section、空行和纯注释不受影响。
@@ -78,6 +89,36 @@ int main(int argc, char **argv) {
                 relative + ":" + std::to_string(lineno) +
                     " config value is missing an inline explanation");
       }
+    }
+
+    const std::vector<std::string> example_configs = {
+        "examples/configs/hbm.cfg", "examples/configs/lpddr.cfg",
+        "examples/configs/hbm_nstacks.cfg",
+        "examples/configs/lpddr_nstacks.cfg"};
+    for (const auto &relative : example_configs) {
+      const auto documents =
+          hbm_sim::config::load_document_tree(root + "/" + relative);
+      require(documents.size() == 1,
+              relative + " must be a self-contained cfg example");
+      std::ifstream input(root + "/" + relative);
+      require(static_cast<bool>(input),
+              "cannot read example config: " + relative);
+      std::string line;
+      int lineno = 0;
+      while (std::getline(input, line)) {
+        ++lineno;
+        const auto first = line.find_first_not_of(" \t");
+        if (first == std::string::npos || line[first] == '#' ||
+            line[first] == '[' || line.find('=') == std::string::npos) {
+          continue;
+        }
+        require(line.find('#', line.find('=') + 1) != std::string::npos,
+                relative + ":" + std::to_string(lineno) +
+                    " config value is missing an inline explanation");
+      }
+      require_complete_example(
+          relative.find("lpddr") == std::string::npos ? hbm : lpddr,
+          documents.front(), relative);
     }
 
     auto selection = hbm_sim::config::discover_selection({hbm}, {}, {});
@@ -141,11 +182,50 @@ int main(int argc, char **argv) {
                           "dramsim3_hbm2_common") != validation_presets.end(),
             "HBM3 validation preset inventory is incomplete");
 
-    const auto hbm_case = hbm_sim::config::load_document_tree(
-        root + "/configs/usecases/hbm_nstacks.cfg");
-    require(hbm_case.size() == 2 && hbm_case.back().path.find(
-                                        "hbm_nstacks.cfg") != std::string::npos,
-            "usecase inheritance did not expand in base-to-child order");
+    const auto custom_hbm = hbm_sim::config::load_document_tree(
+        root + "/experiments/local/my_hbm4.cfg");
+    require(custom_hbm.size() == 1,
+            "public custom-model example must be a self-contained config");
+    const auto custom_selection =
+        hbm_sim::config::discover_selection(custom_hbm, {}, {});
+    const auto custom_active =
+        hbm_sim::config::resolve_documents(custom_hbm, custom_selection);
+    require(custom_selection.standard == "hbm4" &&
+                custom_selection.preset.empty() &&
+                has_entry(custom_active, "override", "stack_count", "2"),
+            "self-contained HBM custom example did not activate its override");
+
+    const auto hx_hbm = hbm_sim::config::load_document_tree(
+        root + "/experiments/local/hx_hbm4_9000_48gb_16hi.cfg");
+    const auto custom_lpddr = hbm_sim::config::load_document_tree(
+        root + "/experiments/local/lpddr6_synthetic_linkprot.cfg");
+    require(hx_hbm.size() == 1 && custom_lpddr.size() == 1,
+            "official research-model examples must not depend on inheritance");
+    const auto hx_selection =
+        hbm_sim::config::discover_selection(hx_hbm, {}, {});
+    const auto lpddr_selection =
+        hbm_sim::config::discover_selection(custom_lpddr, {}, {});
+    require(hx_selection.standard == "hbm4" && hx_selection.preset.empty() &&
+                lpddr_selection.standard == "lpddr6" &&
+                lpddr_selection.preset.empty(),
+            "self-contained research examples must select a base standard "
+            "without an external preset");
+
+    for (const auto &relative : example_configs) {
+      const auto documents =
+          hbm_sim::config::load_document_tree(root + "/" + relative);
+      const auto selection =
+          hbm_sim::config::discover_selection(documents, {}, {});
+      const auto active =
+          hbm_sim::config::resolve_documents(documents, selection);
+      const bool multi = relative.find("_nstacks") != std::string::npos;
+      const bool lpddr_family = relative.find("lpddr") != std::string::npos;
+      require(selection.standard == (lpddr_family ? "lpddr6" : "hbm4") &&
+                  selection.preset.empty() &&
+                  has_entry(active, "override", "stack_count",
+                            multi ? "2" : "1"),
+              relative + " did not select its expected standard/Stack count");
+    }
 
     // 继承环必须在加载阶段失败，不能递归到栈溢出，也不能只取其中一份配置。
     const auto cycle_dir = std::filesystem::temp_directory_path() /

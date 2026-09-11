@@ -32,7 +32,7 @@ struct MemPhyOptions {
   // Direct 保持历史完成语义；Behavioral 才启用在线 FIFO/训练/返回流水线。
   MemPhyMode mode = MemPhyMode::Direct;
   // 接口语义/审计标签；当前实现不会按版本切换 DFI 行为。
-  std::string dfi_version = "6.0";
+  std::string dfi_version = "6.0.1";
   std::size_t command_fifo_depth = 16;
   std::size_t read_fifo_depth = 16;
   std::size_t write_fifo_depth = 16;
@@ -86,7 +86,6 @@ struct MemPhyCompletion {
 
 // 协议适配器输出的是行为级 CA 编码摘要，而不是厂商 pin-accurate 波形。
 struct PhyCommandEncoding {
-  int dfi_phases = 1;
   int ca_edges = 1;
   bool row_path = false;
   bool column_path = false;

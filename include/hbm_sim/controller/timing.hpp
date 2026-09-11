@@ -74,11 +74,12 @@ public:
   const TimingScopeState &wck_state(const DramSpec &spec,
                                     const DecodedAddress &decoded) const;
 
-  // 检查 table-driven preceding->following constraint 是否已经 ready。
+  // 检查 table-driven constraint 和 LPDDR6 REFdb 计数/双目标是否 ready。
   // 这里不处理 window>0 的 tFAW 类约束，tFAW 走 recent_acts 专门路径。
   bool constraint_ready(const DramSpec &spec, const DecodedAddress &decoded,
                         Command cmd, Cycle clk) const;
-  // 返回所有表驱动约束共同决定的最早发射 tick。LPDDR 用它避免在总线换向
+  // 返回表驱动与 REFdb 计数约束的最早发射 tick。重复刷新本轮已访问的 Bank
+  // 时返回 Cycle 最大值：须先完成轮转/同步，单纯等待无法就绪。LPDDR 用它避免在总线换向
   // gate 尚未结束时过早建立一个注定会过期的 WCK/CAS 窗口。
   Cycle constraint_ready_at(const DramSpec &spec, const DecodedAddress &decoded,
                             Command cmd) const;
@@ -128,6 +129,14 @@ private:
   std::vector<TimingScopeState> pseudo_channel_scopes_;
   std::vector<TimingScopeState> sid_scopes_;
   std::vector<TimingScopeState> rank_scopes_;
+  // LPDDR6: one refresh-row bank counter per Channel/Subchannel/SID/Rank.
+  // A complete sweep advances the refresh row and selects tDBR2DBR_L.
+  struct RefdbState {
+    int bank_count = 0;
+    Cycle ready = 0;
+    std::vector<bool> visited_pairs;
+  };
+  std::vector<RefdbState> refdb_states_;
   // activation_scopes_ 的作用域来自 spec.activation_scope，专门服务 tFAW。
   std::vector<TimingScopeState> activation_scopes_;
   // row_scopes_/column_scopes_ 的作用域来自

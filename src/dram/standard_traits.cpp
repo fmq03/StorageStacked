@@ -18,7 +18,8 @@ constexpr std::array<StandardTraits, 4> kStandardTraits{{
         .display_name = "HBM4",
         .aliases = {"hbm4", "hbm", ""},
         .alias_count = 2,
-        .default_timing_profile = "hbm4_jedec_8g_32gb_8hi",
+        .default_timing_profile = "hbm4_jedec_8000_32gb_8hi",
+        .default_mode_profile = "full_stack_crc_off",
         .default_speed_bin_mbps = 8000,
         .default_density_gb = 32,
         .default_stack_height = 8,
@@ -36,12 +37,12 @@ constexpr std::array<StandardTraits, 4> kStandardTraits{{
         .display_name = "HBM3",
         .aliases = {"hbm3", "", ""},
         .alias_count = 1,
-        .default_timing_profile = "hbm3_generic",
+        .default_timing_profile = "hbm3_ramulator2_6400_16gb_8hi",
         .default_speed_bin_mbps = 6400,
         .default_density_gb = 16,
         .default_stack_height = 8,
         .hbm_edge_pairing_matrix = "hbm3_row_col_pre_pairing",
-        .hbm_sid_mapping = "single_sid",
+        .hbm_sid_mapping = "sid_pair_8hi",
         .hbm_ras_policy = "counter_only",
     },
     {
@@ -58,7 +59,7 @@ constexpr std::array<StandardTraits, 4> kStandardTraits{{
         .default_stack_height = 0,
         .supports_rfm = true,
         .lpddr_dual_bank_refresh = true,
-        .lpddr_mode_register_profile = "RLSet1_WLSetA",
+        .lpddr_mode_register_profile = "RLSet1_WLSetA_BL24",
         .activation_scope = TimingScope::PseudoChannel,
     },
     {
@@ -68,7 +69,7 @@ constexpr std::array<StandardTraits, 4> kStandardTraits{{
         .display_name = "LPDDR5",
         .aliases = {"lpddr5", "", ""},
         .alias_count = 1,
-        .default_timing_profile = "lpddr5_generic",
+        .default_timing_profile = "lpddr5_ramulator2_6400_16gb",
         .default_speed_bin_mbps = 6400,
         .default_density_gb = 16,
         .lpddr_wck_training_required = false,
@@ -132,9 +133,10 @@ void apply_standard_traits(DramSpec& spec, const StandardTraits& traits) {
 
   spec.lpddr_mode_register_profile = std::string(traits.lpddr_mode_register_profile);
   if (traits.standard == DramStandard::Lpddr6) {
+    spec.lpddr_low_data_rate_mbps = 4267;
     spec.lpddr_dvfs_mode = LpddrDvfsMode::Nominal;
     spec.lpddr_wck_mode = LpddrWckMode::CasSync;
-    spec.lpddr_wck_ratio = 4;
+    spec.lpddr_wck_ratio = 2;
     spec.lpddr_wck_training_mode = "startup_and_dvfs_retrain";
     spec.lpddr_dvfs_transition_policy = "idle_channel_nacu_guarded";
   } else if (traits.standard == DramStandard::Lpddr5) {

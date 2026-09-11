@@ -15,7 +15,7 @@ demo_bin=${HBM_SIM_BIN:-$demo_root/build-clang-debug/hbm_sim}
 demo_stacks=${STACK_COUNT:-2}
 demo_output_root=${OUTPUT_ROOT:-$demo_root/outputs/demos}
 demo_out=$demo_output_root/${demo_standard}_${demo_stacks}stack
-demo_config=$demo_root/configs/usecases/${demo_family}_nstacks.cfg
+demo_config=$demo_root/examples/configs/${demo_family}_nstacks.cfg
 demo_trace=$demo_root/examples/multistack_demos/two_stack_payload.trace
 
 if [[ ! -x "$demo_bin" ]]; then
@@ -40,6 +40,7 @@ mkdir -p "$demo_out"
   --dump-timing-table "$demo_out/timing.csv" \
   --dump-thermal-map "$demo_out/thermal_{stack}.txt" \
   --validate-cmd-trace --validate-dfi-trace \
+  --stats-view summary --stats-json "$demo_out/result.json" \
   | tee "$demo_out/stats.txt"
 
 # Dashboard 同时合并所有 Stack 的热网格；命令轨迹本身已经带 stack_id。
@@ -50,7 +51,7 @@ done
 python3 "$demo_root/tools/visualize.py" \
   --command-trace "$demo_out/commands.csv" \
   --dfi-trace "$demo_out/dfi.csv" \
-  --stats "$demo_out/stats.txt" \
+  --stats "$demo_out/result.json" \
   "${thermal_args[@]}" \
   --out "$demo_out/dashboard.html" \
   --title "${demo_standard^^} ${demo_stacks}-Stack validation dashboard"

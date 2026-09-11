@@ -1,3 +1,4 @@
+#include "spec_fixture.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -118,6 +119,7 @@ void expand_scope_dimensions(DramSpec &spec) {
   spec.org.ranks = std::max(2, spec.org.ranks);
   spec.org.bank_groups = std::max(2, spec.org.bank_groups);
   spec.org.banks_per_group = std::max(2, spec.org.banks_per_group);
+  set_fixture_density_from_geometry(spec);
 }
 
 Evidence check_pair(const DramSpec &original,
@@ -126,6 +128,9 @@ Evidence check_pair(const DramSpec &original,
   DramSpec spec = original;
   expand_scope_dimensions(spec);
   spec.timing_constraints = {constraint};
+  // Isolate this table entry; counter-dependent REFdb rules have their own
+  // full-state boundary probes below (including the real dual-bank geometry).
+  spec.lpddr_dual_bank_refresh = false;
   TimingEngine engine(spec);
   const DecodedAddress decoded = base_address();
   const DecodedAddress other = other_scope_address(decoded, constraint.scope);
@@ -231,6 +236,41 @@ Evidence check_faw(const DramSpec &original, const TimingConstraint &constraint,
   };
 }
 
+Evidence check_refdb_counter(bool wrap) {
+  DramSpec spec = hbm_sim::make_spec("lpddr6");
+  TimingEngine engine(spec);
+  const int pairs = spec.org.bank_groups * spec.org.banks_per_group / 2;
+  const Cycle multiplier = spec.tick_multiplier;
+  const Cycle short_gap = spec.timing.nREFDB2REFDBS * multiplier;
+  Cycle issued = 1000;
+  DecodedAddress address;
+  const int count = wrap ? pairs : 1;
+  for (int i = 0; i < count; ++i) {
+    address.bank_group = (i / spec.org.banks_per_group) * 2;
+    address.bank = i % spec.org.banks_per_group;
+    engine.apply_constraints(spec, address, Command::REFDB, issued);
+    if (i + 1 < count)
+      issued += short_gap;
+  }
+  address.bank_group = 0;
+  address.bank = wrap ? 0 : 1;
+  const int latency = wrap ? spec.timing.nREFDB2REFDBL : spec.timing.nREFDB2REFDBS;
+  const Cycle ready = issued + latency * multiplier;
+  auto other = address;
+  other.pseudo_channel = 1;
+  const bool before = engine.constraint_ready(spec, address, Command::REFDB, ready - multiplier);
+  const bool last = engine.constraint_ready(spec, address, Command::REFDB, ready - 1);
+  const bool at = engine.constraint_ready(spec, address, Command::REFDB, ready);
+  const bool isolated = engine.constraint_ready(spec, other, Command::REFDB, issued);
+  const std::string parameter = wrap ? "nREFDB2REFDBL" : "nREFDB2REFDBS";
+  return Evidence{spec.name, spec.timing_profile, spec.timing_constraints.size() + (wrap ? 1 : 0),
+                  parameter, timing_source(spec, parameter),
+                  "JESD209-6 sections 7.6.1/7.6.2; Table 299; stateful refresh-row counter",
+                  "rank", "REFdb", "REFdb", latency, spec.tick_multiplier,
+                  ready - multiplier, ready, before, last, at, isolated,
+                  !before && !last && at && isolated ? "PASS" : "FAIL"};
+}
+
 void write_csv(const std::filesystem::path &path,
                const std::vector<Evidence> &rows) {
   if (path.has_parent_path()) {
@@ -276,6 +316,8 @@ int main(int argc, char **argv) {
     }
 
     std::vector<Evidence> evidence;
+    evidence.push_back(check_refdb_counter(false));
+    evidence.push_back(check_refdb_counter(true));
     std::size_t skipped_zero_latency = 0;
     for (const char *standard : {"hbm3", "hbm4", "lpddr5", "lpddr6"}) {
       const DramSpec spec = hbm_sim::make_spec(standard);
