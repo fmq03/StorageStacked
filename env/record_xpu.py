@@ -37,12 +37,24 @@ for name,path in paths.items():
 private=[json.loads(p.read_text()) for p in (deps/'xpu-sysroot/conda-meta').glob('*.json')]
 expected={s for s in (root/'env/xpu-runtime-linux-64.lock').read_text().splitlines() if s.startswith('https://')}
 assert expected=={p['url']+'#'+p['md5'] for p in private}
+cmake_sources=[]
+cmake_cache=(root/'vortex-gpu/vortex/third_party/ramulator/build/CMakeCache.txt').read_text()
+for item in json.loads((root/'env/xpu-artifacts.lock.json').read_text())['cmake_sources']:
+    archive=deps/'xpu-downloads/cmake'/(item['name']+'-'+item['revision']+'.tar.gz')
+    source=deps/'cmake-sources'/item['name']
+    assert hashlib.file_digest(archive.open('rb'),'sha256').hexdigest()==item['sha256']
+    assert (source/'.storagestacked-source.sha256').read_text().strip()==item['sha256']
+    key='FETCHCONTENT_SOURCE_DIR_'+item['name'].upper()
+    assert any(line.startswith(key+':') and line.split('=',1)[-1]==str(source)
+               for line in cmake_cache.splitlines()), key
+    cmake_sources.append({**item,'source_directory':str(source)})
 versions={}
 for name,cmd in {
     'bazel':[str(deps/'xpu-tools/bin/bazel'),'--version'],
     'vortex_llvm':[str(deps/'xpu-toolchains/llvm-vortex/bin/clang++'),'--version'],
 }.items():versions[name]=subprocess.check_output(cmd,text=True)
 (out/'xpu_manifest.json').write_text(json.dumps({'passed':True,'files':files,'versions':versions,
+    'cmake_sources':cmake_sources,
     'private_runtime_packages':[{k:p[k] for k in ('name','version','build','url','md5')} for p in private],
     'systemc':'Only gem5 native SystemC; accelerator libraries have no SystemC symbols'},indent=2)+'\n')
 print('XPU binary and SystemC audit passed')

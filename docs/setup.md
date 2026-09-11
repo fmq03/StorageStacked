@@ -64,7 +64,7 @@ bootstrap_xpu包含基础环境配置；build_xpu包含mem_sim与gem5构建，�
 
 包中的上游源码是未打补丁的固定版本；系统内安装脚本会安装所需补丁和设备源码。
 Ramulator的三项CMake依赖由bootstrap解压到SS_DEPS_ROOT/cmake-sources，构建直接使用
-这些固定源码，避免CMake再次从Git下载。
+这些固定源码，避免CMake再次从Git下载。Ramulator作为Vortex内部依赖编译；整机内存后端使用mem_sim。
 没有复制本机已安装的Conda前缀、修改过加载器的LLVM、NPU/gem5二进制、仿真结果或用户配置。
 
 ```bash
