@@ -62,7 +62,7 @@ def write_manifest(folder, modules):
         'locks': {name: digest(ROOT / 'env' / name) for name in LOCKS},
         'submodules': modules,
         'files': {str(p.relative_to(folder)): {'sha256': digest(p), 'bytes': p.stat().st_size}
-                  for p in sorted(folder.rglob('*')) if p.is_file() and p.name != 'manifest.json'},
+                  for p in sorted(folder.rglob('*')) if p.is_file() and p != folder / 'manifest.json'},
     }
     (folder / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
@@ -151,6 +151,10 @@ def verify(folder):
     manifest = json.loads((folder / 'manifest.json').read_text())
     if manifest['format'] != 1:
         raise RuntimeError('Unsupported package format')
+    actual = {str(p.relative_to(folder)) for p in folder.rglob('*')
+              if p.is_file() and p != folder / 'manifest.json'}
+    if actual != set(manifest['files']):
+        raise RuntimeError('Package file inventory differs from manifest')
     for name, expected in manifest['locks'].items():
         if digest(ROOT / 'env' / name) != expected:
             raise RuntimeError('Package does not match this checkout: ' + name)
