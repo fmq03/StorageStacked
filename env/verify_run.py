@@ -90,7 +90,7 @@ result = {
         "transaction_delta_min_ns": min(deltas) / 1e6,
         "transaction_delta_max_ns": max(deltas) / 1e6,
     },
-    "not_connected": ["Vortex", "CoralNPU", "mem_sim"],
+    "not_exercised_by_this_suite": ["Vortex", "CoralNPU", "mem_sim"],
 }
 (root / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
 print(json.dumps(result, indent=2))

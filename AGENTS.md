@@ -3,7 +3,7 @@
 接手先读 integrate_doc/HANDOFF.md 和 integrate_doc/09_migration.md（本地交接资料），
 再读 README.md 和 docs/development.md。若交接资料未分发，以已提交文档为准。
 
-- 用户已授权本轮同步远端、整合仓库、保留历史并用中文提交记录修改；不执行 push。
+- 用户已授权本轮复核合并、清理遗留、验证链路、打包依赖并提交配置指引；提交说明用中文，不执行push。
 - ucie-model、axi2flit、gem5_axi、mem_sim、gem5_new 是主仓库普通目录，直接维护源码。
   不重新建立内部 .git、gitlink 或构建时向内部模块应用补丁。
 - gem5、coralnpu、vortex-gpu/vortex 是外部子模块，按 env/sources.lock.json 固定版本。

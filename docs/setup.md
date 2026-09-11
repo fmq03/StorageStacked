@@ -3,6 +3,7 @@
 本工程把CPU、Vortex GPU、CoralNPU的访存接入同一个AXI256/UCIe/在线mem_sim响应闭环。
 五个内部模块已并入主仓库；只有gem5、coralnpu、vortex-gpu/vortex及Vortex递归依赖是子模块。
 入口统一在根目录env/；protocol/是共享协议源码。
+源码和依赖安装路径建议使用不含空格的Linux路径。
 
 ## 1. 主机条件
 
@@ -46,6 +47,8 @@ bash env/build_xpu.sh
 
 bootstrap_xpu包含基础环境配置；build_xpu包含mem_sim与gem5构建，无需再重复基础步骤。
 首次下载需要访问GitHub、conda-forge及Bazel依赖所用的上游站点。
+全量构建需要数十分钟；gem5/mem_sim默认6个编译任务，可用AXI_JOBS调整，例如
+`AXI_JOBS=12 bash env/build_xpu.sh`（本轮在32GiB内存机器上验证）。
 
 ## 3. 有依赖包：恢复源码与下载缓存
 

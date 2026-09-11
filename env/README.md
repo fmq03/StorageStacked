@@ -43,7 +43,7 @@ bash env/run_xpu.sh             # 也可传入一个尚不存在的结果目录
 HTML详情按需加载，支持直接双击打开；复制或交接时请带上同级 `view_store.js`、
 `memsim_data/`、`trace_paths_data/`、`trace_flits_data/`，最方便是复制整个用例目录。
 请求页每页50个选项、Flit页每页100行，不再将全部字节内嵌到HTML。
-当前结果入口为 `results/axi256-20260911/report.html`；此前旧结果已按用户要求清理。
+当前交接结果入口为 `results/handoff-20260911/report.html`；此前AXI256与monorepo报告保留。
 
 主环境继续固定 GCC13.4/Python3.12.13，不额外安装第二套宿主 C++ 编译环境。
 专用依赖在同一个 `SS_DEPS_ROOT` 下管理：
@@ -180,7 +180,10 @@ CPU 旧 libc workload 的默认 watchdog 为 10ms；新的 freestanding workload
 
 ## 验收记录
 
-当前统一仓库回归：[总结果](../results/monorepo-20260911/summary.json)。
+最新交接验收见[验收说明](../docs/handoff-validation.md)与[总报告](../results/handoff-20260911/report.html)，
+覆盖当前工作区完整流程以及新路径/新环境恢复后的构建与闭环。
+
+此前仓库整合基线：[总结果](../results/monorepo-20260911/summary.json)。
 新版 mem_sim 的19项原生测试、7组CPU/定向完整链路、4组GPU/NPU及5组RAM兼容场景通过。
 
 - [在线内存](../results/monorepo-20260911/memsim/summary.json)：989笔父请求、1784个原生子请求。
