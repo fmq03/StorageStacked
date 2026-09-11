@@ -1,4 +1,5 @@
 #include "online.h"
+#include "hbm_sim/config/model.hpp"
 #include "hbm_sim/core/system.hpp"
 #include "hbm_sim/validation/trace.hpp"
 #include "hbm_sim/validation/validator.hpp"
@@ -25,12 +26,11 @@ extern "C" ss_mem* ss_mem_create(const char* standard, unsigned channels, unsign
  unsigned depth, uint64_t size, const char* outdir) {
  try {
   if (!channels || !scale || !depth || !size) throw std::invalid_argument("zero configuration value");
-  auto h=std::make_unique<ss_mem>(); h->spec=make_spec(standard); h->dir=outdir; h->size=size;
-  h->spec.org.channels=channels;
-  h->spec.timing.tCK_ps*=scale;
-  validate_spec(h->spec);
+  auto h=std::make_unique<ss_mem>(); h->dir=outdir; h->size=size;
+  h->spec=config::build_model(standard, {{"channels",std::to_string(channels)}});
   if(size>h->spec.addressable_capacity_bytes()) throw std::invalid_argument("window exceeds native DRAM capacity; increase channels");
-  double fs=h->spec.timing.tCK_ps*1000/h->spec.tick_multiplier;
+  // Scale the host-to-model time mapping, keeping the native speed/tCK valid.
+  double fs=h->spec.timing.tCK_ps*1000*scale/h->spec.tick_multiplier;
   h->period=std::llround(fs);
   if (!h->period || std::abs(fs-h->period)>1e-6 || h->spec.transaction_bytes()>64)
    throw std::invalid_argument("period must be integral fs; transaction must fit 64B");
@@ -56,7 +56,10 @@ extern "C" ss_mem* ss_mem_create(const char* standard, unsigned channels, unsign
      <<",\"timing_scale\":"<<scale<<",\"period_fs\":"<<h->period
      <<",\"transaction_bytes\":"<<h->spec.transaction_bytes()<<",\"queue_depth\":"<<depth
      <<",\"window_bytes\":"<<size<<",\"phy\":\"behavioral\",\"tick_multiplier\":"<<h->spec.tick_multiplier
-     <<",\"tCK_ps\":"<<h->spec.timing.tCK_ps<<",\"provisional_timing_entries\":"<<h->spec.timing_table.provisional_count()<<"}\n";
+     <<",\"tCK_ps\":"<<h->spec.timing.tCK_ps<<",\"effective_tCK_ps\":"<<h->spec.timing.tCK_ps*scale
+     <<",\"density_gbit\":"<<h->spec.density_gb<<",\"data_bus_bits\":"<<h->spec.data_bus_bits
+     <<",\"data_rate_mbps\":"<<h->spec.data_rate_mbps<<",\"capacity_bytes\":"<<h->spec.addressable_capacity_bytes()
+     <<",\"provisional_timing_entries\":"<<h->spec.timing_table.provisional_count()<<"}\n";
   return h.release();
  } catch(const std::exception& e) { error=e.what();return nullptr; }
 }

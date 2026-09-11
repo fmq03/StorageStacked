@@ -89,7 +89,7 @@ bash env/run_memsim.sh
 含统一的 glibc 2.28 sysroot、binutils 和 C/C++ 运行库。`environment.yml` 记录选版意图；
 交接使用 explicit lock，不重新求解。安装目录默认 `~/.local/share/storagestacked-unified/`。
 
-`build.sh` 检查 `sources.lock.json`，应用既有 gem5/UCIe 补丁，先以 C++20 构建
+`build.sh` 检查 `sources.lock.json`，应用外部 gem5 补丁并安装系统内的设备源码，先以 C++20 构建
 `mem_sim/build-unified/libstoragestacked_memsim.so`，再通过 EXTRAS 构建
 `gem5/build/AXI/gem5.opt`，含 gem5_axi 和 gem5_new 的 HETTrace 观察器。
 两者使用同一套编译器和运行库；C ABI 隔开 gem5 C++17 与 mem_sim C++20。
@@ -97,8 +97,9 @@ bash env/run_memsim.sh
 HDF5/protobuf/capstone/tcmalloc 为未启用的可选组件，相关构建提示不影响此配置。
 KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 
-源码版本：gem5 `c8222cc...`（gem5_new 锁定的 v25.1.0.1）；mem_sim 保留本地
-`a790653...`，没有切换为 gem5_new 原锁 `794565...`。新增在线接口直接使用本地模型。
+源码版本：gem5 `c8222cc...`（gem5_new 锁定的 v25.1.0.1）；mem_sim 已同步远端
+`c383152...` 并合并在线接口。内部源码版本统一由主仓库提交标识，导入来源见
+`env/internal_imports.json`；不再使用旧 gem5_new 锁文件控制内部模块。
 
 ## 运行与证据
 
@@ -117,7 +118,7 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 构建行为级 DFI 轨迹，不是外部 RTL 引脚采样。
 `memsim_image.csv` 是原生 MemoryImage 的最终内容；桥本身不维护替代 RAM。
 `environment/manifest.json` 记录源码/未提交文件、工具包、二进制和共享库哈希及实际链接库；
-内部目录记录同一个主仓库提交及各自文件哈希，外部目录记录子模块提交。
+内部目录（包括公共 protocol）记录同一个主仓库提交及各自文件哈希，外部目录记录子模块提交。
 同目录patch仅记录对应目录的未提交差异；内部导入来源另见env/internal_imports.json。
 
 手动跑一个 CPU 场景：
@@ -131,10 +132,11 @@ source env/activate.sh
 ```
 
 参数说明：`--memsim-channels 2`、`--memsim-queue 4`、`--memsim-slots 8` 为默认值；
-`--memsim-scale 4` 将原生 tCK 与 mem_sim 时间步长一起放大；`--memsim-response-hold`
+`--memsim-scale 4` 将宿主时间与 mem_sim tick 的映射放慢4倍，保持原生速率/tCK参数一致；`--memsim-response-hold`
 仅用于背压测试，单位是 mem_sim tick，正常值为 0。HBM4 默认 tCK=500ps、tick_multiplier=2，
 因此每次原生 step 对应 250ps；主事件队列驱动 SystemC 在该时刻调用一次 step。
-每次运行将确切设置写入 `memsim_config.json`。HBM4 preset 含 19 项 provisional 时序，
+每次运行将原生 tCK、缩放后 effective_tCK、周期、容量和解析后的配置写入
+`memsim_config.json`。HBM4 preset 含 provisional 时序，具体数量以该文件为准；
 用于功能及模型内时序验证，尚未经特定硬件标定。
 
 旧验证入口 `bash env/run.sh [新结果目录]` 继续验证 SimpleBurstMemory/RAM、ID 复用和
@@ -156,9 +158,13 @@ CPU 旧 libc workload 的默认 watchdog 为 10ms；新的 freestanding workload
 
 ## 迁移与交接
 
-保留同级源码布局、根 `.git/modules`、子模块 `.git` 文件及全部必要未提交源码。
-`env/`、`gem5_axi/`、`ucie-model/`、`mem_sim/integration/` 和 gem5/gem5_new 补丁均需交付；
-当前单纯 `git clone --recursive` 无法恢复本地集成修改。禁止删除原 `/mnt/d/storagestacked`。
+五个内部模块和必要的外部适配补丁已提交到主仓库。配置团队远端并推送后，新机器可
+`git clone --recurse-submodules <主仓库地址>`，再执行上述 bootstrap/build；构建会将补丁
+和系统内设备源码安装到外部依赖。当前尚无主仓库远端，也未推送。
+
+直接复制工作区时，保留根 `.git/modules`、三个外部子模块的 `.git` 文件及必要的
+未提交源码。运行结果与 integrate_doc 不随 clone 分发，需要时另行复制。
+禁止删除原 `/mnt/d/storagestacked`。
 
 新机器用锁文件重新创建工具环境并构建，不直接搬 venv 或编译缓存。源码和
 `SS_DEPS_ROOT` 可更换路径；迁移时不带 gem5/build、mem_sim/build-unified 等编译目录，
