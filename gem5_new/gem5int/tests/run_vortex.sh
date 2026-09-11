@@ -10,9 +10,9 @@
 # "找不到 .so"，看不出是被系统删的。
 #
 # 前提：
-#   1. vortexint/install.sh 跑过（观测补丁和 timing-feedback 组合补丁在位）；
-#   2. $VORTEX_HOME/sim/simx/gem5/install.sh 跑过且 gem5.opt 编过（Vortex 的
-#      gem5 SimObject 源码 source-of-truth 在 Vortex 树里，不在本项目）；
+#   1. vortexint/install.sh 跑过（SimX在线访存补丁在位）；
+#   2. $PROJ_DIR/gem5int/install_devices.sh 跑过且 gem5.opt 编过（Vortex 的
+#      gem5 SimObject 源码在本项目 gem5int/src/dev/vortex）；
 #   3. Vortex 的 third_party 建过，且 libvortex-gem5.so 用 USE_GEM5=1 编过：
 #        make -C $VORTEX_HOME/third_party
 #        env -u DEBUG make -C $VORTEX_BUILD/sim/simx USE_GEM5=1 libvortex-gem5
@@ -52,7 +52,7 @@ grep -q trace_enable "$GEM5_HOME/build/X86/params/VortexGPGPU.hh" 2>/dev/null ||
     fail "gem5 里的 VortexGPGPU 没有 trace_enable 参数
       说明 gem5 是用打补丁前的 VortexGPGPU.py 编的。依次跑：
         VORTEX_HOME=$VORTEX_HOME $PROJ_DIR/vortexint/install.sh
-        GEM5_HOME=$GEM5_HOME $VORTEX_HOME/sim/simx/gem5/install.sh
+        GEM5_HOME=$GEM5_HOME $PROJ_DIR/gem5int/install_devices.sh
         cd $GEM5_HOME && .venv/bin/scons build/X86/gem5.opt -j\$(nproc)"
 
 # 内核每次都重建。它只有 88 字节，重建的代价可以忽略，而"改了 kernel.S 忘了

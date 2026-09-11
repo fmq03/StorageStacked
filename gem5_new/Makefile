@@ -82,48 +82,22 @@ $(BUILD):
 	mkdir -p $@
 
 # ---- 安装 ------------------------------------------------------------------
-# 四步必须严格串行。尤其是 Vortex 的 gem5 SimObject source-of-truth 在 Vortex 树里：
-# 必须先给 Vortex 打补丁，再运行 Vortex 自带的 gem5 installer，随后才能安装本项目
-# gem5 增量；即使用户以 `make -j install` 调用，这个单一 recipe 也不会乱序。
+# 模型增量和内部设备源码按固定顺序安装；并行make也不会交叉覆盖。
 install:
 	@set -eu; \
 	workspace_root="$(dir $(PROJ))"; \
-	vortex_home="$${VORTEX_HOME:-$${workspace_root}vortex-gpu/vortex}"; \
-	gem5_home="$${GEM5_HOME:-$${workspace_root}gem5}"; \
-	coralnpu_home="$${CORALNPU_HOME:-$${workspace_root}coralnpu}"; \
-	[ -x "$$vortex_home/sim/simx/gem5/install.sh" ] || { \
-		echo "错误: 找不到 Vortex gem5 installer: $$vortex_home/sim/simx/gem5/install.sh" >&2; \
-		exit 1; \
-	}; \
-	echo "[1/4] 安装 Vortex 项目增量"; \
-	VORTEX_HOME="$$vortex_home" ./vortexint/install.sh; \
-	echo "[2/4] 把 Vortex gem5 SimObject 安装进 gem5"; \
-	VORTEX_HOME="$$vortex_home" GEM5_HOME="$$gem5_home" \
-		"$$vortex_home/sim/simx/gem5/install.sh"; \
-	echo "[3/4] 安装统一 gem5 增量"; \
-	GEM5_HOME="$$gem5_home" ./gem5int/install.sh; \
-	echo "[4/4] 安装 CoralNPU 项目增量"; \
-	CORALNPU_HOME="$$coralnpu_home" ./coralnpuint/install.sh
+	VORTEX_HOME="$${VORTEX_HOME:-$${workspace_root}vortex-gpu/vortex}" ./vortexint/install.sh; \
+	GEM5_HOME="$${GEM5_HOME:-$${workspace_root}gem5}" ./gem5int/install.sh; \
+	CORALNPU_HOME="$${CORALNPU_HOME:-$${workspace_root}coralnpu}" ./coralnpuint/install.sh
 
 install-gem5:
 	./gem5int/install.sh
 
-# Vortex 要跑两个脚本且顺序不能反：先给 Vortex 树打补丁，再把打过补丁的 gem5 侧
-# 源码装进 gem5（那份源码的 source-of-truth 在 Vortex 树里）。理由见
-# docs/04-integration.md。Vortex 自带的 third_party/ramulator 是 SimX 依赖，
-# 由 Vortex 构建流程管理，不是本项目的在线内存后端。
 install-vortex:
 	@set -eu; \
 	workspace_root="$(dir $(PROJ))"; \
-	vortex_home="$${VORTEX_HOME:-$${workspace_root}vortex-gpu/vortex}"; \
-	gem5_home="$${GEM5_HOME:-$${workspace_root}gem5}"; \
-	[ -x "$$vortex_home/sim/simx/gem5/install.sh" ] || { \
-		echo "错误: 找不到 Vortex gem5 installer: $$vortex_home/sim/simx/gem5/install.sh" >&2; \
-		exit 1; \
-	}; \
-	VORTEX_HOME="$$vortex_home" ./vortexint/install.sh; \
-	VORTEX_HOME="$$vortex_home" GEM5_HOME="$$gem5_home" \
-		"$$vortex_home/sim/simx/gem5/install.sh"
+	VORTEX_HOME="$${VORTEX_HOME:-$${workspace_root}vortex-gpu/vortex}" ./vortexint/install.sh; \
+	GEM5_HOME="$${GEM5_HOME:-$${workspace_root}gem5}" bash ./gem5int/install_devices.sh
 
 install-coralnpu:
 	./coralnpuint/install.sh

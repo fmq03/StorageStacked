@@ -149,8 +149,7 @@ boundary-all: | $(SIM_DIR)
 
 # 链路模型目录可独立配置；UCIE_DIR 的相对路径以 systemc/ 为基准。
 AXI2FLIT_SYSTEMC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-UCIE_DIR ?= ../reference/ucie-model
-UCIE_PATCH := $(AXI2FLIT_SYSTEMC_DIR)/integration/ucie-model-aou.patch
+UCIE_DIR ?= ../../ucie-model
 ADAPTER_FLAGS := -I./integration -I"$(UCIE_DIR)/src"
 FULL_LINK_ARGS ?=
 FULL_LINK_TARGET := $(SIM_DIR)/full_link_$(WIDTH)
@@ -205,10 +204,10 @@ config-check: reference-check | $(SIM_DIR)
 	  $(DUT_SRCS) $(TB_DIR)/tb_preintegration.cpp -o $(SIM_DIR)/boundary_config $(LDFLAGS)
 	./$(SIM_DIR)/boundary_config normal 1
 
-# reference 不纳入主仓库。反向检查只读确认交付补丁已安装，缺失时给出操作入口。
+# 两端源码均属于统一系统；这里只检查所需文件，不应用补丁。
 reference-check:
-	@git -C "$(UCIE_DIR)" apply --reverse --check "$(UCIE_PATCH)" || \
-	  { echo "UCIe 接入补丁未安装或与本地修改冲突，请按 integration/README.md 检查。"; exit 1; }
+	@test -f "$(UCIE_DIR)/src/ucie_link.h" -a -f "../../protocol/include/aou_format6.h" || \
+	  { echo "缺少系统内的UCIe或公共协议头，请检查完整工作区。"; exit 1; }
 
 wave:
 	gtkwave $(SIM_DIR)/waveform.vcd &

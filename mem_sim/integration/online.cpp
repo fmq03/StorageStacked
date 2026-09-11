@@ -3,6 +3,7 @@
 #include "hbm_sim/validation/trace.hpp"
 #include "hbm_sim/validation/validator.hpp"
 #include "hbm_sim/validation/dfi.hpp"
+#include "hbm_sim/stats/result.hpp"
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -108,7 +109,8 @@ extern "C" int ss_mem_finish(ss_mem* h){
   write_command_trace_csv(h->dir+"/memsim_commands.csv",commands);
   write_dfi_trace_csv(h->dir+"/memsim_dfi.csv",dfi);
   write_dfi_signal_trace_csv(h->dir+"/memsim_dfi_signals.csv",dfi);
-  std::ofstream stats(h->dir+"/memsim_stats.txt");print_stats(stats,h->system->stats());
+  std::ofstream stats(h->dir+"/memsim_stats.txt");
+  print_diagnostics(stats,collect_stats(h->system->stats()));
   for(const auto& e:validation.errors)stats<<"COMMAND ERROR: "<<e<<'\n';
   for(const auto& e:dv.errors)stats<<"DFI ERROR: "<<e<<'\n';
   h->system->stack_memory_images()[0]->dump_csv(h->dir+"/memsim_image.csv");

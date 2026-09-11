@@ -1,5 +1,8 @@
 # 统一构建与运行环境
 
+当前五个内部模块是主仓库普通源码，外部gem5/Vortex/CoralNPU仍按sources.lock.json锁定。
+构建不再对UCIe打补丁；GPU设备源码在gem5_new/gem5int/src/dev/vortex直接维护。
+
 当前已验证的完整链路：
 
 ```text
@@ -33,7 +36,7 @@ bash env/run_xpu.sh             # 也可传入一个尚不存在的结果目录
 
 这三个入口包含基本环境的准备和构建。无需先单独执行 CPU 的三个命令。
 运行 CPU+NPU、CPU+GPU、CPU+GPU+NPU、三源内存时间尺度×4 四组，保留每组完整
-波形/Flit/DRAM/DFI/来源日志，执行独立校验、内存 C ABI 大地址测试及原生14项测试。
+波形/Flit/DRAM/DFI/来源日志，执行独立校验、内存 C ABI 大地址测试及原生测试（当前19项）。
 `summary.json` 是验收结果；`three/memsim_view.html` 按请求展示全过程。
 HTML详情按需加载，支持直接双击打开；复制或交接时请带上同级 `view_store.js`、
 `memsim_data/`、`trace_paths_data/`、`trace_flits_data/`，最方便是复制整个用例目录。
@@ -101,7 +104,7 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 
 `run_memsim.sh [新结果目录]` 编译一个无 libc 启动过程的 CPU 校验程序，执行：
 
-- mem_sim 原生 14 项测试及 C ABI 掩码/队列/完成测试。
+- mem_sim 原生测试（当前19项）及 C ABI 掩码/队列/完成测试。
 - 五组定向链路测试：默认、双平面 CRC 重放、深度 1 队列、响应保持背压、3ns AXI 时钟。
 - 两组 CPU 测试：默认内存时间尺度与放慢 4 倍，比较同一程序的 452 次访问和完成时间。
 - AXI 五通道 VCD、两端完整 Flit、DRAM/DFI 字节与时间、最终内存镜像的独立校验。
@@ -114,7 +117,8 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 构建行为级 DFI 轨迹，不是外部 RTL 引脚采样。
 `memsim_image.csv` 是原生 MemoryImage 的最终内容；桥本身不维护替代 RAM。
 `environment/manifest.json` 记录源码/未提交文件、工具包、二进制和共享库哈希及实际链接库；
-同目录 patch 记录各仓库已有文件的修改，manifest 本身不能代替源码交付包。
+内部目录记录同一个主仓库提交及各自文件哈希，外部目录记录子模块提交。
+同目录patch仅记录对应目录的未提交差异；内部导入来源另见env/internal_imports.json。
 
 手动跑一个 CPU 场景：
 

@@ -1,3 +1,5 @@
+> 统一系统入口以根目录env/和docs/development.md为准；下文部分独立安装步骤保留供参考。
+
 # 上游源码集成
 
 本项目在四棵外部树旁工作：gem5、Vortex、CoralNPU 和 GuXing25 `mem_sim`。固定 commit 见
@@ -75,14 +77,10 @@ test -f build/X86/params/HetAxiMonitor.hh
 
 ## Vortex 与 CoralNPU 补丁栈
 
-Vortex 安装器按以下顺序维护：
-
-```text
-trace ABI → timing_feedback.patch → axi_transactions.patch
-```
-
-后两层让 core 与 CP DMA 能经 gem5 timing request 完成功能数据交接，并携带 transaction context
-和 byte-enable；它们不表示外部 `hbm_sim` completion 会反馈。卸载必须逆序，安装器已处理。
+Vortex安装器只应用simx_online.patch，修改外部SimX/ABI内部。
+gem5设备源码统一维护于gem5int/src/dev/vortex，直接编辑普通C++/Python源文件；
+gem5int/install_devices.sh刷新外部gem5中的构建副本。旧trace/timing/AXI/online CP
+多层补丁已归并，设备层功能由普通源码承接。当前在线mem_sim完成会沿原链路反馈。
 
 CoralNPU 的 base/async wrapper 补丁也有顺序，提供非阻塞 AXI issue/completion seam，使真实
 READY/VALID、ID、WSTRB 和 RESP 可由 gem5 驱动。不要手工重复应用单个 hunk。
