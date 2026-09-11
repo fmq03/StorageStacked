@@ -39,6 +39,7 @@ expected={s for s in (root/'env/xpu-runtime-linux-64.lock').read_text().splitlin
 assert expected=={p['url']+'#'+p['md5'] for p in private}
 cmake_sources=[]
 cmake_cache=(root/'vortex-gpu/vortex/third_party/ramulator/build/CMakeCache.txt').read_text()
+simx_headers=(root/'vortex-gpu/vxbuild/sim/simx/obj/sim_common/dram_sim.d').read_text()
 for item in json.loads((root/'env/xpu-artifacts.lock.json').read_text())['cmake_sources']:
     archive=deps/'xpu-downloads/cmake'/(item['name']+'-'+item['revision']+'.tar.gz')
     source=deps/'cmake-sources'/item['name']
@@ -47,6 +48,8 @@ for item in json.loads((root/'env/xpu-artifacts.lock.json').read_text())['cmake_
     key='FETCHCONTENT_SOURCE_DIR_'+item['name'].upper()
     assert any(line.startswith(key+':') and line.split('=',1)[-1]==str(source)
                for line in cmake_cache.splitlines()), key
+    if item['name'] in ('spdlog','yaml-cpp'):
+        assert str(source/'include') in simx_headers, item['name']
     cmake_sources.append({**item,'source_directory':str(source)})
 versions={}
 for name,cmd in {

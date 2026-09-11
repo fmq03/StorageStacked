@@ -21,7 +21,10 @@ cmake --build "$VORTEX_HOME/third_party/ramulator/build" --parallel 4
 # SoftFloat hardcodes gcc in COMPILE_C; CC alone would be ignored.
 softfloat_compile="$AXI_CC -c -Werror-implicit-function-declaration -DSOFTFLOAT_FAST_INT64 "'$(SOFTFLOAT_OPTS) $(C_INCLUDES) -O2 -o $@'
 make -C "$VORTEX_HOME/third_party" CC="$AXI_CC" CXX="$AXI_CXX" COMPILE_C="$softfloat_compile" -j4
-env -u DEBUG make -C sim/simx USE_GEM5=1 libvortex-gem5 -j4
+# SimX's upstream makefile also includes Ramulator headers directly. Put the
+# pinned include paths first, including when an old ext/ checkout still exists.
+vortex_flags="-I$SS_DEPS_ROOT/cmake-sources/spdlog/include -I$SS_DEPS_ROOT/cmake-sources/yaml-cpp/include ${CXXFLAGS:-}"
+env -u DEBUG CXXFLAGS="$vortex_flags" make -C sim/simx USE_GEM5=1 libvortex-gem5 -j4
 make -C sw/runtime/stub -j4
 make -C sw/runtime/gem5 HOST_ARCH=x86_64 -j4
 # Host optimization flags cannot be passed to the RISC-V compiler.
