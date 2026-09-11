@@ -1,0 +1,54 @@
+# ============================================================
+#  本地资料与依赖源码
+# ============================================================
+# 文档目录中的本地二进制资料和编辑器临时文件
+doc/*.pdf
+doc/*.doc
+doc/*.docx
+doc/*.jpg
+doc/*.png
+doc/~$*
+# 本地依赖目录由各依赖项目管理
+/reference
+
+# 项目 Markdown 文档纳入仓库管理。
+
+# ============================================================
+#  仿真构建产物：一律不入库
+# ============================================================
+# 可执行文件由 make 生成，文件名一律带位宽后缀（见 Makefile 头部注释）
+#   make / make perf / make golden      → axi2flit_{sim,perf,golden}_<WIDTH>
+#   make test-all / perf-all / golden-all → {func,perf,golden}_<WIDTH>
+systemc/sim/axi2flit_sim*
+systemc/sim/axi2flit_perf*
+systemc/sim/axi2flit_golden*
+systemc/sim/func_*
+systemc/sim/perf_*
+systemc/sim/golden_*
+systemc/sim/wire_*
+systemc/sim/boundary_*
+systemc/sim/adapter*
+systemc/sim/full_link*
+systemc/obj/
+
+# 波形与日志：每次仿真重新生成，且体积大
+*.vcd
+*.log
+systemc/sim/perf_report.txt
+
+# 编译中间产物
+*.o
+*.d
+*.a
+__pycache__/
+*.py[cod]
+*.so
+*.fst
+*.fsdb
+*.wlf
+/.venv/
+/.vscode/
+/.idea/
+*.swp
+*.swo
+*~
