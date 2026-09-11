@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from native_tests import passed_count
 from hettrace.reader import CHAN_R, CHAN_W, read_header, read_records
 from hettrace.validate import format_report, validate_dir
 
@@ -15,7 +16,7 @@ def rows(p):
 def finish(p):return int(re.findall(r'EXIT: .* tick (\d+)',(p/'run.log').read_text())[-1])
 def insts(p):return int(re.search(r'^simInsts\s+(\d+)',(p/'stats.txt').read_text(),re.M)[1])
 native=(root/'native-tests.log').read_text()
-assert '100% tests passed, 0 tests failed out of 14' in native
+native_count=passed_count(root)
 api=read(root/'api/api_check.json');assert api['passed'] and api['queue_retry']
 cases={}
 for name in ('directed','replay','shallow','held','period_3ns','cpu','cpu_slow'):
@@ -52,7 +53,7 @@ negative=read(root/'directed/memsim_negative.json');assert len(negative)==6 and 
 wave=read(root/'wave_audit/summary.json');assert len(wave)==7 and all(v['passed'] for v in wave.values())
 result={'passed':True,'scope':'X86 CPU -> gem5 native TLM/SystemC -> AXI -> AXI2Flit -> UCIe -> online mem_sim HBM4 behavioral PHY',
         'axi_data_bits':read(root/'directed/protocol_summary.json').get('axi_data_bits',64),
-        'native_tests_passed':14,'api_check':api,'cases':cases,'negative_checks':negative,'cpu_feedback':{'passed':True,'simulated_instructions':insts(fast),
+        'native_tests_passed':native_count,'api_check':api,'cases':cases,'negative_checks':negative,'cpu_feedback':{'passed':True,'simulated_instructions':insts(fast),
         'transactions':len(a),'finish_delta_ns':finish_delta/1e6,'transaction_delta_sum_ns':sum(deltas)/1e6,
         'slower_transactions':sum(d>0 for d in deltas),'transaction_delta_min_ns':min(deltas)/1e6,'transaction_delta_max_ns':max(deltas)/1e6},
         'limitations':['CPU target window is uncached; not cache coherence verification','HBM4 provisional preset, not calibrated device timing','This suite covers CPU/tester; accelerators are covered by run_xpu.sh']}

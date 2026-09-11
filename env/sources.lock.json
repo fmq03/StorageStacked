@@ -1,9 +1,5 @@
 {
   "gem5": "c8222cc67a399bfc01e8658dd14b30d5bfd634f9",
-  "gem5_new": "00532b0ba03ccccb3721e5c8d6ed1db241fd7b96",
-  "axi2flit": "6aa7d30c5a5d367f72ca073b3b8e051d69d45fe3",
-  "ucie-model": "58a44f352a0444a2e65d1e2dfd24780ce0c14c21",
-  "mem_sim": "a79065371fc7e37f4d86a4532933ad9724e80187",
   "vortex-gpu/vortex": "d76b7f24e658867ab57e3942d7c648c3e6af072d",
   "coralnpu": "fcb74cfe79dbd184b9c53539490994e701981f80"
 }

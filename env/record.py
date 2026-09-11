@@ -42,16 +42,18 @@ for name in ["gem5", "gem5_new", "gem5_axi", "axi2flit", "ucie-model", "mem_sim"
     repo = root / name
     head = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "HEAD"],
                           capture_output=True, text=True)
-    files = command("git", "-C", str(repo), "ls-files", "-z", "--cached", "--others", "--exclude-standard").split("\0")
+    files = command("git", "-C", str(repo), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ".").split("\0")
     sources[name] = {
         "revision": head.stdout.strip() if head.returncode == 0 else None,
-        "status": command("git", "-C", str(repo), "status", "--short"),
+        "kind": "monorepo" if Path(command("git", "-C", str(repo), "rev-parse", "--show-toplevel")) == root else "submodule",
+        "status": command("git", "-C", str(repo), "status", "--short", "--", "."),
         "files_sha256": {f: sha(repo / f) for f in sorted(set(files)) if (repo / f).is_file()},
     }
-    (destination / (name.replace('/', '-') + ".patch")).write_text(command("git", "-C", str(repo), "diff", "--binary") + "\n")
+    (destination / (name.replace('/', '-') + ".patch")).write_text(command("git", "-C", str(repo), "diff", "--relative", "--binary", "--", ".") + "\n")
 manifest = {
     "platform": platform.platform(), "machine": platform.machine(),
-    "workspace": str(root), "toolchain_prefix": str(prefix),
+    "workspace": str(root), "workspace_revision": command("git", "-C", str(root), "rev-parse", "HEAD"),
+    "internal_imports": json.loads((root / "env/internal_imports.json").read_text()), "toolchain_prefix": str(prefix),
     "python": sys.version, "compiler": command(os.environ["AXI_CXX"], "--version"),
     "scons": command(str(prefix / "bin/scons"), "--version"),
     "packages": [{k: p[k] for k in ("name", "version", "build", "url", "md5")} for p in packages],

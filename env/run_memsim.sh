@@ -8,6 +8,7 @@ mkdir -p "$destination" "$AXI_PROJECT_DIR/build"
 destination=$(cd "$destination" && pwd)
 "$AXI_PYTHON" "$SS_ROOT/env/check_sources.py"
 "$AXI_PYTHON" "$SS_ROOT/env/record.py" "$destination/environment"
+ctest --test-dir "$MEMSIM_BUILD" --show-only=json-v1 > "$destination/native-test-plan.json"
 ctest --test-dir "$MEMSIM_BUILD" --output-on-failure > "$destination/native-tests.log" 2>&1
 "$AXI_PYTHON" "$MEMSIM_HOME/integration/check_online.py" "$MEMSIM_BUILD/libstoragestacked_memsim.so" "$destination/api"
 "$AXI_CC" -O2 -static -nostdlib -ffreestanding -fno-stack-protector -fno-pie -no-pie -Wl,-e,_start \

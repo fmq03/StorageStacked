@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from native_tests import passed_count
 from hettrace.reader import CHAN_AR,CHAN_AW,CHAN_B,CHAN_R,CHAN_W,read_records
 from hettrace.validate import validate_dir,format_report
 
@@ -73,11 +74,11 @@ feedback={'passed':True,'scale':4,'host_finish_delta_ns':(slow['exit_tick_fs']-f
     'note':'CPU/CP polling counts may change; compare the same computation and actual source responses.'}
 wave=read(root/'wave_audit/summary.json');assert len(wave)==4 and all(v['passed'] for v in wave.values())
 api=read(root/'api/api_check.json');assert api['passed'] and api['high_address_no_alias'] and api['sparse_zero_initialized']
-assert '100% tests passed, 0 tests failed out of 14' in (root/'native-tests.log').read_text()
+native_count=passed_count(root)
 assert read(root/'environment/xpu_manifest.json')['passed']
 result={'passed':True,'scope':'CPU-hosted Vortex SimX and CoralNPU RTL -> AXI/UCIe -> online mem_sim -> original response path',
     'axi_data_bits':read(root/'three/protocol_summary.json').get('axi_data_bits',64),
-    'cases':cases,'memory_feedback':feedback,'api_check':api,'native_tests_passed':14,
+    'cases':cases,'memory_feedback':feedback,'api_check':api,'native_tests_passed':native_count,
     'limitations':['Host program/stack use gem5 local memory; target buffers use the online link',
       'No general AoU functional/atomic access, checkpoints or cache-coherence support',
       'NPU local ELF/reset initialization precedes timed execution; one launch per simulation',
