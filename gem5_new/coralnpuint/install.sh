@@ -102,6 +102,14 @@ if [ "$REVERT" = "1" ]; then
     exit 0
 fi
 
+# 上游 Bazel/Verilator 必须支持原生 C++，防止引入第二套 SystemC。
+NATIVE_PATCH="$SELF_DIR/patches/native_cpp_rules.patch"
+install -m 0644 "$SELF_DIR/patches/0018-Optional-SystemC-for-native-Cpp.patch" "$CORALNPU_HOME/third_party/rules_hdl/"
+if ! patch -R -p1 -s -f --dry-run -d "$CORALNPU_HOME" -i "$NATIVE_PATCH" >/dev/null 2>&1; then
+    patch -p1 -s -f --dry-run -d "$CORALNPU_HOME" -i "$NATIVE_PATCH"
+    patch -p1 -s -d "$CORALNPU_HOME" -i "$NATIVE_PATCH"
+fi
+
 echo "安装 CoralNPU gem5 集成到 $CORALNPU_HOME"
 
 mkdir -p "$GEM5INT_DIR/hettrace"

@@ -8,8 +8,8 @@
 #        src/dev/coralnpu/   CoralNPU 设备
 #        src/hettrace/       统一内存侧 AXI4 monitor
 #        src/mem/unified_timing/  功能执行使用的稀疏定延迟内存
-#      Vortex 那条腿不在这里：它的 gem5 侧源码 source-of-truth 在 Vortex 树里，
-#      由 $VORTEX_HOME/sim/simx/gem5/install.sh 安装（见 docs/04-integration.md）。
+#      Vortex 的 gem5 侧源码在本目录 src/dev/vortex 直接维护，
+#      由本脚本或 install_devices.sh 安装。
 #   2. libhettrace 的头 -> $GEM5_HOME/src/hettrace/（与 monitor 同目录）。
 #      gem5 的 SCons 把 src/ 当作 include 根（这就是 gem5 自己
 #      #include "mem/packet.hh" 能成立的原因），所以放在这里之后
@@ -42,7 +42,7 @@ fi
 # 要镜像过去的 src/ 子目录。三个都是本项目新增的目录，gem5 自带的文件一个都不
 # 碰 —— 所以列在这里而不是用 find，"哪些目录属于本项目"是显式的，--revert 才敢
 # 直接 rm -rf。
-SRC_SUBDIRS="dev/coralnpu hettrace mem/unified_timing"
+SRC_SUBDIRS="dev/coralnpu dev/vortex hettrace mem/unified_timing"
 DMA_BE_PATCH="$SELF_DIR/patches/dma_byte_enable.patch"
 
 apply_dma_be_patch() {

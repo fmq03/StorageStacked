@@ -1,0 +1,36 @@
+--- a/dependency_support/verilator/verilator.BUILD.bazel
++++ b/dependency_support/verilator/verilator.BUILD.bazel
+@@ -397,7 +397,7 @@
+         "_virtual_includes/verilatedos",
+         "_virtual_includes/svdpi",
+     ],
+-    defines = ["VM_SC"],
++    defines = select({":storagestacked_native_cpp": [], "//conditions:default": ["VM_SC"]}),
+     linkopts = [
+         "-lpthread",
+         "-llz4",
+@@ -409,11 +409,13 @@
+     ],
+     visibility = ["//visibility:public"],
+     deps = [
+-        "@accellera_systemc//:systemc",
+         "@net_zlib//:zlib",
+         ":vltstd",
+         ":verilatedos",
+-    ],
++    ] + select({
++        ":storagestacked_native_cpp": [],
++        "//conditions:default": ["@accellera_systemc//:systemc"],
++    }),
+ )
+ 
+ # This alias is for supporting the legacy name but while allowing the
+@@ -480,3 +482,8 @@
+     srcs = ["bin/verilator"],
+     visibility = ["//visibility:public"],
+ )
++
++config_setting(
++    name = "storagestacked_native_cpp",
++    define_values = {"storagestacked_native_cpp": "1"},
++)

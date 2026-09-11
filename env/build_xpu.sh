@@ -3,16 +3,7 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/activate.sh"
 "$AXI_PYTHON" "$SS_ROOT/env/check_sources.py"
 bash "$HET_PROJECT_ROOT/vortexint/install.sh"
-bash "$VORTEX_HOME/sim/simx/gem5/install.sh"
 bash "$HET_PROJECT_ROOT/coralnpuint/install.sh"
-mkdir -p "$GEM5_HOME/src/dev/coralnpu" "$GEM5_HOME/src/mem/unified_timing"
-cp "$HET_PROJECT_ROOT/gem5int/src/dev/coralnpu/"* "$GEM5_HOME/src/dev/coralnpu/"
-cp "$HET_PROJECT_ROOT/gem5int/src/mem/unified_timing/"* "$GEM5_HOME/src/mem/unified_timing/"
-patch_file="$HET_PROJECT_ROOT/gem5int/patches/dma_byte_enable.patch"
-if ! patch -R -p1 -s -f --dry-run -d "$GEM5_HOME" -i "$patch_file" >/dev/null 2>&1; then
-    patch -p1 -s -f --dry-run -d "$GEM5_HOME" -i "$patch_file"
-    patch -p1 -s -d "$GEM5_HOME" -i "$patch_file"
-fi
 mkdir -p "$VORTEX_BUILD"
 cd "$VORTEX_BUILD"
 "$VORTEX_HOME/configure" --xlen=32 --tooldir="$SS_DEPS_ROOT/xpu-toolchains"
