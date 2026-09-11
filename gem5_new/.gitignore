@@ -1,0 +1,33 @@
+# 构建产物
+build/
+*.o
+*.d
+*.so
+*.elf
+*.bin
+*.a
+
+# 例外：Vortex smoke test 的内核是源码 kernel.S 编出来的，88 字节，
+# 不入库 —— 但把这条例外写出来，是为了说明上面那几条通配符不是想排除
+# 什么"提交了会出问题"的东西，只是产物。
+
+# Python
+__pycache__/
+*.pyc
+
+# trace 产物。跑一次几 MB，且带机器/时间戳信息，入库没有意义。
+*.hettrace
+*.hettrace.txt
+*.meta.json
+
+# gem5 的输出目录
+m5out/
+
+# 上游打补丁前的备份文件（由三个 install.sh 生成，在上游树里而非本仓库，
+# 列在这里只是防止有人把上游树软链进来）
+*.pre-hettrace
+
+# 编辑器
+.vscode/
+.idea/
+*.swp

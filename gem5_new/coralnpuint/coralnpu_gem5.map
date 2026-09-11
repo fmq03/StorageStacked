@@ -1,0 +1,29 @@
+/* 链接器版本脚本：libcoralnpu-gem5.so 只导出 C ABI，其余一律 local。
+ *
+ * 这不是洁癖，是修一个真实的段错误。
+ *
+ * libcoralnpu-gem5.so 静态链进了一整套 Accellera SystemC（Verilator 那条依赖链
+ * 带进来的），会导出 1000 多个 sc_core::* 符号；而 gem5.opt 自己也有一套
+ * SystemC 实现（src/systemc/，符号在 sc_core:: 与 sc_gem5:: 下）。一个进程里
+ * 两套 SystemC 内核。
+ *
+ * 更糟的是 dlopen 的符号查找顺序：即便用 RTLD_LOCAL（只是不让别人看见本库的
+ * 符号），本库自己**未定义**引用的解析顺序仍是"先全局作用域（也就是 gem5.opt）
+ * 再本库"。于是本库里 SystemC 静态对象的构造/析构会跑到 gem5 的实现里去，
+ * 进程退出时 sc_core::sc_event::~sc_event -> sc_gem5::Object::delChildEvent
+ * 拿着一个野指针，段错误。症状出现在 gem5 打完全部正确结果之后的退出阶段，
+ * 离现场极远 —— 正是最难查的那种。
+ *
+ * 把符号收窄到 ABI 面之后，配合 -Wl,-Bsymbolic（本库内部引用优先绑本库自己的
+ * 定义），两套 SystemC 就彻底各自为政了。
+ *
+ * 顺带的好处：这 17 个符号本来就是 gem5 侧唯一 dlsym 的东西
+ * （见 gem5int/src/dev/coralnpu/coralnpu_dev.cc 里的 Abi / AbiTrace），
+ * 导出面等于接口面，漏加一个符号会在 dlsym 那一步立刻炸，而不是悄悄工作。
+ */
+CORALNPU_GEM5 {
+    global:
+        coralnpu_gem5_*;
+    local:
+        *;
+};

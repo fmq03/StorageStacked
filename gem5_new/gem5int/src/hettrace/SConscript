@@ -1,0 +1,15 @@
+# -*- mode:python -*-
+#
+# 统一 memory-side HETTrace monitor。由 gem5int/install.sh 装进
+# $GEM5_HOME/src/hettrace/；gem5 的顶层 SConstruct 会自动递归到本文件。
+#
+# 这个目录里还有 libhettrace 的头（addrmap.h / record.h / writer.h，同样由
+# install.sh 拷入）。它们是 header-only，不需要在这里 Source()，靠 gem5 把 src/
+# 作为 include 根来解析 #include "hettrace/writer.h"。
+#
+# 真值源: gem5int/src/hettrace/SConscript
+
+Import('*')
+
+SimObject('HetAxiMonitor.py', sim_objects=['HetAxiMonitor'])
+Source('het_axi_monitor.cc')

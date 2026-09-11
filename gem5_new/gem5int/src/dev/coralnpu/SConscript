@@ -1,0 +1,17 @@
+# -*- mode:python -*-
+#
+# CoralNPU SimObject for gem5. Installed into $GEM5_HOME/src/dev/coralnpu/
+# by gem5int/install.sh and picked up automatically by gem5's top-level
+# SConstruct, which recurses into every SConscript under src/.
+#
+# The source of truth for this file lives in this project's tree
+# (gem5int/src/dev/coralnpu/SConscript); the installer only copies it.
+
+Import('*')
+
+SimObject('CoralNPU.py', sim_objects=['CoralNPU'])
+Source('coralnpu_dev.cc')
+
+# Enable with:
+#   gem5.opt --debug-flags=CoralNPU ...
+DebugFlag('CoralNPU')

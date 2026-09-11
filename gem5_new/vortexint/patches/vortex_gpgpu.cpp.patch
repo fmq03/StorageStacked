@@ -1,0 +1,74 @@
+--- a/vortex_gpgpu.cpp
++++ b/vortex_gpgpu.cpp
+@@ -16,6 +16,7 @@
+ #include "constants.h"
+ #include "dev_mem.h"
+ #include "processor.h"
++#include "vortex_trace.h"
+ #include <cmd_processor.h>
+ #include <mem.h>
+ #include <util.h>
+@@ -160,14 +161,37 @@
+         start_ctx_ = ctx;
+     }
+ 
++    // ---------------- Memory-access trace tap ---------------------------
++    // Read-only observer on the post-LLC request stream. Installing it
++    // does not change simulation behaviour, so a failure to open the
++    // trace is reported but never fatal.
++    bool trace_open(vortex_gem5_tick_provider_t fn, void* ctx,
++                    int64_t addr_offset) {
++        return trace_.Install(proc_.get(), fn, ctx, addr_offset);
++    }
++    void trace_close() { trace_.Close(); }
++    uint64_t trace_emitted() const {
++        return trace_.is_open() ? trace_.stats().emitted : 0;
++    }
++
+ private:
++    // Declared before proc_ on purpose: members are destroyed in reverse
++    // declaration order, so the tap outlives the Processor whose telemetry
++    // hook holds a pointer to it.
++    vortex_gem5::VortexTraceTap trace_;
++
+     vortex::CommandProcessor::Hooks make_cp_hooks() {
+         vortex::CommandProcessor::Hooks h;
+         h.dram_read = [this](uint64_t addr, void* dst, std::size_t bytes) {
+             dev_mem_->read(addr, dst, bytes);
++            // CP 的 DMA 不经过 vortex::Memory，pre_send hook 看不到它 —— 但它是
++            // 真实的设备内存流量（镜像上传 + 载荷中转），而且是把 host 的暂存区
++            // 与设备缓冲连起来的那一步。详见 vortex_trace.h 的 OnDma。
++            trace_.OnDma(addr, bytes, hettrace::kRead);
+         };
+         h.dram_write = [this](uint64_t addr, const void* src, std::size_t bytes) {
+             dev_mem_->write(addr, src, bytes);
++            trace_.OnDma(addr, bytes, hettrace::kWrite);
+         };
+         h.vortex_dcr_write = [this](uint32_t addr, uint32_t value) {
+             proc_->dcr_write(addr, value);
+@@ -284,4 +308,25 @@
+     reinterpret_cast<Gem5Device*>(h)->vram_read(dev_addr, dst, size);
+ }
+ 
++int vortex_gem5_trace_open(vortex_gem5_handle_t h,
++                           vortex_gem5_tick_provider_t tick_fn,
++                           void* tick_ctx,
++                           int64_t addr_offset) {
++    if (h == nullptr) return -1;
++    return reinterpret_cast<Gem5Device*>(h)->trace_open(tick_fn, tick_ctx,
++                                                        addr_offset)
++               ? 0
++               : -1;
++}
++
++void vortex_gem5_trace_close(vortex_gem5_handle_t h) {
++    if (h == nullptr) return;
++    reinterpret_cast<Gem5Device*>(h)->trace_close();
++}
++
++uint64_t vortex_gem5_trace_emitted(vortex_gem5_handle_t h) {
++    if (h == nullptr) return 0;
++    return reinterpret_cast<Gem5Device*>(h)->trace_emitted();
++}
++
+ } // extern "C"

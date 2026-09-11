@@ -1,0 +1,177 @@
+--- a/sim/simx/gem5/vortex_gpgpu_dev.hh
++++ b/sim/simx/gem5/vortex_gpgpu_dev.hh
+@@ -48,4 +48,5 @@
+ #include <deque>
+ #include <memory>
+ #include <string>
++#include <unordered_map>
+ #include <vector>
+@@ -125,4 +125,5 @@ private:
+     bool issueCoreTiming(uint64_t token, uint64_t addr, bool is_write,
+                          const uint8_t* src, uint64_t byteen, uint32_t size);
++    void coreDmaComplete(uint64_t token);
+     void startNextCpDma();
+     void dmaComplete();
+@@ -206,3 +207,1 @@ private:
+-    enum class DmaKind {
+-        None, CoreRead, CoreWrite, CoreMergeRead, CpRead, CpWrite
+-    };
++    enum class DmaKind { None, CpRead, CpWrite };
+@@ -217,10 +217,15 @@ private:
+     std::deque<CpDmaRequest> cpDmaQueue_;
+     std::unique_ptr<CpDmaRequest> activeCpDma_;
+     std::vector<uint8_t> dmaData_;
+-    std::vector<uint8_t> coreWriteData_;
+-    uint64_t activeCoreToken_ = 0;
+-    Addr activeCoreAddr_ = 0;
+-    uint64_t activeCoreByteen_ = 0;
+-    uint32_t activeCoreSize_ = 0;
+-    Tick activeCoreIssueTick_ = 0;
++    struct CoreDmaRequest {
++        uint64_t token;
++        Addr addr;
++        bool isWrite;
++        uint32_t size;
++        Tick issueTick;
++        std::vector<uint8_t> data;
++        std::vector<bool> byteEnable;
++    };
++    std::unordered_map<uint64_t, std::unique_ptr<CoreDmaRequest>> coreDmas_;
++    uint64_t maxCoreOutstanding_ = 0;
+     bool cpResumeNeeded_ = false;
+--- a/sim/simx/gem5/vortex_gpgpu_dev.cc
++++ b/sim/simx/gem5/vortex_gpgpu_dev.cc
+@@ -18,2 +18,3 @@
+ #include <algorithm>
+ #include <dlfcn.h>
++#include <limits>
+@@ -252,6 +253,4 @@ VortexGPGPU::issueCoreTiming(uint64_t token, uint64_t addr, bool is_write,
+                              const uint8_t* src, uint64_t byteen,
+                              uint32_t size)
+ {
+-    if (dmaKind_ != DmaKind::None || !cpDmaQueue_.empty())
+-        return false;
+     panic_if(addr > pinSize_ || size > pinSize_ - addr,
+@@ -260,31 +259,67 @@ VortexGPGPU::issueCoreTiming(uint64_t token, uint64_t addr, bool is_write,
+     panic_if(size == 0 || size > 64,
+              "VortexGPGPU core timing size %u is outside [1,64]", size);
+-
+-    activeCoreToken_ = token;
+-    activeCoreAddr_ = pinAddr_ + addr;
+-    activeCoreByteen_ = byteen;
+-    activeCoreSize_ = size;
+-    activeCoreIssueTick_ = curTick();
+-    dmaData_.assign(size, 0);
+-    if (!is_write) {
+-        ++coreTimingReads_;
+-        dmaKind_ = DmaKind::CoreRead;
+-        dmaRead(activeCoreAddr_, size, &dmaDoneEvent_, dmaData_.data());
+-        return true;
+-    }
+-
+-    panic_if(src == nullptr, "VortexGPGPU core timing write has no data");
+-    ++coreTimingWrites_;
+-    coreWriteData_.assign(src, src + size);
+-    const uint64_t fullMask = size == 64 ? ~uint64_t(0)
+-                                         : ((uint64_t(1) << size) - 1);
+-    if ((byteen & fullMask) == fullMask) {
+-        dmaKind_ = DmaKind::CoreWrite;
+-        dmaWrite(activeCoreAddr_, size, &dmaDoneEvent_,
+-                 coreWriteData_.data());
++    panic_if(token > std::numeric_limits<uint32_t>::max(),
++             "VortexGPGPU core token exceeds gem5 stream-ID width");
++    panic_if(coreDmas_.count(token) != 0,
++             "VortexGPGPU duplicate outstanding core token %llu",
++             static_cast<unsigned long long>(token));
++
++    auto request = std::make_unique<CoreDmaRequest>();
++    request->token = token;
++    request->addr = pinAddr_ + addr;
++    request->isWrite = is_write;
++    request->size = size;
++    request->issueTick = curTick();
++    request->data.resize(size);
++    if (is_write) {
++        panic_if(src == nullptr, "VortexGPGPU core timing write has no data");
++        ++coreTimingWrites_;
++        std::copy_n(src, size, request->data.begin());
++        request->byteEnable.resize(size);
++        for (uint32_t byte = 0; byte < size; ++byte)
++            request->byteEnable[byte] =
++                (byteen & (uint64_t(1) << byte)) != 0;
+     } else {
+-        dmaKind_ = DmaKind::CoreMergeRead;
+-        dmaRead(activeCoreAddr_, size, &dmaDoneEvent_, dmaData_.data());
++        ++coreTimingReads_;
++    }
++
++    const Addr physical_addr = request->addr;
++    uint8_t *data = request->data.data();
++    const auto &byte_enable = request->byteEnable;
++    coreDmas_.emplace(token, std::move(request));
++    maxCoreOutstanding_ = std::max<uint64_t>(maxCoreOutstanding_,
++                                             coreDmas_.size());
++
++    auto *done = new EventFunctionWrapper(
++        [this, token] { coreDmaComplete(token); },
++        name() + ".coreDmaDone", true);
++    const uint32_t source_token = static_cast<uint32_t>(token);
++    if (is_write) {
++        dmaWrite(physical_addr, size, done, data, byte_enable,
++                 source_token, source_token);
++    } else {
++        dmaRead(physical_addr, size, done, data,
++                source_token, source_token);
+     }
+     return true;
+ }
++
++void
++VortexGPGPU::coreDmaComplete(uint64_t token)
++{
++    auto found = coreDmas_.find(token);
++    panic_if(found == coreDmas_.end(),
++             "VortexGPGPU completion for unknown core token %llu",
++             static_cast<unsigned long long>(token));
++    std::unique_ptr<CoreDmaRequest> request = std::move(found->second);
++    coreDmas_.erase(found);
++
++    const Tick observed = curTick() - request->issueTick;
++    timingLatencyTotal_ += observed;
++    timingLatencyMax_ = std::max(timingLatencyMax_, observed);
++    ++timingCompletions_;
++    abi_.complete_core_memory(deviceHandle_, request->token,
++                              request->isWrite ? nullptr
++                                               : request->data.data(),
++                              request->isWrite ? 0 : request->size);
++}
+@@ -312,29 +347,3 @@ void
+ VortexGPGPU::dmaComplete()
+ {
+-    if (dmaKind_ == DmaKind::CoreMergeRead) {
+-        for (uint32_t i = 0; i < activeCoreSize_; ++i) {
+-            if (activeCoreByteen_ & (uint64_t(1) << i))
+-                dmaData_[i] = coreWriteData_[i];
+-        }
+-        dmaKind_ = DmaKind::CoreWrite;
+-        dmaWrite(activeCoreAddr_, activeCoreSize_, &dmaDoneEvent_,
+-                 dmaData_.data());
+-        return;
+-    }
+-
+-    if (dmaKind_ == DmaKind::CoreRead || dmaKind_ == DmaKind::CoreWrite) {
+-        const bool isRead = dmaKind_ == DmaKind::CoreRead;
+-        const Tick observed = curTick() - activeCoreIssueTick_;
+-        timingLatencyTotal_ += observed;
+-        timingLatencyMax_ = std::max(timingLatencyMax_, observed);
+-        ++timingCompletions_;
+-        dmaKind_ = DmaKind::None;
+-        abi_.complete_core_memory(deviceHandle_, activeCoreToken_,
+-                                  isRead ? dmaData_.data() : nullptr,
+-                                  isRead ? activeCoreSize_ : 0);
+-        startNextCpDma();
+-        resumeCpIfReady();
+-        return;
+-    }
+-
+     if (dmaKind_ == DmaKind::CpRead || dmaKind_ == DmaKind::CpWrite) {

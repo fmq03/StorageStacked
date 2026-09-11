@@ -1,0 +1,12 @@
+--- BUILD
++++ BUILD
+@@ -34,6 +34,9 @@
+         "core_mini_axi_wrapper.h",
+         "mailbox.h",
+     ],
++    # //gem5int 需要它。同 package 里的 coralnpu_simulator_headers 早就是
++    # public，这里只是把同一层的另一个 header-only 库也放出去。
++    visibility = ["//visibility:public"],
+     deps = [
+         ":hw_primitives",
+         "//hdl/chisel/src/coralnpu:core_mini_axi_cc_library_cc",

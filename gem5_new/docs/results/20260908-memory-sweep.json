@@ -1,0 +1,81 @@
+{
+  "date": "2026-09-08",
+  "scope": "deterministic open-loop memory timing; not application performance",
+  "memsim_revision": "7945650579c44713ddec80acc2c82ae34e1f19a5",
+  "experiments": [
+    {
+      "name": "baseline",
+      "requests": 596,
+      "bytes": 9536,
+      "system_cycles": 2023,
+      "mean_response_cycles": 270.1963087248322,
+      "p95_response_cycles": 1465,
+      "mean_injection_wait_cycles": 0,
+      "max_injection_wait_cycles": 0,
+      "forwarded_responses": 5,
+      "all_status_ok": true,
+      "hit_cycle_limit": false,
+      "ticks_per_cycle": 1000,
+      "scheduler": "FRFCFS",
+      "row_policy": "open_page",
+      "raw_outputs": "build/repro-20260908/exp-baseline"
+    },
+    {
+      "name": "fcfs",
+      "requests": 596,
+      "bytes": 9536,
+      "system_cycles": 2023,
+      "mean_response_cycles": 270.96812080536915,
+      "p95_response_cycles": 1465,
+      "mean_injection_wait_cycles": 0,
+      "max_injection_wait_cycles": 0,
+      "forwarded_responses": 5,
+      "all_status_ok": true,
+      "hit_cycle_limit": false,
+      "ticks_per_cycle": 1000,
+      "scheduler": "FCFS",
+      "row_policy": "open_page",
+      "raw_outputs": "build/repro-20260908/exp-fcfs"
+    },
+    {
+      "name": "closed",
+      "requests": 596,
+      "bytes": 9536,
+      "system_cycles": 3141,
+      "mean_response_cycles": 585.51677852349,
+      "p95_response_cycles": 2133,
+      "mean_injection_wait_cycles": 0,
+      "max_injection_wait_cycles": 0,
+      "forwarded_responses": 70,
+      "all_status_ok": true,
+      "hit_cycle_limit": false,
+      "ticks_per_cycle": 1000,
+      "scheduler": "FRFCFS",
+      "row_policy": "closed_page",
+      "raw_outputs": "build/repro-20260908/exp-closed"
+    },
+    {
+      "name": "dense",
+      "requests": 596,
+      "bytes": 9536,
+      "system_cycles": 1985,
+      "mean_response_cycles": 113.6241610738255,
+      "p95_response_cycles": 274,
+      "mean_injection_wait_cycles": 20.266778523489933,
+      "max_injection_wait_cycles": 50,
+      "forwarded_responses": 170,
+      "all_status_ok": true,
+      "hit_cycle_limit": false,
+      "ticks_per_cycle": 4000,
+      "scheduler": "FRFCFS",
+      "row_policy": "open_page",
+      "raw_outputs": "build/repro-20260908/exp-dense"
+    }
+  ],
+  "trace_files": [
+    "build/repro-20260908/experiment-input/coralnpu.hettrace",
+    "build/repro-20260908/experiment-input/host.hettrace",
+    "build/repro-20260908/experiment-input/vortex.hettrace"
+  ],
+  "binary": "build/repro-20260908/mem_sim/build/hbm_sim"
+}

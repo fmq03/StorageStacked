@@ -1,0 +1,121 @@
+diff --git a/src/dev/dma_device.cc b/src/dev/dma_device.cc
+index e68b796dfa..214fdc466d 100644
+--- a/src/dev/dma_device.cc
++++ b/src/dev/dma_device.cc
+@@ -136,6 +136,14 @@ DmaPort::DmaReqState::createPacket()
+     if (ssid.has_value()) {
+         req->setSubstreamId(ssid.value());
+     }
++    if (!byteEnable.empty()) {
++        panic_if(byteEnable.size() != totBytes,
++                 "DMA byte-enable size %zu does not match action size %llu",
++                 byteEnable.size(), static_cast<unsigned long long>(totBytes));
++        const auto first = byteEnable.begin() + gen.complete();
++        req->setByteEnable(
++            std::vector<bool>(first, first + gen.size()));
++    }
+     req->taskId(context_switch_task_id::DMA);
+ 
+     PacketPtr pkt = new Packet(req, cmd);
+@@ -195,6 +203,16 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+                    uint8_t *data, std::optional<uint32_t> sid,
+                    std::optional<uint32_t> ssid, Tick delay,
+                    Request::Flags flag)
++{
++    dmaAction(cmd, addr, size, event, data, {}, sid, ssid, delay, flag);
++}
++
++void
++DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
++                   uint8_t *data, const std::vector<bool> &byte_enable,
++                   std::optional<uint32_t> sid,
++                   std::optional<uint32_t> ssid, Tick delay,
++                   Request::Flags flag)
+ {
+     DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n", addr, size,
+             event ? event->scheduled() : -1);
+@@ -204,7 +222,8 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+     // i.e. cache line size.
+     transmitList.push_back(
+             new DmaReqState(cmd, addr, cacheLineSize, size,
+-                data, flag, requestorId, sid, ssid, event, delay));
++                data, byte_enable, flag, requestorId, sid, ssid, event,
++                delay));
+ 
+     // In zero time, also initiate the sending of the packets for the request
+     // we have just created. For atomic this involves actually completing all
+diff --git a/src/dev/dma_device.hh b/src/dev/dma_device.hh
+index ae405fa2ef..be7e2edf75 100644
+--- a/src/dev/dma_device.hh
++++ b/src/dev/dma_device.hh
+@@ -42,8 +42,9 @@
+ #define __DEV_DMA_DEVICE_HH__
+ 
+ #include <deque>
+-#include <optional>
+ #include <memory>
++#include <optional>
++#include <vector>
+ 
+ #include "base/addr_range_map.hh"
+ #include "base/chunk_generator.hh"
+@@ -107,6 +108,9 @@ class DmaPort : public RequestPort, public Drainable
+         /** Pointer to a buffer for the data. */
+         uint8_t *const data = nullptr;
+ 
++        /** Optional per-byte write strobes for the complete DMA action. */
++        const std::vector<bool> byteEnable;
++
+         /** The flags to use for requests. */
+         const Request::Flags flags;
+ 
+@@ -121,11 +125,13 @@ class DmaPort : public RequestPort, public Drainable
+         const Packet::Command cmd;
+ 
+         DmaReqState(Packet::Command _cmd, Addr addr, Addr chunk_sz, Addr tb,
+-                    uint8_t *_data, Request::Flags _flags, RequestorID _id,
++                    uint8_t *_data, std::vector<bool> _byte_enable,
++                    Request::Flags _flags, RequestorID _id,
+                     std::optional<uint32_t> _sid, std::optional<uint32_t> _ssid,
+                     Event *ce, Tick _delay, Event *ae=nullptr)
+             : completionEvent(ce), abortEvent(ae), totBytes(tb), delay(_delay),
+-              gen(addr, tb, chunk_sz), data(_data), flags(_flags), id(_id),
++              gen(addr, tb, chunk_sz), data(_data),
++              byteEnable(std::move(_byte_enable)), flags(_flags), id(_id),
+               sid(_sid), ssid(_ssid), cmd(_cmd)
+         {}
+ 
+@@ -209,6 +215,16 @@ class DmaPort : public RequestPort, public Drainable
+               uint8_t *data, std::optional<uint32_t> sid,
+               std::optional<uint32_t> ssid, Tick delay, Request::Flags flag=0);
+ 
++    /**
++     * Variant carrying one byte-enable bit per byte of the complete action.
++     * DmaPort fragments both data and enables at cache-line boundaries.
++     */
++    void
++    dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
++              uint8_t *data, const std::vector<bool> &byte_enable,
++              std::optional<uint32_t> sid,
++              std::optional<uint32_t> ssid, Tick delay, Request::Flags flag=0);
++
+     // Abort and remove any pending DMA transmissions.
+     void abortPending();
+ 
+@@ -236,6 +252,16 @@ class DmaDevice : public PioDevice
+                           sid, ssid, delay);
+     }
+ 
++    void
++    dmaWrite(Addr addr, int size, Event *event, uint8_t *data,
++             const std::vector<bool> &byte_enable,
++             std::optional<uint32_t> sid, std::optional<uint32_t> ssid,
++             Tick delay=0)
++    {
++        dmaPort.dmaAction(MemCmd::WriteReq, addr, size, event, data,
++                          byte_enable, sid, ssid, delay);
++    }
++
+     void
+     dmaWrite(Addr addr, int size, Event *event, uint8_t *data, Tick delay=0)
+     {

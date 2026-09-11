@@ -1,0 +1,24 @@
+--- core_mini_axi_wrapper.h
++++ core_mini_axi_wrapper.h
+@@ -205,6 +205,21 @@
+     }
+   }
+ 
++  // 非阻塞状态查询。
++  //
++  // 这是本补丁存在的唯一理由：halted_ / wfi_ 是 private，而现成的
++  // WaitForTermination() 会自己 while(...) Step() 把时钟推起来。在 gem5 里
++  // 时钟主是 gem5 的事件队列，任何"库自己偷跑周期"的调用都会让那段时间产生的
++  // 访存记录全部挤在同一个 gem5 tick 上，trace 的时间基准就废了。
++  //
++  // gem5 那条腿的每周期循环因此是：Step() 一次，然后查这两个位决定要不要
++  // 再调度下一个 tick 事件 —— 等价于 WaitForTermination 的判据，但控制权在
++  // gem5 手里。
++  //
++  // 纯增量：不改任何现有成员或方法，原有使用者不受影响。
++  bool halted() const { return (*halted_) != 0; }
++  bool wfi() const { return (*wfi_) != 0; }
++
+   bool WaitForTermination(int timeout = 10000) {
+     for (int i = 0; i < timeout; i++) {
+       if ((*halted_) || (*wfi_)) {

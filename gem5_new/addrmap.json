@@ -1,0 +1,124 @@
+{
+  "_comment": [
+    "统一物理地址空间 —— 本文件是唯一真值源。",
+    "C++ (libhettrace/include/hettrace/addrmap.h) 与 Python (tools/hettrace/addrmap.py)",
+    "均由 scripts/gen_addrmap.py 从本文件生成；`make check-addrmap` 校验其未过期。",
+    "",
+    "硬约束：CoralNPU 的 AXI 地址位宽为 32 (hw_sim/hw_primitives.h 中 AxiAddr::addr_bits_addr",
+    "为 uint32_t)，因此任何 NPU 需要触及的区域必须落在 4GiB 以内 —— 这是 npu_addr_bits，",
+    "只约束 accessors 里含 coralnpu 的区域，不是整张图的宽度。整张图是 64 位的，因为",
+    "vortex_bar 必须落在 4GiB 之上（原因见 regions.vortex_bar）。"
+  ],
+
+  "map_addr_bits": 64,
+  "npu_addr_bits": 32,
+  "ticks_per_second": 1000000000000,
+
+  "sources": [
+    { "id": 0, "name": "host",     "level": "post_llc",   "clock_mhz": 2000 },
+    { "id": 1, "name": "vortex",   "level": "post_llc",   "clock_mhz": 1000 },
+    { "id": 2, "name": "coralnpu", "level": "axi_master", "clock_mhz": 500  }
+  ],
+
+  "regions": [
+    {
+      "name": "boot_rom",
+      "base": "0x00000000",
+      "size": "0x10000000",
+      "kind": "rom",
+      "accessors": ["host"],
+      "note": "预留 / 引导。不参与 trace 分析。"
+    },
+    {
+      "name": "npu_slave",
+      "base": "0x10000000",
+      "size": "0x10000000",
+      "kind": "mmio",
+      "accessors": ["host"],
+      "note": "CoralNPU AXI slave 窗口。host 经此写 TCM 与控制寄存器。",
+      "subregions": [
+        { "name": "npu_tcm",       "offset": "0x00000000", "size": "0x00030000",
+          "note": "ITCM + DTCM，core-local。命中此处不算 DRAM 流量，默认不入 trace。" },
+        { "name": "npu_ctrl_reset","offset": "0x00030000", "size": "0x4",
+          "note": "写 1 再写 0 触发启动 (core_mini_axi_simulator.cc Run())" },
+        { "name": "npu_ctrl_pc",   "offset": "0x00030004", "size": "0x4",
+          "note": "起始 PC" }
+      ]
+    },
+    {
+      "name": "vortex_cp",
+      "base": "0x20000000",
+      "size": "0x00000200",
+      "kind": "mmio",
+      "accessors": ["host"],
+      "note": "Vortex CP 寄存器堆 (PIO)。与 VortexGPGPU.py 的 pio_addr 默认值一致，勿改。"
+    },
+    {
+      "name": "npu_pio",
+      "base": "0x30000000",
+      "size": "0x00001000",
+      "kind": "mmio",
+      "accessors": ["host"],
+      "note": "gem5 CoralNPU SimObject 的控制窗口 (ctrl/status/entry/emitted/mailbox×4)，与 CoralNPU.py 的 pio_addr 默认值一致，勿改。注意它与上面的 npu_slave 是两回事：npu_slave 是设备库内部的 AXI slave 窗口（host 经它写 TCM），npu_pio 是 gem5 这一侧的寄存器。实际只用到头 0x20 字节，占满一页是为了 host 侧能整页映射。"
+    },
+    {
+      "name": "host_heap",
+      "base": "0x80000000",
+      "size": "0x10000000",
+      "kind": "dram",
+      "accessors": ["host"],
+      "note": "host 私有堆。落在 NPU 的 DDR 窗口内但 NPU 不应触及。"
+    },
+    {
+      "name": "shared_buffer",
+      "base": "0x90000000",
+      "size": "0x10000000",
+      "kind": "dram",
+      "accessors": ["host", "coralnpu"],
+      "note": "host 与 CoralNPU 的显式交接区。Vortex 的设备地址会加上 4 GiB pin base 后落入 vortex_bar，不能以同一物理地址访问这里。"
+    },
+    {
+      "name": "vortex_vram",
+      "base": "0xa0000000",
+      "size": "0x10000000",
+      "kind": "dram",
+      "accessors": ["vortex"],
+      "note": "Vortex 设备**内部**地址空间里的一段，给 vortex_only.py 的裸机内核用（workloads/vortex_smoke/kernel.S 写死了这个基址）。accessors 只有 vortex：Vortex 的内存是设备内的 simx::RAM，host 碰不到这个地址 —— 同一批字节在 host 侧的物理地址是 pin_addr + dev_addr，落在 vortex_bar 里。写成 host+vortex 会让它进 HANDOFF_REGIONS，而那是个永远不可能被两源共同触及的候选，等于给 validate 塞了个假线索。"
+    },
+    {
+      "name": "npu_work",
+      "base": "0xb0000000",
+      "size": "0x10000000",
+      "kind": "dram",
+      "accessors": ["host", "coralnpu"],
+      "note": "NPU 私有工作区（权重、activation 暂存）。"
+    },
+    {
+      "name": "npu_mailbox",
+      "base": "0xc0000000",
+      "size": "0x00000010",
+      "kind": "mmio",
+      "accessors": ["host", "coralnpu"],
+      "note": "NPU 经 AXI master 访问的 4×u32 mailbox。参考实现把所有非 DDR 的 master 访问都当 mailbox；本工程收窄为显式窗口，落在窗口外一律记为 unmapped 并计数。"
+    },
+    {
+      "name": "vortex_bar",
+      "base": "0x100000000",
+      "size": "0x100000000",
+      "kind": "bar",
+      "accessors": ["host", "vortex"],
+      "note": "host 看向 Vortex 设备内存的窗口，host_pa = pin_addr + dev_addr。base/size 都不是自由参数：sw/runtime/gem5/driver.h 把 PIN_BASE_ADDR/PIN_REGION_SIZE 写成 constexpr，host 运行时按这两个数直接算地址、不做 mmap。size 必须是整 4GiB，因为 mem_alloc 可以发出任意 32 位设备地址、且 .vxbin 装在设备地址 0x80000000；base 必须在 4GiB 之上，否则会撞上 SE 模式下被仿真进程自己的低位 VA 布局。因此本区域**超出** npu_addr_bits —— CoralNPU 的 32 位 AXI 连表达它都做不到，NPU 与 Vortex 无法直接共享字节，见 docs/03-limitations.md。kind 为 bar 而非 dram：它不在 CoralNPU 的 DDR 判定区间内，但它是真实内存流量，所以进 trace_windows。"
+    }
+  ],
+
+  "dram_window": {
+    "base": "0x80000000",
+    "size": "0x40000000",
+    "note": "CoralNPU 参考实现的 IsDdrAddress() 判定区间 [0x80000000, 0xc0000000)。本映射的四个 dram region 均落于此，保证 NPU 的 DDR 判定无需改动。"
+  },
+
+  "trace_windows": {
+    "regions": ["dram_window", "vortex_bar"],
+    "note": "HETTRACE_FILTER=dram 时 writer 只记录落在这些窗口里的访问。它比 dram_window 多一个 vortex_bar：过滤器要挡掉的是 core-local 命中与 MMIO 寄存器读写，而经 BAR 走的访问是真实的内存流量，两侧（host 与 vortex）都必须留下才能对出共享字节。dram_window 本身的含义不动 —— IsDram() 仍然只表示 CoralNPU 的 DDR 判定。"
+  }
+}

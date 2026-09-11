@@ -1,0 +1,30 @@
+--- core_mini_axi_wrapper.h
++++ core_mini_axi_wrapper.h
+@@ -220,6 +220,27 @@
+   bool halted() const { return (*halted_) != 0; }
+   bool wfi() const { return (*wfi_) != 0; }
+ 
++  // Event-driven timing seam for the AXI master. Requests are observed
++  // during Step(), while B/R responses can be injected by a later simulator
++  // event without advancing the CoralNPU clock internally.
++  void RegisterAsyncReadCallback(
++      std::function<void(const AxiAddr&)> read_cb) {
++    master_read_driver_.RegisterAsyncReadCallback(std::move(read_cb));
++  }
++
++  void RegisterAsyncWriteCallback(
++      std::function<void(const AxiAddr&, const AxiWData&)> write_cb) {
++    master_write_driver_.RegisterAsyncWriteCallback(std::move(write_cb));
++  }
++
++  void CompleteRead(const AxiRData& response) {
++    master_read_driver_.PushReadResponse(response);
++  }
++
++  void CompleteWrite(const AxiWResp& response) {
++    master_write_driver_.PushWriteResponse(response);
++  }
++
+   bool WaitForTermination(int timeout = 10000) {
+     for (int i = 0; i < timeout; i++) {
+       if ((*halted_) || (*wfi_)) {

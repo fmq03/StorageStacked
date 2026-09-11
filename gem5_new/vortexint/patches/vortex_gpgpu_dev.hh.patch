@@ -1,0 +1,63 @@
+--- a/vortex_gpgpu_dev.hh	2026-08-17 13:24:09.425422593 +0800
++++ b/vortex_gpgpu_dev.hh	2026-08-17 13:25:37.706094761 +0800
+@@ -88,6 +88,22 @@
+     static void onVortexStartTrampoline(void* ctx);
+     void onVortexStart();
+ 
++    // Memory-access tracing (hettrace) --------------------------------
++    // Installs a read-only tap inside the device library on the post-LLC
++    // request stream. The library cannot call curTick() -- it is dlopen'd
++    // and does not link gem5 -- so it gets the clock through this
++    // trampoline. That is what puts Vortex's records on the same time base
++    // as the host and CoralNPU traces, which is the whole point.
++    static uint64_t curTickTrampoline(void* ctx);
++
++    // No-op if trace_enable=false, if the library predates the trace ABI,
++    // or if HETTRACE_DIR is unset. None of those are errors.
++    void openTrace();
++
++    // Flush + write the .meta.json sidecar. Idempotent; called from the
++    // standalone completion path, from an exit callback, and from the dtor.
++    void closeTrace();
++
+     // Library binding ------------------------------------------------
+     void* libHandle_;
+     void* deviceHandle_;
+@@ -110,6 +126,17 @@
+                                  uint8_t* dst, uint32_t size);
+     } abi_;
+ 
++    // Optional trace ABI. Resolved with dlsym but deliberately *not*
++    // fatal on absence, unlike AbiV2 above: a libvortex-gem5.so built
++    // before the hettrace tap existed must still load and run. Missing
++    // symbols mean "no tracing available", not "version mismatch".
++    struct AbiTrace {
++        int      (*open)(void* h, uint64_t (*tick_fn)(void*), void* ctx,
++                         int64_t addr_offset);
++        void     (*close)(void* h);
++        uint64_t (*emitted)(void* h);
++    } traceAbi_;
++
+     // Configuration --------------------------------------------------
+     const std::string libraryPath_;
+     const std::string kernelPath_;
+@@ -118,6 +145,8 @@
+     const Addr        pinAddr_;   // device VRAM, host-visible as BAR
+     const Addr        pinSize_;
+     const Tick        pioLatency_;
++    const bool        traceEnable_;
++    const int64_t     traceAddrOffset_;
+ 
+     // Event scheduling
+     EventFunctionWrapper cpTickEvent_;
+@@ -126,6 +155,10 @@
+     // Standalone (Phase 3) vs. hosted mode. Set by startup() based on
+     // whether the `kernel=` Python param was provided.
+     bool standalone_;
++
++    // True between a successful openTrace() and closeTrace(). Guards the
++    // idempotency of closeTrace().
++    bool traceActive_;
+ };
+ 
+ } // namespace gem5

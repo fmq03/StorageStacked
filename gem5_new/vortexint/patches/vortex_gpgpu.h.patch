@@ -1,0 +1,44 @@
+--- a/vortex_gpgpu.h	2026-08-17 13:15:53.390260280 +0800
++++ b/vortex_gpgpu.h	2026-08-17 13:16:24.757540474 +0800
+@@ -111,6 +111,41 @@
+                             uint64_t dev_addr, uint8_t* dst,
+                             uint32_t size);
+ 
++// ---- Memory-access tracing (hettrace) --------------------------------------
++//
++// Optional, additive ABI. The gem5 side resolves these with dlsym() and
++// null-checks the result, so a libvortex-gem5.so built without them still
++// loads and runs -- tracing is simply unavailable.
++//
++// The tap is a read-only observer on the post-LLC request stream
++// (vortex::Memory's pre-send hook). It does not alter the data path, the
++// latency, or the request order. See sim/simx/gem5/vortex_trace.h.
++
++// Returns the current global gem5 Tick. The device library cannot call
++// curTick() -- it is dlopen'd and does not link gem5 -- so the SimObject
++// passes this in and every trace timestamp comes from gem5's event queue.
++typedef uint64_t (*vortex_gem5_tick_provider_t)(void* ctx);
++
++// Open the trace and install the tap. `addr_offset` is added to every
++// device address to move it into the unified physical space described by
++// addrmap.json; pass 0 when the workload already uses global addresses.
++//
++// Returns 0 on success, -1 if tracing is disabled (HETTRACE_DIR unset) or
++// the trace file could not be created. -1 is not fatal: it means "no trace",
++// and the caller should carry on simulating.
++int vortex_gem5_trace_open(vortex_gem5_handle_t h,
++                           vortex_gem5_tick_provider_t tick_fn,
++                           void* tick_ctx,
++                           int64_t addr_offset);
++
++// Flush and close the trace, writing the .meta.json sidecar. Idempotent.
++// Called from the SimObject's serialize/exit path; the destructor also
++// covers the case where the simulation is killed mid-run.
++void vortex_gem5_trace_close(vortex_gem5_handle_t h);
++
++// Records written so far, for the SimObject's exit summary. 0 if inactive.
++uint64_t vortex_gem5_trace_emitted(vortex_gem5_handle_t h);
++
+ #ifdef __cplusplus
+ } // extern "C"
+ #endif

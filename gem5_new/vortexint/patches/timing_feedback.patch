@@ -1,0 +1,964 @@
+--- a/sim/simx/mem/memory.h
++++ b/sim/simx/mem/memory.h
+@@ -59,6 +59,18 @@
+ 	using PreSendHook = std::function<void(const MemReq&)>;
+ 	void set_pre_send_hook(PreSendHook hook);
+ 
++	// Optional replacement for the local DramSim/RAM data path.  An accepted
++	// request is identified by token and remains pending until
++	// complete_external() is called by the embedding simulator.  Returning
++	// false applies backpressure and leaves the request at the memory xbar.
++	using ExternalIssueHook = std::function<bool(
++		uint64_t token, const MemReq& request, const uint8_t* write_data,
++		uint64_t byteen, uint32_t size)>;
++	void set_external_timing_hook(ExternalIssueHook hook);
++	void complete_external(uint64_t token, const uint8_t* read_data,
++	                       uint32_t size);
++	bool has_external_pending() const;
++
+ 	const PerfStats& perf_stats() const;
+ 
+ protected:
+@@ -72,4 +84,4 @@
+ 	friend class SimObject<Memory>;
+ };
+ 
+-};
+\ No newline at end of file
++};
+--- a/sim/simx/mem/memory.cpp
++++ b/sim/simx/mem/memory.cpp
+@@ -13,6 +13,7 @@
+ 
+ #include <VX_types.h>
+ #include "memory.h"
++#include <algorithm>
+ #include <vector>
+ #include <queue>
+ #include <sstream>
+@@ -37,6 +38,16 @@
+ 	DramSim   dram_sim_;
+ 	RAM*      ram_;
+ 	Memory::PreSendHook pre_send_hook_;
++	Memory::ExternalIssueHook external_issue_hook_;
++	uint64_t next_external_token_ = 1;
++	struct ExternalPending {
++		MemReq request;
++		uint32_t bank_id;
++		std::shared_ptr<mem_block_t> rsp_data;
++		bool complete = false;
++	};
++	std::unordered_map<uint64_t, ExternalPending> external_pending_;
++	std::queue<uint64_t> external_completed_;
+ 	mutable PerfStats perf_stats_;
+ 	struct DramCallbackArgs {
+ 		Memory::Impl* memsim;
+@@ -74,9 +85,33 @@
+ 
+ 	void reset() {
+ 		dram_sim_.reset();
++		external_pending_.clear();
++		while (!external_completed_.empty()) external_completed_.pop();
+ 	}
+ 
+ 	void tick() {
++		// Completion callbacks arrive on the embedding simulator's event queue.
++		// Deliver them only from Memory::tick(), keeping SimChannel mutations on
++		// the ordinary Vortex cycle boundary.
++		while (!external_completed_.empty()) {
++			const uint64_t token = external_completed_.front();
++			auto found = external_pending_.find(token);
++			if (found == external_pending_.end()) {
++				external_completed_.pop();
++				continue;
++			}
++			auto& pending = found->second;
++			if (!pending.request.is_write()) {
++				MemRsp mem_rsp{pending.request.tag, pending.request.hart_id,
++				               pending.request.uuid};
++				mem_rsp.data = pending.rsp_data;
++				if (!mem_xbar_->RspIn.at(pending.bank_id).try_send(mem_rsp))
++					break;
++			}
++			external_pending_.erase(found);
++			external_completed_.pop();
++		}
++
+ 		dram_sim_.tick();
+ 
+ 		for (uint32_t i = 0; i < config_.num_banks; ++i) {
+@@ -85,6 +120,25 @@
+ 
+ 			auto& mem_req = mem_xbar_->ReqOut.at(i).peek();
+ 
++			if (external_issue_hook_) {
++				const uint64_t token = next_external_token_++;
++				std::shared_ptr<mem_block_t> rsp_data;
++				if (!mem_req.is_write()) rsp_data = make_mem_block();
++				external_pending_.emplace(
++					token, ExternalPending{mem_req, i, rsp_data, false});
++				const uint8_t* write_data =
++					(mem_req.is_write() && mem_req.data)
++						? mem_req.data->data() : nullptr;
++				if (!external_issue_hook_(token, mem_req, write_data,
++				                          mem_req.byteen, config_.block_size)) {
++					external_pending_.erase(token);
++					continue;
++				}
++				if (pre_send_hook_) pre_send_hook_(mem_req);
++				mem_xbar_->ReqOut.at(i).pop();
++				continue;
++			}
++
+ 			std::shared_ptr<mem_block_t> rsp_data;
+ 			if (ram_) {
+ 				uint64_t line_addr = mem_req.addr & ~uint64_t(VX_CFG_MEM_BLOCK_SIZE - 1);
+@@ -154,6 +208,32 @@
+ 	void set_pre_send_hook(Memory::PreSendHook hook) {
+ 		pre_send_hook_ = std::move(hook);
+ 	}
++
++	void set_external_timing_hook(Memory::ExternalIssueHook hook) {
++		external_issue_hook_ = std::move(hook);
++	}
++
++	void complete_external(uint64_t token, const uint8_t* read_data,
++	                       uint32_t size) {
++		auto found = external_pending_.find(token);
++		if (found == external_pending_.end() || found->second.complete)
++			return;
++		auto& pending = found->second;
++		if (!pending.request.is_write() && pending.rsp_data) {
++			std::fill(pending.rsp_data->begin(), pending.rsp_data->end(), 0);
++			if (read_data != nullptr) {
++				std::copy_n(read_data,
++				            std::min<uint32_t>(size, config_.block_size),
++				            pending.rsp_data->begin());
++			}
++		}
++		pending.complete = true;
++		external_completed_.push(token);
++	}
++
++	bool has_external_pending() const {
++		return !external_pending_.empty();
++	}
+ };
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+@@ -185,6 +265,19 @@
+   impl_->set_pre_send_hook(std::move(hook));
+ }
+ 
++void Memory::set_external_timing_hook(ExternalIssueHook hook) {
++  impl_->set_external_timing_hook(std::move(hook));
++}
++
++void Memory::complete_external(uint64_t token, const uint8_t* read_data,
++                               uint32_t size) {
++  impl_->complete_external(token, read_data, size);
++}
++
++bool Memory::has_external_pending() const {
++	return impl_->has_external_pending();
++}
++
+ const Memory::PerfStats &Memory::perf_stats() const {
+ 	return impl_->perf_stats();
+-}
+\ No newline at end of file
++}
+--- a/sim/simx/processor.h
++++ b/sim/simx/processor.h
+@@ -55,6 +55,13 @@
+   // Vortex's RAM.
+   void set_mem_telemetry_hook(std::function<void(const struct MemReq&)> hook);
+ 
++  using MemTimingIssueHook = std::function<bool(
++      uint64_t token, const struct MemReq& request,
++      const uint8_t* write_data, uint64_t byteen, uint32_t size)>;
++  void set_mem_timing_hook(MemTimingIssueHook hook);
++  void complete_mem_timing(uint64_t token, const uint8_t* read_data,
++                           uint32_t size);
++
+   int dcr_write(uint32_t addr, uint32_t value);
+ 
+   int dcr_read(uint32_t addr, uint32_t tag, uint32_t* value);
+--- a/sim/simx/processor_impl.h
++++ b/sim/simx/processor_impl.h
+@@ -57,6 +57,15 @@
+     memsim_->set_pre_send_hook(std::move(hook));
+   }
+ 
++  void set_mem_timing_hook(Memory::ExternalIssueHook hook) {
++    memsim_->set_external_timing_hook(std::move(hook));
++  }
++
++  void complete_mem_timing(uint64_t token, const uint8_t* read_data,
++                           uint32_t size) {
++    memsim_->complete_external(token, read_data, size);
++  }
++
+   // Functional backing store (device physical memory). Exposed so the raster
+   // early-Z stage can read the committed depth buffer synchronously during its
+   // walk (a peek, not a substitute for the cycle-modeled ocache path).
+--- a/sim/simx/processor.cpp
++++ b/sim/simx/processor.cpp
+@@ -324,7 +324,8 @@
+   for (auto& cluster : clusters_) {
+     if (cluster->running()) return true;
+   }
+-  return (SimChannelBase::inflight_count() != 0);
++  return (SimChannelBase::inflight_count() != 0)
++      || memsim_->has_external_pending();
+ }
+ 
+ ProcessorImpl::PerfStats ProcessorImpl::perf_stats() const {
+@@ -392,6 +393,15 @@
+   impl_->set_mem_telemetry_hook(std::move(hook));
+ }
+ 
++void Processor::set_mem_timing_hook(MemTimingIssueHook hook) {
++  impl_->set_mem_timing_hook(std::move(hook));
++}
++
++void Processor::complete_mem_timing(uint64_t token, const uint8_t* read_data,
++                                    uint32_t size) {
++  impl_->complete_mem_timing(token, read_data, size);
++}
++
+ int Processor::dcr_write(uint32_t addr, uint32_t value) {
+   return impl_->dcr_write(addr, value);
+ }
+--- a/sim/simx/gem5/vortex_gpgpu.h
++++ b/sim/simx/gem5/vortex_gpgpu.h
+@@ -111,6 +111,36 @@
+                             uint64_t dev_addr, uint8_t* dst,
+                             uint32_t size);
+ 
++// ---- Shared timing-memory backend -----------------------------------------
++// In hosted gem5 mode the BAR bytes live in gem5's unified sparse memory.
++// CP reads/writes use the synchronous callbacks for data semantics, and the
++// observer emits an equivalent timing transaction; gem5 pauses subsequent CP
++// ticks until those transactions complete. Core requests are fully
++// asynchronous: complete_core_memory() is what releases the pending MemRsp.
++typedef void (*vortex_gem5_mem_read_t)(void* ctx, uint64_t addr,
++                                       uint8_t* dst, uint32_t size);
++typedef void (*vortex_gem5_mem_write_t)(void* ctx, uint64_t addr,
++                                        const uint8_t* src, uint32_t size);
++typedef void (*vortex_gem5_cp_timing_t)(void* ctx, uint64_t addr,
++                                        bool is_write, const uint8_t* src,
++                                        uint32_t size);
++void vortex_gem5_set_memory_backend(vortex_gem5_handle_t h,
++                                    vortex_gem5_mem_read_t read_fn,
++                                    vortex_gem5_mem_write_t write_fn,
++                                    vortex_gem5_cp_timing_t timing_fn,
++                                    void* ctx);
++
++typedef bool (*vortex_gem5_core_timing_t)(
++    void* ctx, uint64_t token, uint64_t addr, bool is_write,
++    const uint8_t* src, uint64_t byteen, uint32_t size);
++void vortex_gem5_set_core_timing_backend(vortex_gem5_handle_t h,
++                                         vortex_gem5_core_timing_t issue_fn,
++                                         void* ctx);
++void vortex_gem5_complete_core_memory(vortex_gem5_handle_t h,
++                                      uint64_t token,
++                                      const uint8_t* read_data,
++                                      uint32_t size);
++
+ // ---- Memory-access tracing (hettrace) --------------------------------------
+ //
+ // Optional, additive ABI. The gem5 side resolves these with dlsym() and
+--- a/sim/simx/gem5/vortex_gpgpu.cpp
++++ b/sim/simx/gem5/vortex_gpgpu.cpp
+@@ -110,7 +110,10 @@
+         #endif
+             return;
+         }
+-        dev_mem_->write(addr, src, size);
++        if (mem_write_fn_)
++            mem_write_fn_(mem_ctx_, addr, src, size);
++        else
++            dev_mem_->write(addr, src, size);
+     }
+     void vram_read(uint64_t addr, uint8_t* dst, uint32_t size) {
+         if (addr + size > GEM5_GLOBAL_MEM_SIZE) {
+@@ -121,7 +124,10 @@
+         #endif
+             return;
+         }
+-        dev_mem_->read(addr, dst, size);
++        if (mem_read_fn_)
++            mem_read_fn_(mem_ctx_, addr, dst, size);
++        else
++            dev_mem_->read(addr, dst, size);
+     }
+ 
+     // ---------------- CP regfile MMIO -----------------------------------
+@@ -161,6 +167,38 @@
+         start_ctx_ = ctx;
+     }
+ 
++    void set_memory_backend(vortex_gem5_mem_read_t read_fn,
++                            vortex_gem5_mem_write_t write_fn,
++                            vortex_gem5_cp_timing_t timing_fn, void* ctx) {
++        mem_read_fn_ = read_fn;
++        mem_write_fn_ = write_fn;
++        cp_timing_fn_ = timing_fn;
++        mem_ctx_ = ctx;
++    }
++
++    void set_core_timing_backend(vortex_gem5_core_timing_t issue_fn,
++                                 void* ctx) {
++        core_timing_fn_ = issue_fn;
++        core_timing_ctx_ = ctx;
++        if (issue_fn == nullptr) {
++            proc_->set_mem_timing_hook(nullptr);
++            return;
++        }
++        proc_->set_mem_timing_hook(
++            [this](uint64_t token, const MemReq& request,
++                   const uint8_t* write_data, uint64_t byteen,
++                   uint32_t size) -> bool {
++                return core_timing_fn_(core_timing_ctx_, token, request.addr,
++                                       request.is_write(), write_data,
++                                       byteen, size);
++            });
++    }
++
++    void complete_core_memory(uint64_t token, const uint8_t* read_data,
++                              uint32_t size) {
++        proc_->complete_mem_timing(token, read_data, size);
++    }
++
+     // ---------------- Memory-access trace tap ---------------------------
+     // Read-only observer on the post-LLC request stream. Installing it
+     // does not change simulation behaviour, so a failure to open the
+@@ -183,15 +221,30 @@
+     vortex::CommandProcessor::Hooks make_cp_hooks() {
+         vortex::CommandProcessor::Hooks h;
+         h.dram_read = [this](uint64_t addr, void* dst, std::size_t bytes) {
+-            dev_mem_->read(addr, dst, bytes);
++            if (mem_read_fn_)
++                mem_read_fn_(mem_ctx_, addr, static_cast<uint8_t*>(dst), bytes);
++            else
++                dev_mem_->read(addr, dst, bytes);
+             // CP 的 DMA 不经过 vortex::Memory，pre_send hook 看不到它 —— 但它是
+             // 真实的设备内存流量（镜像上传 + 载荷中转），而且是把 host 的暂存区
+             // 与设备缓冲连起来的那一步。详见 vortex_trace.h 的 OnDma。
+             trace_.OnDma(addr, bytes, hettrace::kRead);
++            if (cp_timing_fn_)
++                cp_timing_fn_(mem_ctx_, addr, false, nullptr, bytes);
+         };
+         h.dram_write = [this](uint64_t addr, const void* src, std::size_t bytes) {
+-            dev_mem_->write(addr, src, bytes);
++            // With a timing observer installed, that transaction is the
++            // authoritative write. Applying the functional write here too
++            // would expose data before gem5 accepts the timing DMA request.
++            if (mem_write_fn_ && !cp_timing_fn_)
++                mem_write_fn_(mem_ctx_, addr,
++                              static_cast<const uint8_t*>(src), bytes);
++            else
++                dev_mem_->write(addr, src, bytes);
+             trace_.OnDma(addr, bytes, hettrace::kWrite);
++            if (cp_timing_fn_)
++                cp_timing_fn_(mem_ctx_, addr, true,
++                              static_cast<const uint8_t*>(src), bytes);
+         };
+         h.vortex_dcr_write = [this](uint32_t addr, uint32_t value) {
+             proc_->dcr_write(addr, value);
+@@ -218,6 +271,12 @@
+     bool vortex_running_ = false;
+     vortex_gem5_start_handler_t start_fn_  = nullptr;
+     void* start_ctx_ = nullptr;
++    vortex_gem5_mem_read_t mem_read_fn_ = nullptr;
++    vortex_gem5_mem_write_t mem_write_fn_ = nullptr;
++    vortex_gem5_cp_timing_t cp_timing_fn_ = nullptr;
++    void* mem_ctx_ = nullptr;
++    vortex_gem5_core_timing_t core_timing_fn_ = nullptr;
++    void* core_timing_ctx_ = nullptr;
+ };
+ 
+ } // namespace
+@@ -308,6 +367,32 @@
+     reinterpret_cast<Gem5Device*>(h)->vram_read(dev_addr, dst, size);
+ }
+ 
++void vortex_gem5_set_memory_backend(vortex_gem5_handle_t h,
++                                    vortex_gem5_mem_read_t read_fn,
++                                    vortex_gem5_mem_write_t write_fn,
++                                    vortex_gem5_cp_timing_t timing_fn,
++                                    void* ctx) {
++    if (h == nullptr) return;
++    reinterpret_cast<Gem5Device*>(h)->set_memory_backend(
++        read_fn, write_fn, timing_fn, ctx);
++}
++
++void vortex_gem5_set_core_timing_backend(vortex_gem5_handle_t h,
++                                         vortex_gem5_core_timing_t issue_fn,
++                                         void* ctx) {
++    if (h == nullptr) return;
++    reinterpret_cast<Gem5Device*>(h)->set_core_timing_backend(issue_fn, ctx);
++}
++
++void vortex_gem5_complete_core_memory(vortex_gem5_handle_t h,
++                                      uint64_t token,
++                                      const uint8_t* read_data,
++                                      uint32_t size) {
++    if (h == nullptr) return;
++    reinterpret_cast<Gem5Device*>(h)->complete_core_memory(
++        token, read_data, size);
++}
++
+ int vortex_gem5_trace_open(vortex_gem5_handle_t h,
+                            vortex_gem5_tick_provider_t tick_fn,
+                            void* tick_ctx,
+--- a/sim/simx/gem5/vortex_gpgpu_dev.hh
++++ b/sim/simx/gem5/vortex_gpgpu_dev.hh
+@@ -45,7 +45,10 @@
+ #include "sim/eventq.hh"
+ 
+ #include <cstdint>
++#include <deque>
++#include <memory>
+ #include <string>
++#include <vector>
+ 
+ namespace gem5
+ {
+@@ -104,6 +107,27 @@
+     // standalone completion path, from an exit callback, and from the dtor.
+     void closeTrace();
+ 
++    // Shared timing-memory bridge ------------------------------------
++    static void memoryReadTrampoline(void* ctx, uint64_t addr, uint8_t* dst,
++                                     uint32_t size);
++    static void memoryWriteTrampoline(void* ctx, uint64_t addr,
++                                      const uint8_t* src, uint32_t size);
++    static void cpTimingTrampoline(void* ctx, uint64_t addr, bool is_write,
++                                   const uint8_t* src, uint32_t size);
++    static bool coreTimingTrampoline(void* ctx, uint64_t token, uint64_t addr,
++                                     bool is_write, const uint8_t* src,
++                                     uint64_t byteen, uint32_t size);
++    void memoryRead(uint64_t addr, uint8_t* dst, uint32_t size);
++    void memoryWrite(uint64_t addr, const uint8_t* src, uint32_t size);
++    void enqueueCpTiming(uint64_t addr, bool is_write, const uint8_t* src,
++                         uint32_t size);
++    bool issueCoreTiming(uint64_t token, uint64_t addr, bool is_write,
++                         const uint8_t* src, uint64_t byteen, uint32_t size);
++    void startNextCpDma();
++    void dmaComplete();
++    void resumeCpIfReady();
++    void startVortexIfReady();
++
+     // Library binding ------------------------------------------------
+     void* libHandle_;
+     void* deviceHandle_;
+@@ -124,6 +148,22 @@
+                                   const uint8_t* src, uint32_t size);
+         void        (*vram_read)(void* h, uint64_t addr,
+                                  uint8_t* dst, uint32_t size);
++        void        (*set_memory_backend)(
++                         void* h,
++                         void (*read_fn)(void*, uint64_t, uint8_t*, uint32_t),
++                         void (*write_fn)(void*, uint64_t, const uint8_t*,
++                                          uint32_t),
++                         void (*timing_fn)(void*, uint64_t, bool,
++                                           const uint8_t*, uint32_t),
++                         void* ctx);
++        void        (*set_core_timing_backend)(
++                         void* h,
++                         bool (*issue_fn)(void*, uint64_t, uint64_t, bool,
++                                          const uint8_t*, uint64_t, uint32_t),
++                         void* ctx);
++        void        (*complete_core_memory)(void* h, uint64_t token,
++                                            const uint8_t* read_data,
++                                            uint32_t size);
+     } abi_;
+ 
+     // Optional trace ABI. Resolved with dlsym but deliberately *not*
+@@ -145,6 +185,8 @@
+     const Addr        pinAddr_;   // device VRAM, host-visible as BAR
+     const Addr        pinSize_;
+     const Tick        pioLatency_;
++    const bool        timingMemory_;
++    const bool        exitOnFirstPio_;
+     const bool        traceEnable_;
+     const int64_t     traceAddrOffset_;
+ 
+@@ -159,6 +201,41 @@
+     // True between a successful openTrace() and closeTrace(). Guards the
+     // idempotency of closeTrace().
+     bool traceActive_;
++
++    enum class DmaKind {
++        None, CoreRead, CoreWrite, CoreMergeRead, CpRead, CpWrite
++    };
++    struct CpDmaRequest {
++        Addr addr;
++        bool isWrite;
++        std::vector<uint8_t> data;
++        uint32_t size;
++        Tick issueTick;
++    };
++    EventFunctionWrapper dmaDoneEvent_;
++    DmaKind dmaKind_ = DmaKind::None;
++    std::deque<CpDmaRequest> cpDmaQueue_;
++    std::unique_ptr<CpDmaRequest> activeCpDma_;
++    std::vector<uint8_t> dmaData_;
++    std::vector<uint8_t> coreWriteData_;
++    uint64_t activeCoreToken_ = 0;
++    Addr activeCoreAddr_ = 0;
++    uint64_t activeCoreByteen_ = 0;
++    uint32_t activeCoreSize_ = 0;
++    Tick activeCoreIssueTick_ = 0;
++    bool cpResumeNeeded_ = false;
++    bool vortexStartPending_ = false;
++    bool timingSummaryPrinted_ = false;
++    bool timingPhaseExitFired_ = false;
++    uint64_t cpCycles_ = 0;
++    uint64_t vortexCycles_ = 0;
++    uint64_t timingCompletions_ = 0;
++    uint64_t coreTimingReads_ = 0;
++    uint64_t coreTimingWrites_ = 0;
++    uint64_t cpTimingReads_ = 0;
++    uint64_t cpTimingWrites_ = 0;
++    Tick timingLatencyTotal_ = 0;
++    Tick timingLatencyMax_ = 0;
+ };
+ 
+ } // namespace gem5
+--- a/sim/simx/gem5/vortex_gpgpu_dev.cc
++++ b/sim/simx/gem5/vortex_gpgpu_dev.cc
+@@ -16,9 +16,12 @@
+ #include "base/logging.hh"
+ #include "base/trace.hh"
+ #include "mem/packet_access.hh"
++#include "mem/port_proxy.hh"
+ #include "sim/core.hh"
+ #include "sim/sim_exit.hh"
++#include "sim/system.hh"
+ 
++#include <algorithm>
+ #include <dlfcn.h>
+ 
+ namespace gem5
+@@ -65,12 +68,15 @@
+     pinAddr_(p.pin_addr),
+     pinSize_(p.pin_size),
+     pioLatency_(p.pio_latency),
++    timingMemory_(p.timing_memory),
++    exitOnFirstPio_(p.exit_on_first_pio),
+     traceEnable_(p.trace_enable),
+     traceAddrOffset_(p.trace_addr_offset),
+     cpTickEvent_([this]{ this->cpTick(); }, name() + ".cpTickEvent"),
+     vortexTickEvent_([this]{ this->vortexTick(); }, name() + ".vortexTickEvent"),
+     standalone_(false),
+-    traceActive_(false)
++    traceActive_(false),
++    dmaDoneEvent_([this]{ this->dmaComplete(); }, name() + ".dmaDone")
+ {
+     if (libraryPath_.empty()) {
+         fatal("VortexGPGPU: 'library' parameter is required "
+@@ -111,6 +117,22 @@
+                               (libHandle_, "vortex_gem5_vram_write",        libraryPath_.c_str());
+     abi_.vram_read         = dlsym_or_fatal<void(*)(void*, uint64_t, uint8_t*, uint32_t)>
+                               (libHandle_, "vortex_gem5_vram_read",         libraryPath_.c_str());
++    abi_.set_memory_backend = dlsym_or_fatal<void(*)(
++                              void*,
++                              void(*)(void*, uint64_t, uint8_t*, uint32_t),
++                              void(*)(void*, uint64_t, const uint8_t*, uint32_t),
++                              void(*)(void*, uint64_t, bool, const uint8_t*, uint32_t),
++                              void*)>
++                              (libHandle_, "vortex_gem5_set_memory_backend", libraryPath_.c_str());
++    abi_.set_core_timing_backend = dlsym_or_fatal<void(*)(
++                              void*,
++                              bool(*)(void*, uint64_t, uint64_t, bool,
++                                     const uint8_t*, uint64_t, uint32_t),
++                              void*)>
++                              (libHandle_, "vortex_gem5_set_core_timing_backend", libraryPath_.c_str());
++    abi_.complete_core_memory = dlsym_or_fatal<void(*)(
++                              void*, uint64_t, const uint8_t*, uint32_t)>
++                              (libHandle_, "vortex_gem5_complete_core_memory", libraryPath_.c_str());
+ 
+     // Additive trace ABI — optional by design; see AbiTrace in the header.
+     traceAbi_.open    = dlsym_optional<int(*)(void*, uint64_t(*)(void*), void*, int64_t)>
+@@ -159,6 +181,200 @@
+     DmaDevice::init();
+ }
+ 
++// ---- Shared timing-memory bridge ------------------------------------------
++
++void
++VortexGPGPU::memoryReadTrampoline(void* ctx, uint64_t addr, uint8_t* dst,
++                                  uint32_t size)
++{
++    static_cast<VortexGPGPU*>(ctx)->memoryRead(addr, dst, size);
++}
++
++void
++VortexGPGPU::memoryWriteTrampoline(void* ctx, uint64_t addr,
++                                   const uint8_t* src, uint32_t size)
++{
++    static_cast<VortexGPGPU*>(ctx)->memoryWrite(addr, src, size);
++}
++
++void
++VortexGPGPU::cpTimingTrampoline(void* ctx, uint64_t addr, bool is_write,
++                                const uint8_t* src, uint32_t size)
++{
++    static_cast<VortexGPGPU*>(ctx)->enqueueCpTiming(
++        addr, is_write, src, size);
++}
++
++bool
++VortexGPGPU::coreTimingTrampoline(void* ctx, uint64_t token, uint64_t addr,
++                                  bool is_write, const uint8_t* src,
++                                  uint64_t byteen, uint32_t size)
++{
++    return static_cast<VortexGPGPU*>(ctx)->issueCoreTiming(
++        token, addr, is_write, src, byteen, size);
++}
++
++void
++VortexGPGPU::memoryRead(uint64_t addr, uint8_t* dst, uint32_t size)
++{
++    panic_if(addr > pinSize_ || size > pinSize_ - addr,
++             "VortexGPGPU CP read outside BAR: addr=%#llx size=%u",
++             static_cast<unsigned long long>(addr), size);
++    sys->physProxy.readBlob(pinAddr_ + addr, dst, size);
++}
++
++void
++VortexGPGPU::memoryWrite(uint64_t addr, const uint8_t* src, uint32_t size)
++{
++    panic_if(addr > pinSize_ || size > pinSize_ - addr,
++             "VortexGPGPU CP write outside BAR: addr=%#llx size=%u",
++             static_cast<unsigned long long>(addr), size);
++    sys->physProxy.writeBlob(pinAddr_ + addr, src, size);
++}
++
++void
++VortexGPGPU::enqueueCpTiming(uint64_t addr, bool is_write,
++                             const uint8_t* src, uint32_t size)
++{
++    CpDmaRequest request{pinAddr_ + addr, is_write, {}, size, curTick()};
++    if (is_write) {
++        panic_if(src == nullptr, "VortexGPGPU CP timing write has no data");
++        request.data.assign(src, src + size);
++        ++cpTimingWrites_;
++    } else {
++        ++cpTimingReads_;
++    }
++    cpDmaQueue_.push_back(std::move(request));
++}
++
++bool
++VortexGPGPU::issueCoreTiming(uint64_t token, uint64_t addr, bool is_write,
++                             const uint8_t* src, uint64_t byteen,
++                             uint32_t size)
++{
++    if (dmaKind_ != DmaKind::None || !cpDmaQueue_.empty())
++        return false;
++    panic_if(addr > pinSize_ || size > pinSize_ - addr,
++             "VortexGPGPU core access outside BAR: addr=%#llx size=%u",
++             static_cast<unsigned long long>(addr), size);
++    panic_if(size == 0 || size > 64,
++             "VortexGPGPU core timing size %u is outside [1,64]", size);
++
++    activeCoreToken_ = token;
++    activeCoreAddr_ = pinAddr_ + addr;
++    activeCoreByteen_ = byteen;
++    activeCoreSize_ = size;
++    activeCoreIssueTick_ = curTick();
++    dmaData_.assign(size, 0);
++    if (!is_write) {
++        ++coreTimingReads_;
++        dmaKind_ = DmaKind::CoreRead;
++        dmaRead(activeCoreAddr_, size, &dmaDoneEvent_, dmaData_.data());
++        return true;
++    }
++
++    panic_if(src == nullptr, "VortexGPGPU core timing write has no data");
++    ++coreTimingWrites_;
++    coreWriteData_.assign(src, src + size);
++    const uint64_t fullMask = size == 64 ? ~uint64_t(0)
++                                         : ((uint64_t(1) << size) - 1);
++    if ((byteen & fullMask) == fullMask) {
++        dmaKind_ = DmaKind::CoreWrite;
++        dmaWrite(activeCoreAddr_, size, &dmaDoneEvent_,
++                 coreWriteData_.data());
++    } else {
++        dmaKind_ = DmaKind::CoreMergeRead;
++        dmaRead(activeCoreAddr_, size, &dmaDoneEvent_, dmaData_.data());
++    }
++    return true;
++}
++
++void
++VortexGPGPU::startNextCpDma()
++{
++    if (dmaKind_ != DmaKind::None || cpDmaQueue_.empty())
++        return;
++    activeCpDma_ = std::make_unique<CpDmaRequest>(
++        std::move(cpDmaQueue_.front()));
++    cpDmaQueue_.pop_front();
++    if (activeCpDma_->isWrite) {
++        dmaKind_ = DmaKind::CpWrite;
++        dmaWrite(activeCpDma_->addr, activeCpDma_->size, &dmaDoneEvent_,
++                 activeCpDma_->data.data());
++    } else {
++        dmaKind_ = DmaKind::CpRead;
++        dmaData_.assign(activeCpDma_->size, 0);
++        dmaRead(activeCpDma_->addr, activeCpDma_->size, &dmaDoneEvent_,
++                dmaData_.data());
++    }
++}
++
++void
++VortexGPGPU::dmaComplete()
++{
++    if (dmaKind_ == DmaKind::CoreMergeRead) {
++        for (uint32_t i = 0; i < activeCoreSize_; ++i) {
++            if (activeCoreByteen_ & (uint64_t(1) << i))
++                dmaData_[i] = coreWriteData_[i];
++        }
++        dmaKind_ = DmaKind::CoreWrite;
++        dmaWrite(activeCoreAddr_, activeCoreSize_, &dmaDoneEvent_,
++                 dmaData_.data());
++        return;
++    }
++
++    if (dmaKind_ == DmaKind::CoreRead || dmaKind_ == DmaKind::CoreWrite) {
++        const bool isRead = dmaKind_ == DmaKind::CoreRead;
++        const Tick observed = curTick() - activeCoreIssueTick_;
++        timingLatencyTotal_ += observed;
++        timingLatencyMax_ = std::max(timingLatencyMax_, observed);
++        ++timingCompletions_;
++        dmaKind_ = DmaKind::None;
++        abi_.complete_core_memory(deviceHandle_, activeCoreToken_,
++                                  isRead ? dmaData_.data() : nullptr,
++                                  isRead ? activeCoreSize_ : 0);
++        startNextCpDma();
++        resumeCpIfReady();
++        return;
++    }
++
++    if (dmaKind_ == DmaKind::CpRead || dmaKind_ == DmaKind::CpWrite) {
++        const Tick observed = curTick() - activeCpDma_->issueTick;
++        timingLatencyTotal_ += observed;
++        timingLatencyMax_ = std::max(timingLatencyMax_, observed);
++        ++timingCompletions_;
++        activeCpDma_.reset();
++        dmaKind_ = DmaKind::None;
++        startNextCpDma();
++        resumeCpIfReady();
++        return;
++    }
++    panic("VortexGPGPU unexpected DMA completion");
++}
++
++void
++VortexGPGPU::resumeCpIfReady()
++{
++    if (activeCpDma_ || !cpDmaQueue_.empty())
++        return;
++    startVortexIfReady();
++    if (!cpResumeNeeded_)
++        return;
++    cpResumeNeeded_ = false;
++    if (abi_.cp_has_work(deviceHandle_) && !cpTickEvent_.scheduled())
++        schedule(cpTickEvent_, clockEdge(Cycles(1)));
++}
++
++void
++VortexGPGPU::startVortexIfReady()
++{
++    if (!vortexStartPending_ || activeCpDma_ || !cpDmaQueue_.empty())
++        return;
++    vortexStartPending_ = false;
++    if (!vortexTickEvent_.scheduled())
++        schedule(vortexTickEvent_, clockEdge(Cycles(1)));
++}
++
+ uint64_t
+ VortexGPGPU::curTickTrampoline(void* ctx)
+ {
+@@ -187,25 +403,39 @@
+     inform("VortexGPGPU: memory trace active (post-LLC tap, addr_offset=%lld)",
+            static_cast<long long>(traceAddrOffset_));
+ 
+-    // gem5 does not reliably destroy SimObjects at exit, so the destructor
+-    // alone is not enough to get the buffered tail and the .meta.json
+-    // sidecar onto disk. Without the sidecar, downstream truncation
+-    // detection has nothing to compare against.
+-    registerExitCallback([this]{ this->closeTrace(); });
+ }
+ 
+ void
+ VortexGPGPU::closeTrace()
+ {
+-    if (!traceActive_) return;
+-    traceActive_ = false;
+-    const uint64_t n = (traceAbi_.emitted != nullptr)
+-                           ? traceAbi_.emitted(deviceHandle_) : 0;
+-    if (traceAbi_.close != nullptr) {
+-        traceAbi_.close(deviceHandle_);
++    if (traceActive_) {
++        traceActive_ = false;
++        const uint64_t n = (traceAbi_.emitted != nullptr)
++                               ? traceAbi_.emitted(deviceHandle_) : 0;
++        if (traceAbi_.close != nullptr) {
++            traceAbi_.close(deviceHandle_);
++        }
++        inform("VortexGPGPU: memory trace closed, %llu records",
++               static_cast<unsigned long long>(n));
++    }
++    if (timingMemory_ && !timingSummaryPrinted_) {
++        timingSummaryPrinted_ = true;
++        const Tick average = timingCompletions_ == 0 ? 0
++            : timingLatencyTotal_ / timingCompletions_;
++        inform("VortexGPGPU timing summary: core_read=%llu core_write=%llu "
++               "cp_read=%llu cp_write=%llu completed=%llu "
++               "latency_avg=%llu ticks latency_max=%llu ticks "
++               "cp_cycles=%llu vortex_cycles=%llu",
++               static_cast<unsigned long long>(coreTimingReads_),
++               static_cast<unsigned long long>(coreTimingWrites_),
++               static_cast<unsigned long long>(cpTimingReads_),
++               static_cast<unsigned long long>(cpTimingWrites_),
++               static_cast<unsigned long long>(timingCompletions_),
++               static_cast<unsigned long long>(average),
++               static_cast<unsigned long long>(timingLatencyMax_),
++               static_cast<unsigned long long>(cpCycles_),
++               static_cast<unsigned long long>(vortexCycles_));
+     }
+-    inform("VortexGPGPU: memory trace closed, %llu records",
+-           static_cast<unsigned long long>(n));
+ }
+ 
+ void
+@@ -213,6 +443,22 @@
+ {
+     DmaDevice::startup();
+ 
++    // gem5 may keep SimObjects alive past exit. Register independently of
++    // tracing so the timing summary and any buffered trace always close.
++    registerExitCallback([this]{ this->closeTrace(); });
++
++    if (timingMemory_) {
++        fatal_if(!kernelPath_.empty(),
++                 "VortexGPGPU timing_memory currently requires hosted mode");
++        abi_.set_memory_backend(deviceHandle_,
++                                &VortexGPGPU::memoryReadTrampoline,
++                                &VortexGPGPU::memoryWriteTrampoline,
++                                &VortexGPGPU::cpTimingTrampoline, this);
++        abi_.set_core_timing_backend(deviceHandle_,
++                                     &VortexGPGPU::coreTimingTrampoline, this);
++        inform("VortexGPGPU: core + CP DMA routed through gem5 timing memory");
++    }
++
+     // Before any ticks are scheduled, so no request can slip past the tap.
+     openTrace();
+ 
+@@ -239,7 +485,13 @@
+ void
+ VortexGPGPU::cpTick()
+ {
++    ++cpCycles_;
+     const bool still_busy = abi_.cp_tick(deviceHandle_);
++    cpResumeNeeded_ = still_busy;
++    startNextCpDma();
++    if (activeCpDma_ || !cpDmaQueue_.empty())
++        return;
++    cpResumeNeeded_ = false;
+     if (still_busy) {
+         schedule(cpTickEvent_, clockEdge(Cycles(1)));
+     }
+@@ -250,6 +502,7 @@
+ void
+ VortexGPGPU::vortexTick()
+ {
++    ++vortexCycles_;
+     const bool still_running = abi_.vortex_tick(deviceHandle_);
+     if (still_running) {
+         schedule(vortexTickEvent_, clockEdge(Cycles(1)));
+@@ -271,7 +524,8 @@
+ void
+ VortexGPGPU::maybeWakeCp()
+ {
+-    if (abi_.cp_has_work(deviceHandle_) && !cpTickEvent_.scheduled()) {
++    if (abi_.cp_has_work(deviceHandle_) && !activeCpDma_
++        && cpDmaQueue_.empty() && !cpTickEvent_.scheduled()) {
+         schedule(cpTickEvent_, clockEdge(Cycles(1)));
+     }
+ }
+@@ -285,9 +539,10 @@
+ void
+ VortexGPGPU::onVortexStart()
+ {
+-    if (!vortexTickEvent_.scheduled()) {
+-        schedule(vortexTickEvent_, clockEdge(Cycles(1)));
+-    }
++    // QMD/draw setup can issue several CP reads in this same CP tick. Do not
++    // let the core consume their data until those timing requests complete.
++    vortexStartPending_ = true;
++    startVortexIfReady();
+ }
+ 
+ Tick
+@@ -304,6 +559,8 @@
+     }
+     // BAR-mapped VRAM access (CPU is reading device memory directly).
+     // Variable-width packet (host load / cache-line fill).
++    panic_if(timingMemory_,
++             "VortexGPGPU received BAR PIO read while timing_memory owns BAR");
+     const uint64_t dev_addr = a - pinAddr_;
+     abi_.vram_read(deviceHandle_,
+                    dev_addr,
+@@ -324,11 +581,17 @@
+         abi_.cp_mmio_write(deviceHandle_, off, uint32_t(raw));
+         maybeWakeCp();
+         pkt->makeAtomicResponse();
++        if (exitOnFirstPio_ && !timingPhaseExitFired_) {
++            timingPhaseExitFired_ = true;
++            exitSimLoop("VortexGPGPU: timing phase");
++        }
+         return pioLatency_;
+     }
+     // BAR-mapped VRAM write — variable-width packet (host store /
+     // cache writeback). Subsequent device reads at the same address
+     // see the bytes written here.
++    panic_if(timingMemory_,
++             "VortexGPGPU received BAR PIO write while timing_memory owns BAR");
+     const uint64_t dev_addr = a - pinAddr_;
+     abi_.vram_write(deviceHandle_,
+                     dev_addr,
+@@ -346,7 +609,7 @@
+ {
+     AddrRangeList ranges;
+     ranges.push_back(RangeSize(pioAddr_, pioSize_));
+-    if (pinSize_ != 0) {
++    if (pinSize_ != 0 && !timingMemory_) {
+         ranges.push_back(RangeSize(pinAddr_, pinSize_));
+     }
+     return ranges;
+--- a/sim/simx/gem5/VortexGPGPU.py
++++ b/sim/simx/gem5/VortexGPGPU.py
+@@ -51,6 +51,16 @@
+     pin_addr    = Param.Addr(0x100000000, "VRAM base address (BAR-mapped)")
+     pin_size    = Param.Addr(0, "VRAM region size (bytes); 0 disables")
+ 
++    timing_memory = Param.Bool(
++        False,
++        "Route core and CP DMA through gem5 timing memory; BAR data is then "
++        "owned by the external memory responder",
++    )
++    exit_on_first_pio = Param.Bool(
++        False,
++        "Exit once at the first CP write so Python can switch fast-forward CPUs",
++    )
++
+     # Number of CP queues the PIO map can address. Matches VX_CP_NUM_QUEUES default.
+     max_queues  = Param.Unsigned(4, "Number of CP queues the PIO map covers")
+ 
+

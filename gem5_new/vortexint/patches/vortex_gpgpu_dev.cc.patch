@@ -1,0 +1,148 @@
+--- a/vortex_gpgpu_dev.cc	2026-08-17 13:24:09.432279901 +0800
++++ b/vortex_gpgpu_dev.cc	2026-08-17 13:27:54.474972978 +0800
+@@ -16,6 +16,7 @@
+ #include "base/logging.hh"
+ #include "base/trace.hh"
+ #include "mem/packet_access.hh"
++#include "sim/core.hh"
+ #include "sim/sim_exit.hh"
+ 
+ #include <dlfcn.h>
+@@ -36,6 +37,19 @@
+     return reinterpret_cast<T>(p);
+ }
+ 
++// For the additive trace ABI: absence is a valid outcome (older library),
++// so return nullptr instead of fatal-ing. dlerror() is cleared so a later
++// failed dlsym_or_fatal reports its own error, not this one.
++template <typename T>
++T dlsym_optional(void* handle, const char* symbol)
++{
++    void* p = dlsym(handle, symbol);
++    if (p == nullptr) {
++        dlerror();
++    }
++    return reinterpret_cast<T>(p);
++}
++
+ } // namespace
+ 
+ VortexGPGPU::VortexGPGPU(const Params &p)
+@@ -43,6 +57,7 @@
+     libHandle_(nullptr),
+     deviceHandle_(nullptr),
+     abi_{},
++    traceAbi_{},
+     libraryPath_(p.library),
+     kernelPath_(p.kernel),
+     pioAddr_(p.pio_addr),
+@@ -50,9 +65,12 @@
+     pinAddr_(p.pin_addr),
+     pinSize_(p.pin_size),
+     pioLatency_(p.pio_latency),
++    traceEnable_(p.trace_enable),
++    traceAddrOffset_(p.trace_addr_offset),
+     cpTickEvent_([this]{ this->cpTick(); }, name() + ".cpTickEvent"),
+     vortexTickEvent_([this]{ this->vortexTick(); }, name() + ".vortexTickEvent"),
+-    standalone_(false)
++    standalone_(false),
++    traceActive_(false)
+ {
+     if (libraryPath_.empty()) {
+         fatal("VortexGPGPU: 'library' parameter is required "
+@@ -94,6 +112,14 @@
+     abi_.vram_read         = dlsym_or_fatal<void(*)(void*, uint64_t, uint8_t*, uint32_t)>
+                               (libHandle_, "vortex_gem5_vram_read",         libraryPath_.c_str());
+ 
++    // Additive trace ABI — optional by design; see AbiTrace in the header.
++    traceAbi_.open    = dlsym_optional<int(*)(void*, uint64_t(*)(void*), void*, int64_t)>
++                          (libHandle_, "vortex_gem5_trace_open");
++    traceAbi_.close   = dlsym_optional<void(*)(void*)>
++                          (libHandle_, "vortex_gem5_trace_close");
++    traceAbi_.emitted = dlsym_optional<uint64_t(*)(void*)>
++                          (libHandle_, "vortex_gem5_trace_emitted");
++
+     inform("VortexGPGPU: %s", abi_.build_info());
+     inform("VortexGPGPU: library=%s", libraryPath_);
+     inform("VortexGPGPU: pio[CP regfile]=[0x%llx,+0x%llx)",
+@@ -117,6 +143,8 @@
+ 
+ VortexGPGPU::~VortexGPGPU()
+ {
++    // Before destroy(): the tap lives inside the device object.
++    closeTrace();
+     if (deviceHandle_ != nullptr && abi_.destroy != nullptr) {
+         abi_.destroy(deviceHandle_);
+     }
+@@ -131,11 +159,63 @@
+     DmaDevice::init();
+ }
+ 
++uint64_t
++VortexGPGPU::curTickTrampoline(void* ctx)
++{
++    // ctx is unused: curTick() is the global event-queue clock and there is
++    // exactly one. The parameter is kept so the library's tick-provider
++    // signature stays generic across the three trace sources.
++    (void)ctx;
++    return static_cast<uint64_t>(curTick());
++}
++
++void
++VortexGPGPU::openTrace()
++{
++    if (!traceEnable_ || traceAbi_.open == nullptr) {
++        // trace_enable=false, or the library predates the trace ABI.
++        return;
++    }
++    const int rc = traceAbi_.open(deviceHandle_, &VortexGPGPU::curTickTrampoline,
++                                  this, traceAddrOffset_);
++    if (rc != 0) {
++        // Overwhelmingly the normal case: HETTRACE_DIR is simply not set.
++        // Not an error, and not worth an inform() on every run.
++        return;
++    }
++    traceActive_ = true;
++    inform("VortexGPGPU: memory trace active (post-LLC tap, addr_offset=%lld)",
++           static_cast<long long>(traceAddrOffset_));
++
++    // gem5 does not reliably destroy SimObjects at exit, so the destructor
++    // alone is not enough to get the buffered tail and the .meta.json
++    // sidecar onto disk. Without the sidecar, downstream truncation
++    // detection has nothing to compare against.
++    registerExitCallback([this]{ this->closeTrace(); });
++}
++
++void
++VortexGPGPU::closeTrace()
++{
++    if (!traceActive_) return;
++    traceActive_ = false;
++    const uint64_t n = (traceAbi_.emitted != nullptr)
++                           ? traceAbi_.emitted(deviceHandle_) : 0;
++    if (traceAbi_.close != nullptr) {
++        traceAbi_.close(deviceHandle_);
++    }
++    inform("VortexGPGPU: memory trace closed, %llu records",
++           static_cast<unsigned long long>(n));
++}
++
+ void
+ VortexGPGPU::startup()
+ {
+     DmaDevice::startup();
+ 
++    // Before any ticks are scheduled, so no request can slip past the tap.
++    openTrace();
++
+     if (!kernelPath_.empty()) {
+         // Standalone mode: preload a kernel and self-drive to completion.
+         // No host CPU involvement; used as a smoke test for the device library.
+@@ -177,6 +257,7 @@
+     }
+     if (standalone_) {
+         inform("VortexGPGPU: standalone kernel complete — exiting sim loop");
++        closeTrace();
+         exitSimLoop("VortexGPGPU: kernel complete");
+         return;
+     }

@@ -1,0 +1,26 @@
+{
+  "gem5": {
+    "url": "https://github.com/gem5/gem5.git",
+    "revision": "c8222cc67a399bfc01e8658dd14b30d5bfd634f9",
+    "tag": "v25.1.0.1",
+    "legacy_revision": "2721ed751edac7d4cf3df574c6e0293343a14ba2"
+  },
+  "vortex": {
+    "url": "https://github.com/vortexgpgpu/vortex.git",
+    "revision": "d76b7f24e658867ab57e3942d7c648c3e6af072d",
+    "submodules": {
+      "third_party/softfloat": "b51ef8f3201669b2288104c28546fc72532a1ea4",
+      "third_party/ramulator": "e62c84a6f0e06566ba6e182d308434b4532068a5",
+      "third_party/cocogfx": "b1befdb36df8af7ac9e2c96acaf81957aab5d107"
+    }
+  },
+  "coralnpu": {
+    "url": "https://github.com/google-coral/coralnpu.git",
+    "revision": "fcb74cfe79dbd184b9c53539490994e701981f80"
+  },
+  "memsim": {
+    "url": "https://github.com/GuXing25/mem_sim.git",
+    "revision": "7945650579c44713ddec80acc2c82ae34e1f19a5",
+    "excluded_delivery_files": ["堆叠存储模型交付手册.md"]
+  }
+}

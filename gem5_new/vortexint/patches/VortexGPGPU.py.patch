@@ -1,0 +1,31 @@
+--- a/VortexGPGPU.py	2026-08-17 13:24:09.440581056 +0800
++++ b/VortexGPGPU.py	2026-08-17 13:24:35.965838251 +0800
+@@ -53,3 +53,28 @@
+ 
+     # Number of CP queues the PIO map can address. Matches VX_CP_NUM_QUEUES default.
+     max_queues  = Param.Unsigned(4, "Number of CP queues the PIO map covers")
++
++    # ---- Memory-access tracing (hettrace) ------------------------------
++    # Installs a read-only tap on Vortex's post-LLC request stream so the
++    # DRAM-bound traffic can be merged with the host and CoralNPU traces on
++    # a single gem5 time base.
++    #
++    # Whether a trace is actually produced is decided by the HETTRACE_DIR
++    # environment variable, read inside the device library. These params only
++    # control *whether to try* and how to relocate the addresses; that split
++    # keeps the output directory out of the config script, which matters
++    # because all three sources must write into the same directory.
++    trace_enable = Param.Bool(
++        True,
++        "Install the post-LLC memory trace tap (no-op unless HETTRACE_DIR "
++        "is set in the environment)",
++    )
++
++    # Added to every device address before it is recorded. Use it when the
++    # workload addresses device memory from 0 and the unified physical map
++    # puts Vortex VRAM elsewhere. 0 is correct when the workload already
++    # uses global physical addresses -- the recommended setup, see
++    # workloads/shared_buffer.
++    trace_addr_offset = Param.Int64(
++        0, "Offset added to device addresses before recording"
++    )

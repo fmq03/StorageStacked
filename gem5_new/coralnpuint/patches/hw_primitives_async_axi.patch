@@ -1,0 +1,83 @@
+--- hw_primitives.h
++++ hw_primitives.h
+@@ -439,6 +439,20 @@
+   void RegisterReadCallback(
+       std::function<AxiRData(const AxiAddr& addr)> read_cb) {
+     read_cb_ = read_cb;
++    async_read_cb_ = nullptr;
++  }
++
++  // Asynchronous variant used by timing simulators. The callback accepts
++  // the address handshake, and PushReadResponse() injects data when the
++  // later memory response event arrives.
++  void RegisterAsyncReadCallback(
++      std::function<void(const AxiAddr& addr)> read_cb) {
++    async_read_cb_ = read_cb;
++    read_cb_ = nullptr;
++  }
++
++  void PushReadResponse(const AxiRData& response) {
++    data_queue_.push(response);
+   }
+ 
+  private:
+@@ -470,7 +484,9 @@
+       axi_addr_.addr_bits_qos = *read_addr_bits_qos_;
+       axi_addr_.addr_bits_region = *read_addr_bits_region_;
+ 
+-      if (read_cb_) {
++      if (async_read_cb_) {
++        async_read_cb_(axi_addr_);
++      } else if (read_cb_) {
+         AxiRData read_result = read_cb_(axi_addr_);
+         data_queue_.push(read_result);
+       } else {
+@@ -504,6 +520,7 @@
+   std::queue<AxiRData> data_queue_;
+   AxiAddr axi_addr_;
+   std::function<AxiRData(const AxiAddr&)> read_cb_;
++  std::function<void(const AxiAddr&)> async_read_cb_;
+ };
+ 
+ // Struct representing the data transferred in an AXI4 read data channel.
+@@ -559,6 +576,20 @@
+       std::function<AxiWResp(const AxiAddr& addr, const AxiWData& data)>
+           write_cb) {
+     write_cb_ = write_cb;
++    async_write_cb_ = nullptr;
++  }
++
++  // AW/W are acknowledged once, then the RTL waits until the timing backend
++  // injects the B response through PushWriteResponse().
++  void RegisterAsyncWriteCallback(
++      std::function<void(const AxiAddr& addr, const AxiWData& data)>
++          write_cb) {
++    async_write_cb_ = write_cb;
++    write_cb_ = nullptr;
++  }
++
++  void PushWriteResponse(const AxiWResp& response) {
++    resp_queue_.push(response);
+   }
+ 
+  private:
+@@ -598,7 +629,9 @@
+     if (*write_addr_valid_ && *write_data_valid_) {
+       *write_addr_ready_ = 1;
+       *write_data_ready_ = 1;
+-      if (write_cb_) {
++      if (async_write_cb_) {
++        async_write_cb_(axi_addr_, axi_data_);
++      } else if (write_cb_) {
+         AxiWResp resp_result = write_cb_(axi_addr_, axi_data_);
+         resp_queue_.push(resp_result);
+       } else {
+@@ -640,6 +673,8 @@
+   AxiAddr axi_addr_;
+   AxiWData axi_data_;
+   std::function<AxiWResp(const AxiAddr&, const AxiWData&)> write_cb_;
++  std::function<void(const AxiAddr&, const AxiWData&)>
++      async_write_cb_;
+ };
+ 
+ #endif  // HW_SIM_HW_PRIMITIVES_H_
