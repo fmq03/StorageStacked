@@ -24,7 +24,29 @@ git diff --submodule=log
 
 子模块的实际版本由 gitlink 固定；上游锁文件与本地模块版本存在差异时，不自动 reset。
 尚未发布主仓库及本地新提交，不能保证仅从原上游地址递归 clone 能得到全部固定版本。
-本次只整理 Git，未切换仿真环境、安装工具链或重跑仿真。
+Git 建仓后的环境工作见 [统一环境说明](env/README.md)。默认入口已切换到
+gem5_new 锁定的新 gem5 基线及统一工具链，旧环境保留用于历史对照。
+
+```bash
+bash env/bootstrap.sh
+bash env/build.sh
+bash env/run_memsim.sh
+```
+
+CPU 控制 Vortex GPU、CoralNPU 的三源链路也已接通，设备共享缓冲区经
+AXI2Flit → UCIe → 在线 mem_sim 访问，真实响应沿原路径返回。完整入口：
+
+```bash
+bash env/bootstrap_xpu.sh
+bash env/build_xpu.sh
+bash env/run_xpu.sh
+```
+
+三源接入、地址布局和验收范围见 [交接说明](integrate_doc/15_xpu_online.md)。
+CPU 验收见 results/axi256-20260911/memsim/summary.json。
+当前前端已改为原生 AXI256，宽度变更和新旧报告入口见
+[AXI256 验证说明](integrate_doc/16_native_axi256.md)。旧结果已按用户后续要求清理，
+当前HTML使用按需加载，交接时复制整个结果用例目录，见[可视化说明](integrate_doc/17_visualization.md)。
 
 得到提交授权后，先提交子仓库的必要变更，再在主仓库更新 gitlink。
 **本次及后续由助手创建的提交说明统一使用中文；未经授权不 push。**

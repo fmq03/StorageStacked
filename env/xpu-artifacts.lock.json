@@ -1,0 +1,92 @@
+{
+  "bazel-8.6.0-linux-x86_64": {
+    "url": "https://github.com/bazelbuild/bazel/releases/download/8.6.0/bazel-8.6.0-linux-x86_64",
+    "sha256": "9860da9c9386bbc023feed8f43af3105d338727d77b644fa6aeca45a4a11957c"
+  },
+  "lz4-1.10.0.tar.gz": {
+    "url": "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz",
+    "sha256": "537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b"
+  },
+  "vortex": [
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/llvm-vortex/ubuntu/focal/llvm-vortex.tar.bz2.partaa",
+      "sha256": "c9d201da7eca768a225fcad2b526b2b029b02028bb6a4410e5170593f5df83a9",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/llvm-vortex/ubuntu/focal/llvm-vortex.tar.bz2.partab",
+      "sha256": "5ae01975888ea531591aaad351e0867868c8df72aebee6a137db0cc9459aec15",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/llvm-vortex/ubuntu/focal/llvm-vortex.tar.bz2.partac",
+      "sha256": "cc93d8ece31f6deeed07b1c63b2d5aba60f1239f1b063ad19c938b8268c7efbd",
+      "bytes": 3788398
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partaa",
+      "sha256": "8cd479b9bc50883ff7ef945731bded98ea58ca3193db3a750ad5625e9063d793",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partab",
+      "sha256": "102c8c9bc17e4fc7a1fb5565b62a4e858bfe41568e7ae1722bf4aa6658f82212",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partac",
+      "sha256": "fac3e502bfef6330745e9b7b04dea62cc59248011e8b2d7f64b06f01638ff919",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partad",
+      "sha256": "271c3507f2f4b5b09068226d8f9fd50f79044f319882704ab664c01b376cbbfe",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partae",
+      "sha256": "d28c56680796b4a97d03db903220410e6bcc679d411a7a5ba2a2cf1f498314a3",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partaf",
+      "sha256": "9de8c769321d01b4ebe46ad9d4793ecd91b58c4fcdb7d524a3e3c255fddbcf1b",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partag",
+      "sha256": "f47e1855434285899e47aa1cc486c106a857dd556c047301abdd703ebb76e66f",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partah",
+      "sha256": "8992ab576215d89ec1393c90d9e541de79a6c8d4f32cda512792ff8072feb750",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partai",
+      "sha256": "6b6d6ab42e2c6ce7e6460274f850b808bafd6557540308bae7fa3f50bf24c37e",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partaj",
+      "sha256": "bc853a8ed89aa998cdb0d6fff85dce9595c7cf18c0f8263e17d72fc0ddf17821",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partak",
+      "sha256": "9427b7b7c134509eddfa444c5fb372098b60da67e8098ec3d9172f0ee2a5e7a0",
+      "bytes": 11010801
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/libc32/libc32.tar.bz2",
+      "sha256": "b7c8dfb18443db801f87520664a90e658552934de073c6bf2d69866f62d0e079",
+      "bytes": 841452
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/libcrt32/libcrt32.tar.bz2",
+      "sha256": "305c7f3703c3ea8137fac465486d726b66b8a178ffb0a6793d12946da8ee5855",
+      "bytes": 74000
+    }
+  ]
+}
