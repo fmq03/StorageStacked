@@ -4,7 +4,7 @@ LDLIBS ?= -lsystemc
 
 # 与协议桥共用 SystemC 安装和物理帧字节映射。
 SYSTEMC_HOME ?= $(HOME)/.local/systemc-2.3.4-cxx17
-AOU_INCLUDE ?= $(if $(wildcard ../axi2flit/systemc/include),../axi2flit/systemc/include,../../systemc/include)
+AOU_INCLUDE ?= ../protocol/include
 CXXFLAGS += -I$(SYSTEMC_HOME)/include -I$(AOU_INCLUDE)
 LDLIBS += -L$(SYSTEMC_HOME)/lib -Wl,-rpath,$(SYSTEMC_HOME)/lib -lpthread
 

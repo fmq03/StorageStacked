@@ -5,7 +5,7 @@ CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -g \
             -I$(SYSTEMC_HOME)/include \
             -I./include
-CXXFLAGS += $(EXTRA_CXXFLAGS)
+CXXFLAGS += $(EXTRA_CXXFLAGS) -I../../protocol/include
 LDFLAGS  := -L$(SYSTEMC_HOME)/lib \
             -lsystemc -lpthread \
             -Wl,-rpath,$(SYSTEMC_HOME)/lib
@@ -193,7 +193,7 @@ adapter: reference-check | $(SIM_DIR)
 
 ucie-unit: reference-check
 	$(MAKE) -C "$(UCIE_DIR)" SYSTEMC_HOME="$(SYSTEMC_HOME)" \
-	  AOU_INCLUDE="$(AXI2FLIT_SYSTEMC_DIR)/include" all unit-test
+	  AOU_INCLUDE="$(AXI2FLIT_SYSTEMC_DIR)/../../protocol/include" all unit-test
 
 # 参数化回归：x8、PAM4、48 GB/s、TAT=80ns。
 # 不复用默认配置的可执行文件，防止 make 未感知宏变化而命中旧缓存。

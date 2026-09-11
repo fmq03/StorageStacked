@@ -2,7 +2,6 @@
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/activate.sh"
 "$AXI_PYTHON" "$SS_ROOT/env/check_sources.py"
-"$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/patch_ucie.py"
 "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/patch_gem5.py" "$GEM5_HOME"
 cmake -S "$MEMSIM_HOME" -B "$MEMSIM_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_COMPILER=$AXI_CXX"
 cmake --build "$MEMSIM_BUILD" -j "${AXI_JOBS:-6}"
