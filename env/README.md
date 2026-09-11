@@ -1,5 +1,7 @@
 # 统一构建与运行环境
 
+首次配置和依赖包使用请先看[配置与交接指引](../docs/setup.md)。
+
 当前五个内部模块是主仓库普通源码，外部gem5/Vortex/CoralNPU仍按sources.lock.json锁定。
 构建不再对UCIe打补丁；GPU设备源码在gem5_new/gem5int/src/dev/vortex直接维护。
 
@@ -48,6 +50,7 @@ HTML详情按需加载，支持直接双击打开；复制或交接时请带上�
 
 | 子目录 | 内容与锁定依据 |
 |---|---|
+| cmake-sources | Ramulator构建所需的yaml-cpp、spdlog、argparse，源码提交和压缩包SHA256固定在xpu-artifacts.lock.json |
 | xpu-toolchains | Vortex v3.0 RV32 LLVM/GNU/libc/libcrt；固定下载提交与各分片 SHA256 |
 | xpu-tools | Bazel8.6.0，SHA256见 xpu-artifacts.lock.json |
 | xpu-native | GCC13 编译的 LZ4 1.10.0，供 NPU RTL 库使用 |

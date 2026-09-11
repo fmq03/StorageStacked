@@ -25,6 +25,7 @@ bash env/build_xpu.sh
 bash env/run_xpu.sh
 ```
 
+首次安装、依赖包恢复和无依赖包配置见[配置与交接指引](docs/setup.md)。
 环境版本与操作见[env/README.md](env/README.md)，分支协作、历史追溯、源码归属见
 [开发说明](docs/development.md)。外部版本在env/sources.lock.json，内部导入来源在
 [env/internal_imports.json](env/internal_imports.json)。

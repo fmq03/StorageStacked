@@ -15,6 +15,8 @@
   env/bootstrap_xpu.sh、env/build_xpu.sh、env/run_xpu.sh。完整链路显式选择backend aou及memory-backend memsim。
 - gem5设备源码统一维护于gem5_new/gem5int/src/dev，构建自动刷新gem5中的副本。
   共享AoU帧格式在protocol/include。Vortex补丁只改外部SimX和ABI内部。
+- 配置和依赖包说明见docs/setup.md，打包/恢复入口env/dependency_bundle.py。
+  dist/依赖包不入Git；SS_OFFLINE=1仅约束bootstrap下载，Bazel构建的离线性需另行验证。
 - 原目录 /mnt/d/storagestacked 禁止清理。integrate_doc、运行结果、构建产物不提交。
   已有AXI256结果及本次迁移备份保留；新验证使用独立结果目录。
 - 仿真必须保留AXI五通道VCD、两端带时间戳的完整Flit日志及离线数据校验。

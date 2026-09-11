@@ -58,11 +58,13 @@ bootstrap_xpu包含基础环境配置；build_xpu包含mem_sim与gem5构建，�
 | git/ | 三个外部库及八个递归依赖的独立bare仓库，保留固定提交和shallow边界 |
 | cache/mamba/pkgs/ | 两份显式锁文件列出的原始Conda包 |
 | cache/downloads/ | micromamba原始安装包 |
-| cache/xpu-downloads/、cache/xpu-tools/ | Vortex原始工具链分片、LZ4源码和固定Bazel可执行文件 |
+| cache/xpu-downloads/、cache/xpu-tools/ | Vortex原始工具链分片、LZ4、Ramulator的三项CMake源码依赖和固定Bazel可执行文件 |
 | cache/bazel/cache/repos/ | Bazel下载缓存，不包含编译输出目录 |
 | locks/、downloads.json、manifest.json | 版本锁、下载来源及逐文件SHA256清单 |
 
 包中的上游源码是未打补丁的固定版本；系统内安装脚本会安装所需补丁和设备源码。
+Ramulator的三项CMake依赖由bootstrap解压到SS_DEPS_ROOT/cmake-sources，构建直接使用
+这些固定源码，避免CMake再次从Git下载。
 没有复制本机已安装的Conda前缀、修改过加载器的LLVM、NPU/gem5二进制、仿真结果或用户配置。
 
 ```bash
@@ -122,7 +124,7 @@ trace_view.html和memsim_view.html可直接打开，交接时复制整个用例�
 
 - env/sources.lock.json固定三个外部源码版本；内部版本由主仓库提交决定。
 - env/conda-linux-64.lock固定宿主工具环境，xpu-runtime-linux-64.lock固定私有运行库。
-- env/xpu-artifacts.lock.json固定Bazel、LZ4和Vortex工具链的URL与SHA256。
+- env/xpu-artifacts.lock.json固定Bazel、LZ4、Vortex工具链及yaml-cpp/spdlog/argparse的URL与SHA256。
 - 每个结果的environment/manifest.json记录源码、工具版本与二进制哈希；设备运行还记录xpu_manifest.json。
 - 外部子模块在安装后出现modified属于预期，必要补丁保存在主仓库。不要用reset清掉适配。
 - 新shell使用相同SS_DEPS_ROOT；需要手动命令时先source env/activate.sh。

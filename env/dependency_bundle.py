@@ -68,6 +68,8 @@ def write_manifest(folder, modules):
 
 
 def pack(folder, deps):
+    if run('git', 'status', '--porcelain', '--ignore-submodules=all', cwd=ROOT):
+        raise RuntimeError('Commit main-repository source changes before packaging')
     if folder.exists():
         raise RuntimeError('Choose a new package directory: ' + str(folder))
     folder.mkdir(parents=True)
@@ -104,7 +106,7 @@ def pack(folder, deps):
     archive = deps / 'downloads/micromamba-2.3.3.tar.bz2'
     if not archive.exists():
         archive.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(['curl', '-fL', '--retry', '3', MAMBA_URL, '-o', str(archive)], check=True)
+        subprocess.run(['curl', '-fsSL', '--retry', '3', MAMBA_URL, '-o', str(archive)], check=True)
     if digest(archive) != MAMBA_SHA:
         raise RuntimeError('Micromamba archive checksum mismatch')
     copy_file(archive, folder / 'cache/downloads' / archive.name)
@@ -124,6 +126,13 @@ def pack(folder, deps):
         source = deps / relative
         if digest(source) != item['sha256']:
             raise RuntimeError('Vortex archive checksum mismatch: ' + str(source))
+        copy_file(source, folder / 'cache' / relative)
+        downloads.append(dict(item, path='cache/' + relative))
+    for item in artifacts['cmake_sources']:
+        relative = 'xpu-downloads/cmake/' + item['name'] + '-' + item['revision'] + '.tar.gz'
+        source = deps / relative
+        if digest(source) != item['sha256']:
+            raise RuntimeError('CMake source checksum mismatch: ' + str(source))
         copy_file(source, folder / 'cache' / relative)
         downloads.append(dict(item, path='cache/' + relative))
 

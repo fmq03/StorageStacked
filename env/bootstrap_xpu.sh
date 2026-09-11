@@ -33,6 +33,7 @@ assert expected=={p['url']+'#'+p['md5'] for p in packages}, 'Private XPU runtime
 PY
 "$AXI_PYTHON" "$SS_ROOT/env/fetch_vortex_tools.py"
 "$AXI_PYTHON" "$SS_ROOT/env/prepare_vortex_llvm.py"
+"$AXI_PYTHON" "$SS_ROOT/env/prepare_cmake_sources.py"
 cd "$SS_DEPS_ROOT/xpu-downloads"
 [[ -d lz4-1.10.0 ]] || tar -xf lz4-1.10.0.tar.gz
 make -C lz4-1.10.0/lib -j4 CC="$AXI_CC" PREFIX="$SS_DEPS_ROOT/xpu-native" install

@@ -7,6 +7,17 @@ bash "$HET_PROJECT_ROOT/coralnpuint/install.sh"
 mkdir -p "$VORTEX_BUILD"
 cd "$VORTEX_BUILD"
 "$VORTEX_HOME/configure" --xlen=32 --tooldir="$SS_DEPS_ROOT/xpu-toolchains"
+# CMake otherwise clones these sources during the build. Use the same pinned
+# source cache for both network and packaged installations.
+cmake_sources=(yaml-cpp spdlog argparse)
+cmake_args=()
+for dependency in "${cmake_sources[@]}"; do
+    source_dir="$SS_DEPS_ROOT/cmake-sources/$dependency"
+    [[ -f "$source_dir/CMakeLists.txt" ]] || { echo '请先执行 bash env/bootstrap_xpu.sh' >&2; exit 1; }
+    cmake_args+=("-DFETCHCONTENT_SOURCE_DIR_${dependency^^}=$source_dir")
+done
+cmake -S "$VORTEX_HOME/third_party/ramulator" -B "$VORTEX_HOME/third_party/ramulator/build" "${cmake_args[@]}"
+cmake --build "$VORTEX_HOME/third_party/ramulator/build" --parallel 4
 # SoftFloat hardcodes gcc in COMPILE_C; CC alone would be ignored.
 softfloat_compile="$AXI_CC -c -Werror-implicit-function-declaration -DSOFTFLOAT_FAST_INT64 "'$(SOFTFLOAT_OPTS) $(C_INCLUDES) -O2 -o $@'
 make -C "$VORTEX_HOME/third_party" CC="$AXI_CC" CXX="$AXI_CXX" COMPILE_C="$softfloat_compile" -j4
