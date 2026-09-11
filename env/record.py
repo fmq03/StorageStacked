@@ -38,7 +38,7 @@ linked = command("ldd", str(binary))
 if "not found" in linked or "libsystemc" in linked.lower():
     raise SystemExit("Unexpected/missing runtime library:\n" + linked)
 sources = {}
-for name in ["gem5", "gem5_new", "gem5_axi", "axi2flit", "ucie-model", "mem_sim", "coralnpu", "vortex-gpu/vortex"]:
+for name in ["gem5", "gem5_new", "gem5_axi", "axi2flit", "ucie-model", "mem_sim", "protocol", "coralnpu", "vortex-gpu/vortex"]:
     repo = root / name
     head = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "HEAD"],
                           capture_output=True, text=True)

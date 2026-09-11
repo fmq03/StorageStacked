@@ -44,6 +44,9 @@ for kind in ('linkopt','host_linkopt'):
     cmd.append('--'+kind+'=-L'+os.environ['SS_DEPS_ROOT']+'/xpu-native/lib')
 files=subprocess.check_output(cmd,cwd=npu,text=True).splitlines()
 elf=next(npu/s for s in files if s.endswith('/ddr_touch.elf'))
-shutil.copy2(elf,build/'ddr_touch.elf')
+# Bazel outputs are read-only; replace the previous staged file on rebuild.
+staged=build/'ddr_touch.elf'
+staged.unlink(missing_ok=True)
+shutil.copy2(elf,staged)
 PY
 bash "$SS_ROOT/env/build.sh"
