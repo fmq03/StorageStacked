@@ -1,0 +1,4 @@
+# Either HEX or transaction_id,vc,HEX is accepted.
+42,3,00112233445566778899aabbccddeeff
+7,1,deadbeef
+cafebabe01020304
