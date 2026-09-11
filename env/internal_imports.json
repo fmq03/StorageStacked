@@ -1,0 +1,37 @@
+{
+  "ucie-model": {
+    "remote": "https://github.com/wdtastasetg/ucie-model",
+    "remote_branch": "main",
+    "remote_revision": "58a44f352a0444a2e65d1e2dfd24780ce0c14c21",
+    "integrated_revision": "ed641be0b1331bc261874f3097edfcdbad0f9f4b",
+    "import_commit": "eb73794d1a72f4ce401733beffb6e344c743c3f3"
+  },
+  "axi2flit": {
+    "remote": "https://github.com/Jolinjoy666/axi2flit.git",
+    "remote_branch": "main",
+    "remote_revision": "c169ee88123f9ba98b7926265d5074be84d09b5c",
+    "integrated_revision": "d68dc7de37f253be7a9c156504e71520751aba71",
+    "import_commit": "c65dedba6db15781bd721fe0eedfcad762874011"
+  },
+  "mem_sim": {
+    "remote": "https://github.com/GuXing25/mem_sim.git",
+    "remote_branch": "main",
+    "remote_revision": "c38315236f0db45ea80b7ebdc18eca4850b178a6",
+    "integrated_revision": "a4d2f50339743ca91d376f74da1c7e51d94de69d",
+    "import_commit": "16cb4e9cbe70a22c7d99e6b4ad51d5854828ff23"
+  },
+  "gem5_new": {
+    "remote": "https://github.com/hy2581/gem5_new",
+    "remote_branch": "main",
+    "remote_revision": "00532b0ba03ccccb3721e5c8d6ed1db241fd7b96",
+    "integrated_revision": "8f264bc56c002d8e41f7845bf2423edee90e9b41",
+    "import_commit": "9342886667dd35096c53f47d71bf0845817e150b"
+  },
+  "gem5_axi": {
+    "remote": null,
+    "remote_branch": null,
+    "remote_revision": null,
+    "integrated_revision": "ede9cdcca71b0040f0bf00cc8019f9cf4753ab6d",
+    "import_commit": "0e26a8858319994c96c7e8a1f1af20e63f01ef8f"
+  }
+}
