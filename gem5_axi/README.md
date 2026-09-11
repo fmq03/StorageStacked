@@ -1,3 +1,7 @@
+> 本目录现为主仓库普通源码，改动与其他内部模块一起提交和合并。
+> 当前 CPU/GPU/NPU 均已接入在线 mem_sim；统一入口及协作方式见
+> [环境](../env/README.md)和[开发说明](../docs/development.md)。
+
 > 2026-09-11：前端已改为原生 AXI256（32B/拍），见
 > [宽度验证](../integrate_doc/16_native_axi256.md)。旧结果已按后续要求清理，当前报告保留。
 > HTML按需分块加载，复制整个用例目录即可交接，见[可视化说明](../integrate_doc/17_visualization.md)。

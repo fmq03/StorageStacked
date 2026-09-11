@@ -5,7 +5,12 @@
 `../../gem5_axi/memsim_backend.hh/.cc`，由 gem5 原生 SystemC 调度；总入口见 `../../env/README.md`。
 
 宿主顺序：create → 在每个原生时刻尝试 submit → step 一次 → pop 可容纳的响应 → finish → destroy。
-`period_fs` 返回一个原生 step 的物理时长；`clock` 是已完成的 step 数。
+`period_fs` 返回一个原生 step 在宿主时间轴上的时长；`clock` 是已完成的 step 数。
+通道数通过 `config::build_model` 解析，容量、密度和总线宽度保持一致。`scale` 只乘在
+宿主时间映射上，不修改原生模型的速率/tCK配对。配置记录同时保留 tCK_ps、
+effective_tCK_ps、period_fs 及解析出的容量参数。`memsim_stats.txt` 的内存模型内部指标
+仍使用原生时间域；缩放后的端到端延迟以宿主 transactions.csv 和 period_fs 映射为准。
+scale 是整段内存时间轴的敏感度实验，不是重新选择器件速度档。
 宿主不能提前交付 completion_cycle 对应物理时刻之后才产生的响应。
 
 `submit` 返回 1 表示已复制请求、接管 ID；0 表示入口满，应保留相同请求稍后重试；

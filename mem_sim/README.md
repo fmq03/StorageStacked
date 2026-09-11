@@ -1,3 +1,7 @@
+> 本目录现为 StorageStacked 主仓库普通源码，已同步原远端 c383152 并合并在线接口。
+> 整机通过 [integration](integration/README.md) 接入 gem5/AXI/UCIe；构建与运行统一使用
+> [根目录环境入口](../env/README.md)。下文说明内存模型自身的功能与独立运行方式。
+
 # hbm_sim
 
 `hbm_sim` 是面向 HBM3、HBM4、LPDDR5、LPDDR6 的 C++20 内存仿真器。

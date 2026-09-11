@@ -1,3 +1,7 @@
+> 本目录现为 StorageStacked 主仓库普通源码；同级 `ucie-model` 直接维护链路实现，
+> 公共帧格式在 `../protocol/include`。整机使用在线 mem_sim，见[统一环境](../env/README.md)。
+> 下文的 SimpleBurstMemory 用于桥自身的独立测试。
+
 # AXI2FLIT
 
 AXI2FLIT 是使用 C++17 和 SystemC 实现的双向协议桥及联合仿真环境。桥将 SoC 的 AXI 请求编码为固定字节格式的消息，经 UCIe 行为链路送到存储侧响应端；响应端访问存储后，将状态和读数据送回 AXI B/R 通道。

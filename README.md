@@ -29,6 +29,8 @@ bash env/run_xpu.sh
 [开发说明](docs/development.md)。外部版本在env/sources.lock.json，内部导入来源在
 [env/internal_imports.json](env/internal_imports.json)。
 
-已有AXI256验收结果位于results/axi256-20260911；HTML按需加载，复制整个用例目录查看。
+当前统一仓库验收见[results/monorepo-20260911/summary.json](results/monorepo-20260911/summary.json)：
+19项原生测试、7组在线内存、4组GPU/NPU及5组RAM回归通过。
+已有AXI256结果仍在results/axi256-20260911；HTML按需加载，复制整个用例目录查看。
 结果/构建产物和integrate_doc本地交接资料不入库。原/mnt/d/storagestacked保留。
 新提交说明使用中文；本轮只提交到本地，没有配置主仓库远端或执行push。

@@ -177,12 +177,16 @@ CPU 旧 libc workload 的默认 watchdog 为 10ms；新的 freestanding workload
 
 ## 验收记录
 
-三源完整结果：[xpu-20260911-final-r2/summary.json](../results/xpu-20260911-final-r2/summary.json)。
-四组29,253笔请求、29,887个原生子请求；CPU驱动GPU/NPU计算与独立协议/波形校验通过。
-内存尺度×4令GPU设备周期732→1142、NPU周期5600→8589、CPU完成增加102,888ns。
+当前统一仓库回归：[总结果](../results/monorepo-20260911/summary.json)。
+新版 mem_sim 的19项原生测试、7组CPU/定向完整链路、4组GPU/NPU及5组RAM兼容场景通过。
 
-完整在线内存结果：[memsim-20260911-r1/summary.json](../results/memsim-20260911-r1/summary.json)。
-七组共 989 笔父请求、1,014 个 burst、1,699 个原生子请求；CPU 两组均完成 452 次访问，
-校验和 24416。内存时间尺度放慢 4 倍使 CPU 完成时间增加 17,596ns，等于逐请求延迟差之和。
-请求讲解与限制见 [完整链路说明](../integrate_doc/14_online_memsim.md)。
-旧测试内存基线：[unified-20260911-r3/summary.json](../results/unified-20260911-r3/summary.json)。
+- [在线内存](../results/monorepo-20260911/memsim/summary.json)：989笔父请求、1784个原生子请求。
+  CPU两组各452次访问，内存尺度×4使完成增加16286ns，严格等于逐请求延迟差之和。
+- [设备场景](../results/monorepo-20260911/xpu/summary.json)：29253笔父请求、29887个原生子请求。
+  三源内存尺度×4使GPU周期612→1200、NPU周期5068→8359、CPU完成增加103882ns。
+- [RAM兼容](../results/monorepo-20260911/ram/regression_summary.json)：5组通过，包含逐拍与负例检查。
+
+此前AXI256基线及可视化仍在[原报告](../results/axi256-20260911/report.html)。
+本次同步了mem_sim上游并改用配置解析器，相关时序会重算，不能把新旧数字差异归因于仓库布局。
+原始波形、字节日志、源码/二进制哈希和分块HTML均保存在各用例目录。
+本轮未在另一台干净机器或完整离线环境重建，迁移时仍需依锁文件准备依赖。

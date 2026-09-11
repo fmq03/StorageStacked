@@ -1,3 +1,8 @@
+> 本目录现为 StorageStacked 主仓库的一部分，直接维护设备、观察器和外部适配源码。
+> 当前默认是 CPU/GPU/NPU 经 AXI256/UCIe 到在线 mem_sim 的响应闭环，入口为根目录
+> `env/build_xpu.sh` 和 `env/run_xpu.sh`；见[统一环境](../env/README.md)。
+> 下文保留本模块原有离线 HETTrace 工作流说明，不能作为当前整机链路状态或安装入口。
+
 # 异构 XPU 统一 AXI4 HETTrace
 
 本项目把 gem5 中 host CPU、Vortex GPU 和 CoralNPU 的 memory-side 流量放到同一个互连观察点，
