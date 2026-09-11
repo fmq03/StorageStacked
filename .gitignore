@@ -1,9 +1,8 @@
 # Reference delivery stays on disk and is distributed separately when needed.
 /zhongxing-full-environment-20260831/
 
-# 交接材料与本地克隆辅助脚本单独保留。
+# 本地交接资料单独保留。
 /integrate_doc/
-/scripts/clone_local.py
 
 # Workspace build, dependency, result and handoff-package directories.
 /build/

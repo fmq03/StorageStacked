@@ -11,13 +11,17 @@ lock=json.loads((root/'env/xpu-artifacts.lock.json').read_text())
 for name,rel in [('bazel-8.6.0-linux-x86_64','xpu-tools/bin/bazel'),('lz4-1.10.0.tar.gz','xpu-downloads/lz4-1.10.0.tar.gz')]:
     path=deps/rel;item=lock[name]
     if not path.exists():
+        if os.environ.get('SS_OFFLINE')=='1':raise RuntimeError('离线缓存缺少 '+str(path))
         env=dict(os.environ);env.pop('LD_LIBRARY_PATH',None)
         subprocess.run(['curl','-fsSL','--max-time','180','--retry','3',item['url'],'-o',str(path)],check=True,env=env)
     if hashlib.sha256(path.read_bytes()).hexdigest()!=item['sha256']:raise RuntimeError('Checksum mismatch: '+str(path))
 (deps/'xpu-tools/bin/bazel').chmod(0o755)
 PY
 if [[ ! -d "$SS_DEPS_ROOT/xpu-sysroot/conda-meta" ]]; then
-    "$SS_DEPS_ROOT/bootstrap/bin/micromamba" create -y -p "$SS_DEPS_ROOT/xpu-sysroot" --file "$SS_ROOT/env/xpu-runtime-linux-64.lock"
+    offline_args=()
+    [[ ${SS_OFFLINE:-0} != 1 ]] || offline_args+=(--offline)
+    "$SS_DEPS_ROOT/bootstrap/bin/micromamba" --no-rc create -y --root-prefix "$SS_DEPS_ROOT/mamba" \
+        -p "$SS_DEPS_ROOT/xpu-sysroot" --file "$SS_ROOT/env/xpu-runtime-linux-64.lock" "${offline_args[@]}"
 fi
 "$AXI_PYTHON" - <<'PY'
 import json,os

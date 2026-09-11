@@ -18,6 +18,7 @@ groups={
 def fetch(rel):
     p=cache/Path(rel).name
     if not p.exists():
+        if os.environ.get('SS_OFFLINE')=='1':raise RuntimeError('离线缓存缺少 '+str(p))
         tmp=p.with_name(p.name+'.download')
         env=dict(os.environ);env.pop('LD_LIBRARY_PATH',None)
         subprocess.run(['curl','-fsSL','--connect-timeout','20','--max-time','180','--retry','3',base+rel,'-o',str(tmp)],check=True,env=env)
