@@ -1,0 +1,7 @@
+# 同一 source inject_cycle、同一 Stack、同一地址的四个读请求。
+# 用 --stack-dispatch-width 1 分别配合 fcfs/strict_priority，便于从 host response
+# 的 host_request_id 完成顺序观察 Stack ingress QoS；qos 数字越大，优先级越高。
+0 R 0x0000 stack=0 qos=0
+0 R 0x0000 stack=0 qos=2
+0 R 0x0000 stack=0 qos=7
+0 R 0x0000 stack=0 qos=4

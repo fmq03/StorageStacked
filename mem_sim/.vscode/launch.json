@@ -1,0 +1,125 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+
+    {
+      "name": "hbm_sim: HBM4 stream",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-clang-debug/hbm_sim",
+      "args": [
+        "--config",
+        "configs/hbm.cfg",
+        "--standard",
+        "hbm4",
+        "--requests",
+        "128",
+        "--max-cycles",
+        "1000000"
+      ],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "hbm_sim: build debug",
+      "sourceLanguages": ["cpp"]
+    },
+    {
+      "name": "hbm_sim: HBM4 data check (sparse)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-clang-debug/hbm_sim",
+      "args": [
+        "--config",
+        "configs/hbm.cfg",
+        "--standard",
+        "hbm4",
+        "--trace",
+        "examples/data_check.trace",
+        "--requests",
+        "0"
+      ],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "hbm_sim: build debug",
+      "sourceLanguages": ["cpp"]
+    },
+    {
+      "name": "hbm_sim: HBM4 data check (mmap)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-clang-debug/hbm_sim",
+      "args": [
+        "--config",
+        "configs/hbm.cfg",
+        "--standard",
+        "hbm4",
+        "--memory-backend",
+        "mmap_sparse",
+        "--memory-capacity-bytes",
+        "1048576",
+        "--memory-data-file",
+        "/tmp/hbm_sim_debug_mmap.bin"
+      ],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "hbm_sim: build debug",
+      "sourceLanguages": ["cpp"]
+    },
+    {
+      "name": "hbm_sim: HBM4 data check (chunk)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-clang-debug/hbm_sim",
+      "args": [
+        "--config",
+        "configs/hbm.cfg",
+        "--standard",
+        "hbm4",
+        "--memory-backend",
+        "chunk_file",
+        "--memory-capacity-bytes",
+        "1048576",
+        "--memory-data-file",
+        "/tmp/hbm_sim_debug_chunk.bin",
+        "--memory-chunk-size",
+        "65536",
+        "--memory-chunk-cache-entries",
+        "2"
+      ],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "hbm_sim: build debug",
+      "sourceLanguages": ["cpp"]
+    },
+    {
+      "name": "hbm_sim: LPDDR6 stream",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-clang-debug/hbm_sim",
+      "args": [
+        "--config",
+        "configs/lpddr.cfg",
+        "--standard",
+        "lpddr6",
+        "--requests",
+        "128",
+        "--max-cycles",
+        "1000000"
+      ],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "hbm_sim: build debug",
+      "sourceLanguages": ["cpp"]
+    },
+    {
+      "name": "hbm_sim: sequence tests",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-clang-debug/sequence_tests",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "hbm_sim: build debug tests",
+      "sourceLanguages": ["cpp"]
+    }
+  ]
+}

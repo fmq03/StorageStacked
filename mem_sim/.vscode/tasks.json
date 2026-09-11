@@ -1,0 +1,86 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "hbm_sim: configure debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S",
+        "${workspaceFolder}",
+        "-B",
+        "${workspaceFolder}/build-clang-debug",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_CXX_COMPILER=/usr/bin/clang++-18",
+        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "hide": true
+    },
+    {
+      "label": "hbm_sim: build debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build-clang-debug",
+        "--target",
+        "hbm_sim",
+        "--parallel"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "hbm_sim: configure debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$gcc",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "hbm_sim: build debug tests",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build-clang-debug",
+        "--target",
+        "sequence_tests",
+        "timing_boundary_tests",
+        "phy_tests",
+        "config_tests",
+        "--parallel"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "hbm_sim: configure debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "hbm_sim: run all tests",
+      "type": "shell",
+      "command": "ctest",
+      "args": [
+        "--test-dir",
+        "${workspaceFolder}/build-clang-debug",
+        "--output-on-failure"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "hbm_sim: build debug tests",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

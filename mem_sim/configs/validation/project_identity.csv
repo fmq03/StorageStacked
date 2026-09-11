@@ -1,0 +1,11 @@
+capability,project_owner,project_semantics,validation,reference_relation,must_remain_project_specific
+real_payload_memory,hbm_sim,"Request payload commits to MemoryImage and reads return actual bytes/init mask",project_storage_payload_semantics,project_extension,yes
+memory_backends,hbm_sim,"sparse mmap_sparse and chunk_file store payload/init/meta independently of protocol state",file_backed_backend_persistence,independent_storage_architecture,yes
+full_stack_scope,hbm_sim,"HBM4 default models 32 channels and reports stack-level payload/interface bandwidth",project_full_stack_scope,broader_than_single_channel_reference,yes
+dfi_trace_validator,hbm_sim,"DFI-oriented beat/signal events carry real payload and use project-defined mask/source audit fields","dfi_real_payload_roundtrip;dfi_expected_payload_guard",project_extension,yes
+physical_stack_model,hbm_sim,"logical storage maps to die layer tile grid subarray mat cell and microbump coordinates",physical_stack_coordinates,project_extension,yes
+power_thermal_model,hbm_sim,"command energy and sparse TSV-aware 3D RC thermal state attach to touched physical regions",power_thermal_event_path,independent_research_model,yes
+vendor_provenance,hbm_sim,"timing and non-timing parameters retain JEDEC vendor derived or research-default provenance","timing_source_audit;vendor_manifest_complete",project_governance,yes
+hbm_lpddr_focus,hbm_sim,"platform supports HBM3 HBM4 LPDDR5 LPDDR6 without reproducing Ramulator plugin coverage",supported_standard_scope,deliberately_narrower_platform,yes
+streaming_burst_frontend,hbm_sim,"streaming TrafficStream and BW/BR burst traces avoid materializing large workloads",streaming_burst_frontend,project_extension,yes
+data_correctness,hbm_sim,"golden checkpoints mismatch reports read-forward masked writes and ECC shadow validate data","same_address_ordering;data_mismatch_exit_code",project_extension,yes

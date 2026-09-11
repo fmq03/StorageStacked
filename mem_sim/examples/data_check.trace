@@ -1,0 +1,14 @@
+# 最小真实存储与数据正确性轨迹。
+# 写请求携带数据，读请求可携带期望值。
+#
+# 本轨迹有意混合以下场景：
+# - 同地址写后读
+# - 偏移写后读取完整逻辑数据块
+# - 掩码写后执行完整和局部读取
+W 0x1000 data=00112233445566778899aabbccddeeff
+R 0x1000 expect=00112233445566778899aabbccddeeff
+W 0x1008 data=deadbeef
+R 0x1000 expect=0011223344556677deadbeefccddeeff
+W 0x1004 data=a1a2a3a4a5a6a7a8 mask=ff00ff00ff00ff00
+R 0x1000 expect=00112233a155a377a5ada7efccddeeff
+R 0x1004 expect=a155a377a5ada7ef

@@ -1,0 +1,4 @@
+# 稀疏真实存储初始镜像。
+# 格式：地址 [ch=] [pc=] [sid=] [rank=] [bg=] [bank=] [row=] [col=] data=十六进制
+0x1000 ch=0 pc=0 sid=0 rank=0 bg=0 bank=0 row=8 col=0 data=0011223344556677
+0x2000 ch=1 pc=0 sid=0 rank=0 bg=0 bank=1 row=16 col=0 data=deadbeef00000001

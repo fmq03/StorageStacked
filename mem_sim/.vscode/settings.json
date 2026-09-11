@@ -1,0 +1,21 @@
+{
+  "clangd.path": "/usr/bin/clangd-18",
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build-clang-debug",
+    "--background-index",
+    "--clang-tidy",
+    "--completion-style=detailed"
+  ],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "cmake.generator": "Ninja",
+  "cmake.buildDirectory": "${workspaceFolder}/build-clang-debug",
+  "cmake.configureSettings": {
+    "CMAKE_CXX_COMPILER": "/usr/bin/clang++-18",
+    "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+  },
+  "cmake.configureOnOpen": false,
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  }
+}

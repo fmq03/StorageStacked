@@ -1,0 +1,4 @@
+# 三后端跨标准审计使用的最小初始镜像。
+# 不写固定 ch/pc/sid/bank 坐标，由各标准自己的 AddressMapper 从地址推导，
+# 因而同一文件可用于 HBM3/HBM4/LPDDR5/LPDDR6。
+0x1000 data=0011223344556677

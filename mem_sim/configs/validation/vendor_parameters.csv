@@ -1,0 +1,11 @@
+area,parameters,current_source,validation_status,vendor_data_needed,claim_boundary
+read_write_latency,"RL/WL,nCL,nCWL,nRCDRD,nRCDWR",research_default,sensitivity_and_differential,yes,"Do not claim target speed-bin latency"
+row_timing,"nRP,nRAS,nRC,nRTP,nWR,nRRD,nFAW",research_default,sequence_and_differential,yes,"Controller timing behavior only"
+column_timing,"nBL,nCCD,nWTR,nRTW",JEDEC_or_derived,formula_and_sequence,possibly,"Confirm mode and speed-bin before device claims"
+refresh,"tREFI,tRFCab,tRFCpb,tRREFD",JEDEC_or_derived,formula_and_sequence,possibly,"Temperature and density branch must match target"
+rfm_ras,"RAA,RFM,PRAC thresholds and recovery",research_default,protocol_sequence,yes,"Policy studies only"
+ecc_link,"ECC layout,CRC,retry,syndrome,scrub",research_default,interface_accounting,yes,"No vendor RAS effectiveness claim"
+training,"DFI latency,phase,WCK training,DVFS",project_defined,DFI_trace_validation,yes,"Trace-level MC/PHY abstraction only"
+power,"VDD,IDD and per-command energy",research_default,event_accounting,yes,"No absolute power claim"
+thermal,"floorplan,materials,TSV and cooling",research_default,structural_and_sensitivity,yes,"No package temperature prediction claim"
+geometry,"subarray,mat,cell,microbump coordinates",research_default,address_and_storage_tests,yes,"Logical placement abstraction only"
