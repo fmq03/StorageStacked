@@ -1,0 +1,15 @@
+--- a/src/systemc/tlm_bridge/gem5_to_tlm.cc
++++ b/src/systemc/tlm_bridge/gem5_to_tlm.cc
+@@ -160,7 +160,11 @@
+     sc_assert(trans->has_mm());
+ 
+     unsigned int size = packet->getSize();
+-    unsigned char *data = packet->getPtr<unsigned char>();
++    // TLM requires a mutable pointer, but write data is input-only.
++    // Permit masked writes; integration conversion hooks must preserve enables.
++    unsigned char *data = packet->isWrite() ?
++        const_cast<unsigned char *>(packet->getConstPtr<unsigned char>()) :
++        packet->getPtr<unsigned char>();
+ 
+     trans->set_data_length(size);
+     trans->set_streaming_width(size);
