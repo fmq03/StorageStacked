@@ -507,7 +507,8 @@ static void print_summary(const Config& cfg, const Stats& stats, const Summary& 
               << ", transactions=" << cfg.flit_count
               << ", memory_delay=" << cfg.memory_delay_ui << " UI\n";
     std::cout << "flit_format="
-              << (cfg.flit_format == FlitFormat::Standard256 ? "Standard 256B" : "Compact 68B")
+              << (cfg.flit_format == FlitFormat::AouFormat6 ? "AoU Format 6" :
+                  cfg.flit_format == FlitFormat::Standard256 ? "Standard 256B" : "Compact 68B")
               << ", payload_capacity=" << cfg.payload_bytes() << "B\n";
     std::cout << "lanes=" << cfg.num_lanes << ", rate=" << cfg.lane_rate_gtps
               << " GT/s, mod=" << (cfg.modulation == Modulation::PAM4 ? "PAM4" : "NRZ")

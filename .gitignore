@@ -6,3 +6,16 @@ build/
 # SystemC / 仿真临时文件
 *.vcd
 *.wlf
+*.fst
+*.fsdb
+*.a
+*.so
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

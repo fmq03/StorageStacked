@@ -8,12 +8,13 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "aou_format6.h"
 
 // ---------------------------------------------------------------------------
 // Modulation / flit format enums
 // ---------------------------------------------------------------------------
 enum class Modulation { PAM4, NRZ };
-enum class FlitFormat { Standard256, Compact68 };
+enum class FlitFormat { Standard256, Compact68, AouFormat6 };
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -76,12 +77,13 @@ struct Config {
         return modulation == Modulation::PAM4 ? 2U : 1U;
     }
     std::uint32_t flit_bytes() const {
-        return flit_format == FlitFormat::Standard256 ? 256U : 68U;
+        return flit_format == FlitFormat::Compact68 ? 68U : 256U;
     }
     std::uint32_t payload_bytes() const {
         // Standard 256B: 2B flit hdr + 236B TLP + 4B DLLP + 10B reserved + 4B CRC
         // Compact 68B  : 2B flit hdr + 64B data + 2B CRC
-        return flit_format == FlitFormat::Standard256 ? 236U : 64U;
+        return flit_format == FlitFormat::AouFormat6 ? 250U :
+               flit_format == FlitFormat::Standard256 ? 236U : 64U;
     }
     std::uint32_t flit_bits() const { return flit_bytes() * 8U; }
     std::uint32_t serialize_ui() const {
@@ -120,7 +122,7 @@ inline void print_help(const char* prog) {
         << "  --payload-file PATH  external FDI payloads, one hex payload per line\n"
         << "  --response-file PATH write returned payloads as transaction_id,vc,hex\n"
         << "  --memory-delay N     memory-side response latency in UI (default 32)\n"
-        << "  --format F           flit format: standard256 | compact68 (default standard256)\n"
+        << "  --format F           standard256 | compact68 | aou256 (default standard256)\n"
         << "  --lanes N            number of mainband lanes (default 16)\n"
         << "  --rate-gtps X        per-lane rate in GT/s (default 24)\n"
         << "  --mod M              modulation: pam4 | nrz (default pam4)\n"
@@ -169,6 +171,7 @@ inline Config parse_args(int argc, char** argv) {
             const std::string v = need(i);
             if (v == "standard256") cfg.flit_format = FlitFormat::Standard256;
             else if (v == "compact68") cfg.flit_format = FlitFormat::Compact68;
+            else if (v == "aou256") cfg.flit_format = FlitFormat::AouFormat6;
             else throw std::runtime_error("unknown flit format: " + v);
         }
         else if (a == "--lanes") cfg.num_lanes = static_cast<std::uint32_t>(std::stoul(need(i)));
@@ -269,6 +272,21 @@ inline std::vector<std::uint8_t> build_flit(const Config& cfg, std::uint64_t seq
     if (payload.size() > cfg.payload_bytes()) {
         throw std::runtime_error("FDI payload exceeds configured flit payload capacity");
     }
+    if (cfg.flit_format == FlitFormat::AouFormat6) {
+        // FDI 必须提供完整 250 字节，包括纯credit帧；不接受隐式短包补零。
+        if (payload.size() != 250U) throw std::runtime_error("AoU PLP must be exactly 250B");
+        aou_format6::Payload plp{};
+        std::copy(payload.begin(), payload.end(), plp.begin());
+        auto frame = aou_format6::scatter(plp,
+            {static_cast<std::uint8_t>(seq), static_cast<std::uint8_t>(replay ? 1 : 0)});
+        // 两段 CRC16-CCITT 分别保护半帧中的 126 字节，校验值高字节先写。
+        // 校验槽位为 126/127 和 254/255，帧头保存序号及重放标志。
+        const auto ca = crc16_ccitt(frame.data(), 126);
+        const auto cb = crc16_ccitt(frame.data() + 128, 126);
+        frame[126] = ca >> 8; frame[127] = ca & 255;
+        frame[254] = cb >> 8; frame[255] = cb & 255;
+        return {frame.begin(), frame.end()};
+    }
     std::vector<std::uint8_t> b(cfg.flit_bytes(), 0U);
     b[0] = static_cast<std::uint8_t>(seq & 0xFFU);
     b[1] = replay ? 0x01U : 0x00U;
@@ -296,7 +314,11 @@ inline FlitCheck check_flit(const Config& cfg, const std::vector<std::uint8_t>& 
     if (b.size() != cfg.flit_bytes()) return r;
     r.seq8 = b[0];
     r.replay_flag = (b[1] & 0x01U) != 0U;
-    if (cfg.flit_format == FlitFormat::Standard256) {
+    if (cfg.flit_format == FlitFormat::AouFormat6) {
+        const auto ca = crc16_ccitt(b.data(), 126);
+        const auto cb = crc16_ccitt(b.data() + 128, 126);
+        r.crc_ok = ca == ((b[126] << 8) | b[127]) && cb == ((b[254] << 8) | b[255]);
+    } else if (cfg.flit_format == FlitFormat::Standard256) {
         const std::uint16_t ca = crc16_ccitt(b.data(), 128U);
         const std::uint16_t cb = crc16_ccitt(b.data() + 128U, 124U);
         const std::uint16_t ga = static_cast<std::uint16_t>((b[252] << 8U) | b[253]);
@@ -313,7 +335,18 @@ inline FlitCheck check_flit(const Config& cfg, const std::vector<std::uint8_t>& 
 // ---------------------------------------------------------------------------
 // Stats (single-threaded SystemC kernel: no locking needed)
 // ---------------------------------------------------------------------------
+// Optional passive observer: must not wait, notify, or modify model state.
+#include <functional>
 struct LinkStats {
+    using Observer = std::function<void(const char*, std::uint64_t, std::uint64_t,
+        bool, const std::vector<std::uint8_t>&, const char*)>;
+    Observer observer;
+    void observe(const char* event, std::uint64_t seq, std::uint64_t id,
+                 bool replay, const std::vector<std::uint8_t>& bytes,
+                 const char* status) const {
+        if (observer) observer(event, seq, id, replay, bytes, status);
+    }
+
     std::uint64_t tx_new_flits = 0;
     std::uint64_t tx_replay_flits = 0;
     std::uint64_t ack_count = 0;

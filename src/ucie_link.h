@@ -17,6 +17,16 @@
 
 namespace ucie_detail {
 
+// 检查公开 FDI 接口的载荷长度，供链路接收入口与组件测试共用。
+inline void require_valid_fdi(const Config& cfg, const FdiFlit& flit) {
+    if (flit.payload.size() != cfg.payload_bytes())
+        throw std::runtime_error("FDI payload is not padded to configured size");
+    if (flit.valid_bytes > flit.payload.size())
+        throw std::runtime_error("FDI valid_bytes exceeds payload");
+    if (cfg.flit_format == FlitFormat::AouFormat6 && flit.valid_bytes != 250U)
+        throw std::runtime_error("AoU FDI valid_bytes must be exactly 250");
+}
+
 // Internal link frame. This type never crosses a public UcieLink FDI port.
 struct Frame {
     std::vector<std::uint8_t> bytes;
@@ -48,8 +58,17 @@ inline FdiFlit unpack_fdi(const Config& cfg, const Frame& frame) {
         throw std::runtime_error("received frame is shorter than the configured FDI payload");
     }
     FdiFlit flit;
-    flit.payload.assign(frame.bytes.begin() + 2U,
-                        frame.bytes.begin() + 2U + cfg.payload_bytes());
+    if (cfg.flit_format == FlitFormat::AouFormat6) {
+        if (frame.bytes.size() != 256U)
+            throw std::runtime_error("AoU physical flit must be exactly 256B");
+        aou_format6::Frame physical{};
+        std::copy(frame.bytes.begin(), frame.bytes.end(), physical.begin());
+        const auto plp = aou_format6::gather(physical);
+        flit.payload.assign(plp.begin(), plp.end());
+    } else {
+        flit.payload.assign(frame.bytes.begin() + 2U,
+                            frame.bytes.begin() + 2U + cfg.payload_bytes());
+    }
     flit.valid_bytes = frame.valid_bytes;
     flit.transaction_id = frame.transaction_id;
     flit.vc = frame.vc;
@@ -100,13 +119,7 @@ SC_MODULE(TxAdapter) {
                 if (fdi_in->num_available() > 0 &&
                     retry_buffer_.size() < cfg_.retry_buffer_size) {
                     FdiFlit flit = fdi_in->read();
-                    if (flit.payload.size() != cfg_.payload_bytes()) {
-                        throw std::runtime_error(direction_ +
-                                                 " FDI payload is not padded to configured size");
-                    }
-                    if (flit.valid_bytes > flit.payload.size()) {
-                        throw std::runtime_error(direction_ + " FDI valid_bytes exceeds payload");
-                    }
+                    require_valid_fdi(cfg_, flit);
                     const std::uint64_t seq = next_seq_++;
                     retry_buffer_[seq] = Entry{std::move(flit)};
                     stats_->max_retry_buffer_occupancy = std::max<std::uint64_t>(
@@ -181,7 +194,11 @@ private:
         frame.replay = replay;
         frame.transaction_start = entry.flit.transaction_start;
         frame.fdi_time = entry.flit.fdi_time;
+        if (!replay) stats_->observe("TX_FDI", seq, frame.transaction_id,
+            false, entry.flit.payload, "accepted");
         frame.bytes = build_flit(cfg_, seq, entry.flit.payload, replay);
+        stats_->observe("TX_FRAME", seq, frame.transaction_id, replay,
+                        frame.bytes, "serialization_start");
         wait(static_cast<double>(cfg_.serialize_ui()) * ui_);
         phy_out->write(frame);
         last_progress_ = sc_core::sc_time_stamp();
@@ -284,10 +301,16 @@ SC_MODULE(RxAdapter) {
             const std::uint8_t diff =
                 static_cast<std::uint8_t>((check.seq8 - expected8) & 0xFFU);
 
+            stats_->observe("RX_FRAME", frame.seq, frame.transaction_id, frame.replay,
+                frame.bytes, !check.crc_ok ? "crc_error" :
+                diff == 0U ? "in_order" : diff > 127U ? "duplicate" : "seq_error");
             if (check.crc_ok && diff == 0U) {
                 rx_state_ = RxState::NoRetry;
                 frames_since_nak_ = 0;
-                fdi_out->write(unpack_fdi(cfg_, frame));
+                const auto delivered = unpack_fdi(cfg_, frame);
+                fdi_out->write(delivered);
+                stats_->observe("RX_FDI", frame.seq, frame.transaction_id,
+                    frame.replay, delivered.payload, "delivered");
                 fb_out->write(FbMsg{false, expected_seq_});
                 ++expected_seq_;
             } else if (check.crc_ok && diff > 127U) {
