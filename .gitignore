@@ -1,0 +1,21 @@
+# Reproducible simulation output and workload executables.
+/results/
+/build/
+/build-*/
+/m5out/
+__pycache__/
+*.py[cod]
+*.o
+*.d
+*.a
+*.so
+*.vcd
+*.fst
+*.fsdb
+*.log
+.venv/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

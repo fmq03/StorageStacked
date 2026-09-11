@@ -1,0 +1,12 @@
+--- a/src/systemc/utils/vcd.cc
++++ b/src/systemc/utils/vcd.cc
+@@ -602,7 +602,8 @@
+     {
+         const int w = this->width();
+         std::string str;
+-        str.reserve(w);
++        // Indexed writes require a sized string, not only reserved capacity.
++        str.resize(w);
+ 
+         const uint64_t val =
+             static_cast<uint64_t>(this->value()) & gem5::mask(sizeof(T) * 8);
