@@ -1,0 +1,112 @@
+--- a/sim/simx/gem5/vortex_gpgpu_dev.hh
++++ b/sim/simx/gem5/vortex_gpgpu_dev.hh
+@@ -39,6 +39,7 @@
+ #ifndef __DEV_VORTEX_VORTEX_GPGPU_DEV_HH__
+ #define __DEV_VORTEX_VORTEX_GPGPU_DEV_HH__
+ 
++#include "base/coroutine.hh"
+ #include "dev/dma_device.hh"
+ #include "dev/io_device.hh"
+ #include "params/VortexGPGPU.hh"
+@@ -193,6 +194,10 @@
+     const int64_t     traceAddrOffset_;
+ 
+     // Event scheduling
++    using CpCoroutine = Coroutine<void, void>;
++    std::unique_ptr<CpCoroutine> cpCoroutine_;
++    CpCoroutine::CallerType* cpYield_ = nullptr;
++    bool cpBusy_ = false;
+     EventFunctionWrapper cpTickEvent_;
+     EventFunctionWrapper vortexTickEvent_;
+ 
+--- a/sim/simx/gem5/vortex_gpgpu_dev.cc
++++ b/sim/simx/gem5/vortex_gpgpu_dev.cc
+@@ -221,7 +221,12 @@
+     panic_if(addr > pinSize_ || size > pinSize_ - addr,
+              "VortexGPGPU CP read outside BAR: addr=%#llx size=%u",
+              static_cast<unsigned long long>(addr), size);
+-    sys->physProxy.readBlob(pinAddr_ + addr, dst, size);
++    panic_if(!cpYield_, "Vortex timing read outside a CP continuation");
++    enqueueCpTiming(addr, false, nullptr, size);
++    startNextCpDma();
++    (*cpYield_)();
++    panic_if(dmaData_.size() != size, "Vortex CP response size mismatch");
++    std::copy(dmaData_.begin(), dmaData_.end(), dst);
+ }
+ 
+ void
+@@ -230,7 +235,10 @@
+     panic_if(addr > pinSize_ || size > pinSize_ - addr,
+              "VortexGPGPU CP write outside BAR: addr=%#llx size=%u",
+              static_cast<unsigned long long>(addr), size);
+-    sys->physProxy.writeBlob(pinAddr_ + addr, src, size);
++    panic_if(!cpYield_, "Vortex timing write outside a CP continuation");
++    enqueueCpTiming(addr, true, src, size);
++    startNextCpDma();
++    (*cpYield_)();
+ }
+ 
+ void
+@@ -355,6 +363,8 @@
+         activeCpDma_.reset();
+         dmaKind_ = DmaKind::None;
+         startNextCpDma();
++        if (cpCoroutine_ && !cpCoroutine_->finished())
++            cpResumeNeeded_ = true;
+         resumeCpIfReady();
+         return;
+     }
+@@ -370,7 +380,7 @@
+     if (!cpResumeNeeded_)
+         return;
+     cpResumeNeeded_ = false;
+-    if (abi_.cp_has_work(deviceHandle_) && !cpTickEvent_.scheduled())
++    if (((cpCoroutine_ && !cpCoroutine_->finished()) || abi_.cp_has_work(deviceHandle_)) && !cpTickEvent_.scheduled())
+         schedule(cpTickEvent_, clockEdge(Cycles(1)));
+ }
+ 
+@@ -462,7 +472,7 @@
+         abi_.set_memory_backend(deviceHandle_,
+                                 &VortexGPGPU::memoryReadTrampoline,
+                                 &VortexGPGPU::memoryWriteTrampoline,
+-                                &VortexGPGPU::cpTimingTrampoline, this);
++                                nullptr, this);
+         abi_.set_core_timing_backend(deviceHandle_,
+                                      &VortexGPGPU::coreTimingTrampoline, this);
+         inform("VortexGPGPU: core + CP DMA routed through gem5 timing memory");
+@@ -494,16 +504,28 @@
+ void
+ VortexGPGPU::cpTick()
+ {
+-    ++cpCycles_;
+-    const bool still_busy = abi_.cp_tick(deviceHandle_);
+-    cpResumeNeeded_ = still_busy;
+-    startNextCpDma();
+-    if (activeCpDma_ || !cpDmaQueue_.empty())
++    if (!timingMemory_) {
++        ++cpCycles_;
++        if (abi_.cp_tick(deviceHandle_))
++            schedule(cpTickEvent_, clockEdge(Cycles(1)));
++        return;
++    }
++    if (!cpCoroutine_ || cpCoroutine_->finished()) {
++        ++cpCycles_;
++        cpCoroutine_ = std::make_unique<CpCoroutine>(
++            [this](CpCoroutine::CallerType& yield) {
++                cpYield_ = &yield;
++                cpBusy_ = abi_.cp_tick(deviceHandle_);
++                cpYield_ = nullptr;
++            }, false);
++    }
++    (*cpCoroutine_)();
++    if (!cpCoroutine_->finished())
+         return;
+     cpResumeNeeded_ = false;
+-    if (still_busy) {
++    if (cpBusy_)
+         schedule(cpTickEvent_, clockEdge(Cycles(1)));
+-    }
++
+     // Idle drop-out: no reschedule. PIO writes that arm new work will
+     // call maybeWakeCp() and reschedule us.
+ }

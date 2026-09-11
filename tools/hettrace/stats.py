@@ -31,6 +31,9 @@ def bandwidth_timeline(directory, window_ticks):
     entries = discover(directory)
     if not entries:
         return [], []
+    frequencies = {hdr.ticks_per_second for _, hdr in entries}
+    if len(frequencies) != 1 or next(iter(frequencies)) <= 0:
+        raise ValueError("trace 必须使用相同且为正的 ticks_per_second")
 
     src_names = []
     all_recs = []
@@ -123,6 +126,8 @@ def rw_and_region_breakdown(directory):
 
 
 def format_report(directory, window_ticks=1000000, line_bytes=64):
+    entries = discover(directory)
+    frequency = entries[0][1].ticks_per_second if entries else addrmap.TICKS_PER_SECOND
     L = []
     a = L.append
     a("=" * 72)
@@ -160,7 +165,7 @@ def format_report(directory, window_ticks=1000000, line_bytes=64):
     windows, src_names = bandwidth_timeline(directory, window_ticks)
     a(
         "带宽时间线 (窗口 %d tick = %.3f us, 共 %d 窗):"
-        % (window_ticks, window_ticks / (addrmap.TICKS_PER_SECOND / 1e6), len(windows))
+        % (window_ticks, window_ticks / (frequency / 1e6), len(windows))
     )
     if windows:
         a("  %-16s %s" % ("窗口起始", " ".join("%12s" % n for n in src_names)))

@@ -1,0 +1,15 @@
+--- core_mini_axi_wrapper.h
++++ core_mini_axi_wrapper.h
+@@ -127,6 +127,12 @@
+ 
+   void Step() { clock_.Step(); }
+ 
++  std::shared_ptr<bool> EnqueueWriteWord(uint32_t addr, uint32_t value) {
++    uint8_t bytes[4];
++    for (unsigned i = 0; i < 4; ++i) bytes[i] = value >> (8 * i);
++    return slave_write_driver_.WriteTransaction(0, addr, absl::Span<const uint8_t>(bytes, 4));
++  }
++
+   CoralNPUMailbox& mailbox() { return mailbox_; }
+ 
+   const CoralNPUMailbox& mailbox() const { return mailbox_; }

@@ -802,6 +802,41 @@ def test_validate_rejects_wrong_global_timebase_and_source_name():
         shutil.rmtree(d)
 
 
+def test_validate_explicit_fs_timebase():
+    d = tmpdir()
+    try:
+        writer = synth.SynthWriter(d, "host")
+        writer.emit(1000000, addrmap.REGIONS["shared_buffer"][0], 8, OP_READ)
+        writer.emit(2000000, addrmap.REGIONS["shared_buffer"][0], 8, OP_READ)
+        writer.close()
+        rewrite_header(writer.path, ticks_per_second=10**15, clock_period_ticks=500000)
+        meta_path = writer.path + ".meta.json"
+        if os.path.exists(meta_path):
+            with open(meta_path) as f:
+                meta = json.load(f)
+            meta.update(ticks_per_second=10**15, clock_period_ticks=500000)
+            with open(meta_path, "w") as f:
+                json.dump(meta, f)
+        issues, summaries = validate.validate_dir(d, require_heterogeneous=False,
+                                                 ticks_per_second=10**15)
+        check(not any(i.level == "ERROR" for i in issues),
+              "explicit fs timebase should validate: %r" % (issues,))
+        check("0.001 us" in validate.format_report(issues, summaries),
+              "1000000 fs must be reported as 0.001 us")
+        check("0.001 us" in stats.format_report(d, window_ticks=1000000),
+              "bandwidth window must use trace timebase")
+        issues, _ = validate.validate_dir(d, require_heterogeneous=False)
+        check(any(i.level == "ERROR" and "ticks_per_second" in i.message for i in issues),
+              "default validator must still enforce the default timebase")
+        rewrite_header(writer.path, clock_period_ticks=500)
+        issues, _ = validate.validate_dir(d, require_heterogeneous=False,
+                                         ticks_per_second=10**15)
+        check(any(i.level == "ERROR" and "clock_period_ticks" in i.message for i in issues),
+              "ps clock period in fs trace must be rejected")
+    finally:
+        shutil.rmtree(d)
+
+
 def test_validate_rejects_duplicate_source_ids():
     d = tmpdir()
     try:

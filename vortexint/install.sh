@@ -44,6 +44,7 @@ PATCH_FILES="vortex_gpgpu.h vortex_gpgpu.cpp \
              vortex_gpgpu_dev.hh vortex_gpgpu_dev.cc VortexGPGPU.py"
 TIMING_PATCH="$SELF_DIR/patches/timing_feedback.patch"
 AXI_PATCH="$SELF_DIR/patches/axi_transactions.patch"
+ONLINE_PATCH="$SELF_DIR/patches/online_cp.patch"
 TIMING_TARGETS="sim/simx/mem/memory.h sim/simx/mem/memory.cpp \
 sim/simx/processor.h sim/simx/processor_impl.h sim/simx/processor.cpp \
 sim/simx/gem5/vortex_gpgpu.h sim/simx/gem5/vortex_gpgpu.cpp \
@@ -139,6 +140,9 @@ revert_axi_patch() {
 if [ "$REVERT" = "1" ]; then
     echo "还原 Vortex timing feedback 与 trace tap:"
     # 严格按补丁栈逆序卸载。
+    if patch -R -p1 -s -f --dry-run -d "$VORTEX_HOME" -i "$ONLINE_PATCH" >/dev/null 2>&1; then
+        patch -R -p1 -s -d "$VORTEX_HOME" -i "$ONLINE_PATCH"
+    fi
     revert_axi_patch
     revert_timing_patch
     for f in $PATCH_FILES; do revert_patch "$f"; done
@@ -158,7 +162,10 @@ install -m 0644 "$SELF_DIR/vortex_trace.h" "$GEM5_DIR/"
 echo "  vortex_trace.h -> $GEM5_DIR"
 
 AXI_STACK_PRESENT=0
-if axi_patch_installed; then
+if patch -R -p1 -s -f --dry-run -d "$VORTEX_HOME" -i "$ONLINE_PATCH" >/dev/null 2>&1; then
+    echo "  online CP continuation 补丁栈已在"
+    AXI_STACK_PRESENT=1
+elif axi_patch_installed; then
     # 最上层补丁成立就证明它所依赖的 timing/trace 基线都在；不要再用下层
     # patch 的旧上下文反向探测，否则会把正常的 patch stack 误判成损坏。
     echo "  trace + timing + AXI transaction 补丁栈已在"
@@ -174,6 +181,10 @@ fi
 if [ "$AXI_STACK_PRESENT" = "0" ]; then
     apply_timing_patch
     apply_axi_patch
+fi
+if ! patch -R -p1 -s -f --dry-run -d "$VORTEX_HOME" -i "$ONLINE_PATCH" >/dev/null 2>&1; then
+    patch -p1 -s -f --dry-run -d "$VORTEX_HOME" -i "$ONLINE_PATCH"
+    patch -p1 -s -d "$VORTEX_HOME" -i "$ONLINE_PATCH"
 fi
 
 cat <<EOF

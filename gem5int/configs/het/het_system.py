@@ -506,4 +506,5 @@ def main():
         raise SystemExit(1)
 
 
-main()
+if __name__ in ("__main__", "__m5_main__"):
+    main()

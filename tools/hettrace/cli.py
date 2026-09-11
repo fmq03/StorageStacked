@@ -69,7 +69,8 @@ def _parse_sources(raw):
 
 def cmd_validate(args):
     issues, summaries = validate.validate_dir(
-        args.trace_dir, require_heterogeneous=not args.allow_single_source
+        args.trace_dir, require_heterogeneous=not args.allow_single_source,
+        ticks_per_second=args.ticks_per_second,
     )
     print(validate.format_report(issues, summaries))
     return 1 if any(i.level == "ERROR" for i in issues) else 0
@@ -268,6 +269,9 @@ def build_parser():
 
     v = sub.add_parser("validate", help="校验 trace 是否可用于分析")
     v.add_argument("trace_dir")
+    v.add_argument("--ticks-per-second", type=_positive_int,
+                   default=addrmap.TICKS_PER_SECOND,
+                   help="Expected global tick frequency (default: address map)")
     v.add_argument(
         "--allow-single-source", action="store_true",
         help="独立设备 bring-up：仍做文件内全部检查，但不要求跨源交接",

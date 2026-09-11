@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -60,6 +61,7 @@ class HetAxiMonitor : public SimObject
       public:
         Source source = Source::Host;
         bool write = false;
+        int allocatedId = -1;
         std::vector<LoggedTxn> transactions;
     };
 
@@ -170,6 +172,9 @@ class HetAxiMonitor : public SimObject
     const bool traceInstFetch;
     const unsigned axiDataBytes;
     const unsigned axiIdBits;
+    const bool uniquePacketIds;
+    std::array<std::set<uint16_t>, 3> liveIds;
+    std::array<uint32_t, 3> nextIds{};
     const std::vector<std::string> vortexPatterns;
     const std::vector<std::string> coralNpuPatterns;
     bool active = false;

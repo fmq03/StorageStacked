@@ -41,6 +41,7 @@ HetAxiMonitor::HetAxiMonitor(const Params &p)
       traceInstFetch(p.trace_inst_fetch),
       axiDataBytes(p.axi_data_bytes),
       axiIdBits(p.axi_id_bits),
+      uniquePacketIds(p.unique_packet_ids),
       vortexPatterns(p.vortex_requestor_patterns),
       coralNpuPatterns(p.coralnpu_requestor_patterns)
 {
@@ -79,21 +80,27 @@ HetAxiMonitor::startup()
     if (!enable)
         return;
 
+    // The address-map defaults use ps; native gem5/SystemC integrations may
+    // select fs. Keep record ticks unchanged and describe their actual scale.
+    const auto frequency = sim_clock::Frequency;
+    const auto period = [frequency](uint64_t ticks) {
+        return ticks * frequency / hettrace::kTicksPerSecond;
+    };
     const bool host_open = traceHost && hostWriter.Open(
         hettrace::kSrcHost, "host", hettrace::kLevelInterconnect,
-        hettrace::kClockPeriodTicks_host, axiDataBytes,
-        hettrace::kMapAddrBits, true);
+        period(hettrace::kClockPeriodTicks_host), axiDataBytes,
+        hettrace::kMapAddrBits, true, frequency);
     const bool vortex_open = traceVortex && vortexWriter.Open(
         hettrace::kSrcVortex, "vortex", hettrace::kLevelInterconnect,
-        hettrace::kClockPeriodTicks_vortex, axiDataBytes,
-        hettrace::kMapAddrBits, true);
+        period(hettrace::kClockPeriodTicks_vortex), axiDataBytes,
+        hettrace::kMapAddrBits, true, frequency);
     const bool npu_open = traceCoralNpu && coralNpuWriter.Open(
         hettrace::kSrcCoralnpu, "coralnpu", hettrace::kLevelInterconnect,
-        hettrace::kClockPeriodTicks_coralnpu, axiDataBytes,
+        period(hettrace::kClockPeriodTicks_coralnpu), axiDataBytes,
         // CoralNPU 的 timing seam 保留原生地址/ID/WSTRB，但到这个
         // 统一点时已是 gem5 Packet。AW/W/B/AR/R 事件、LEN/SIZE/
         // BURST/USER 与响应时刻都由 monitor 重构，不能冒充 pin trace。
-        hettrace::kNpuAddrBits, true);
+        hettrace::kNpuAddrBits, true, frequency);
     active = host_open || vortex_open || npu_open;
     if (!active)
         return;
@@ -248,7 +255,25 @@ void
 HetAxiMonitor::emitBegin(TraceSenderState &state)
 {
     auto &trace_writer = writer(state.source);
+    if (uniquePacketIds) {
+        // gem5 packets from one requestor may complete out of order. Giving
+        // all of them the requestor's ID would invent an AXI ordering error.
+        const auto source = static_cast<unsigned>(state.source);
+        const uint32_t count = uint32_t(1) << axiIdBits;
+        for (uint32_t tried = 0; tried < count; ++tried) {
+            const uint16_t candidate = nextIds[source];
+            nextIds[source] = (nextIds[source] + 1) % count;
+            if (liveIds[source].insert(candidate).second) {
+                state.allocatedId = candidate;
+                break;
+            }
+        }
+        fatal_if(state.allocatedId < 0,
+                 "HetAxiMonitor: synthetic IDs exhausted; increase axi_id_bits");
+    }
     for (auto &logged : state.transactions) {
+        if (uniquePacketIds)
+            logged.txn.axi_id = state.allocatedId;
         logged.txn.txn = trace_writer.NextTxn();
         if (state.write) {
             trace_writer.BeginWrite(curTick(), logged.txn,
@@ -269,6 +294,11 @@ HetAxiMonitor::emitComplete(const TraceSenderState &state, uint8_t response,
             trace_writer.CompleteWrite(completion_tick, logged.txn, response);
         else
             trace_writer.CompleteRead(completion_tick, logged.txn, response);
+    }
+    if (uniquePacketIds) {
+        const auto source = static_cast<unsigned>(state.source);
+        const auto removed = liveIds[source].erase(state.allocatedId);
+        panic_if(removed != 1, "HetAxiMonitor: synthetic ID released twice");
     }
 }
 

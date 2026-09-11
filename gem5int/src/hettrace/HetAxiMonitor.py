@@ -32,6 +32,9 @@ class HetAxiMonitor(SimObject):
         16, "Width in bytes used for packet-to-AXI4 projection"
     )
     axi_id_bits = Param.Unsigned(8, "AXI ID width used for synthesized IDs")
+    unique_packet_ids = Param.Bool(
+        False, "Allocate a synthetic ID per live packet when responses may reorder"
+    )
 
     # Requestor names are allocated by gem5 from SimObject paths.  Keeping the
     # match strings configurable makes the classification auditable without

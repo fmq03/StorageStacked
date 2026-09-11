@@ -39,7 +39,7 @@ SrcSummary = namedtuple(
     "SrcSummary",
     "name src_id level count reads writes bytes first_tick last_tick "
     "regions unmapped burst_beats data_records transactions chan_counts "
-    "resp_errors synth",
+    "resp_errors synth ticks_per_second",
 )
 
 AxiCheck = namedtuple(
@@ -483,6 +483,7 @@ def _summarize(path, hdr):
         chan_counts=chan_counts,
         resp_errors=resp_errors,
         synth=synth_records == count and count > 0,
+        ticks_per_second=hdr.ticks_per_second,
     )
     axi = AxiCheck(
         unmatched_data=unbound_data if saw_addr_channel else 0,
@@ -494,7 +495,8 @@ def _summarize(path, hdr):
     return summary, non_monotonic, seq_gaps, bad_accessor, axi
 
 
-def validate_dir(directory, require_heterogeneous=True):
+def validate_dir(directory, require_heterogeneous=True,
+                 ticks_per_second=addrmap.TICKS_PER_SECOND):
     """返回 ``(issues, summaries)``。
 
     默认要求至少两个来源和真实交接区，用于正式异构分析。独立设备 bring-up
@@ -553,7 +555,8 @@ def validate_dir(directory, require_heterogeneous=True):
                 )
             )
         if (
-            hdr.ticks_per_second != addrmap.TICKS_PER_SECOND
+            ticks_per_second <= 0
+            or hdr.ticks_per_second != ticks_per_second
             or hdr.clock_period_ticks <= 0
         ):
             issues.append(
@@ -564,7 +567,7 @@ def validate_dir(directory, require_heterogeneous=True):
                     "clock_period_ticks=%d"
                     % (
                         hdr.ticks_per_second,
-                        addrmap.TICKS_PER_SECOND,
+                        ticks_per_second,
                         hdr.clock_period_ticks,
                     ),
                 )
@@ -734,14 +737,16 @@ def validate_dir(directory, require_heterogeneous=True):
                     )
                 )
             _sid, exp_level, _mhz, exp_period = addrmap.SOURCES[canonical]
-            if hdr.clock_period_ticks != exp_period:
+            if (hdr.clock_period_ticks * addrmap.TICKS_PER_SECOND !=
+                    exp_period * hdr.ticks_per_second):
                 issues.append(
                     Issue(
                         "ERROR",
                         src,
                         "clock_period_ticks=%d，addrmap.json 声明为 %d —— "
                         "时钟域配置不一致"
-                        % (hdr.clock_period_ticks, exp_period),
+                        % (hdr.clock_period_ticks,
+                           exp_period * hdr.ticks_per_second // addrmap.TICKS_PER_SECOND),
                     )
                 )
             if hdr.level != addrmap.LEVELS[exp_level]:
@@ -1027,7 +1032,7 @@ def format_report(issues, summaries):
                 s.first_tick,
                 s.last_tick,
                 span,
-                span / (addrmap.TICKS_PER_SECOND / 1e6),
+                span / (s.ticks_per_second / 1e6) if s.ticks_per_second > 0 else 0,
             )
         )
     a("")

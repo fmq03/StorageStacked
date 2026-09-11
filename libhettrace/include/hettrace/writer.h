@@ -114,7 +114,8 @@ class TraceWriter {
     // 推导的，不是从真 AXI 信号读到的；它会打在每条记录的 kFlagSynth 上。
     bool Open(uint16_t src_id, const char* src_name, TapLevel level,
               uint64_t clock_period_ticks, uint16_t axi_data_bytes = 16,
-              uint16_t axi_addr_bits = kMapAddrBits, bool synth = false) {
+              uint16_t axi_addr_bits = kMapAddrBits, bool synth = false,
+              uint64_t ticks_per_second = kTicksPerSecond) {
         Close();
 
         const char* dir = std::getenv("HETTRACE_DIR");
@@ -147,6 +148,7 @@ class TraceWriter {
         src_name_           = src_name;
         level_              = level;
         clock_period_ticks_ = clock_period_ticks;
+        ticks_per_second_   = ticks_per_second;
         axi_data_bytes_     = axi_data_bytes;
         axi_addr_bits_      = axi_addr_bits;
         synth_              = synth;
@@ -490,7 +492,7 @@ class TraceWriter {
                          static_cast<unsigned>(src_id_), src_name_.c_str(),
                          static_cast<unsigned>(level_));
             std::fprintf(fp_, "# ticks_per_second=%llu clock_period_ticks=%llu\n",
-                         static_cast<unsigned long long>(kTicksPerSecond),
+                         static_cast<unsigned long long>(ticks_per_second_),
                          static_cast<unsigned long long>(clock_period_ticks_));
             std::fprintf(fp_, "# axi_data_bytes=%u axi_addr_bits=%u\n",
                          static_cast<unsigned>(axi_data_bytes_),
@@ -505,7 +507,7 @@ class TraceWriter {
         std::memcpy(h.magic, kMagic, sizeof(kMagic));
         h.version            = kFormatVersion;
         h.record_size        = static_cast<uint32_t>(sizeof(Record));
-        h.ticks_per_second   = kTicksPerSecond;
+        h.ticks_per_second   = ticks_per_second_;
         h.clock_period_ticks = clock_period_ticks_;
         h.src_id             = src_id_;
         h.level              = static_cast<uint8_t>(level_);
@@ -534,7 +536,7 @@ class TraceWriter {
         std::fprintf(mf, "  \"axi_addr_bits\": %u,\n",
                      static_cast<unsigned>(axi_addr_bits_));
         std::fprintf(mf, "  \"ticks_per_second\": %llu,\n",
-                     static_cast<unsigned long long>(kTicksPerSecond));
+                     static_cast<unsigned long long>(ticks_per_second_));
         std::fprintf(mf, "  \"clock_period_ticks\": %llu,\n",
                      static_cast<unsigned long long>(clock_period_ticks_));
         std::fprintf(mf, "  \"emitted\": %llu,\n",
@@ -569,6 +571,7 @@ class TraceWriter {
     uint16_t            axi_addr_bits_      = kMapAddrBits;
     TapLevel            level_              = kLevelPostLlc;
     uint64_t            clock_period_ticks_ = 0;
+    uint64_t            ticks_per_second_ = kTicksPerSecond;
     uint32_t            seq_                = 0;
     uint32_t            txn_                = 0;
     size_t              cap_                = 65536;

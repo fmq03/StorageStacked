@@ -479,6 +479,54 @@ static void TestFlushAcrossBuffer() {
     CHECK(seq_ok, "seq 应连续无洞");
 }
 
+static void TestRuntimeTimebase() {
+    setenv("HETTRACE_DIR", g_dir.c_str(), 1);
+    setenv("HETTRACE_FILTER", "all", 1);
+    for (const char* format : {"bin", "text"}) {
+        setenv("HETTRACE_FORMAT", format, 1);
+        const std::string name = std::string("host_fs_") + format;
+        TraceWriter w;
+        CHECK(w.Open(kSrcHost, name.c_str(), kLevelInterconnect,
+                     500000, 16, 64, true, 1000000000000000ull),
+              "1fs timebase writer should open");
+        w.Emit(2000000, kSharedBufferBase, 8, kRead, 0);
+        w.Close();
+        const std::string path = g_dir + "/" + name + ".hettrace" +
+                                 (std::strcmp(format, "text") == 0 ? ".txt" : "");
+        if (std::strcmp(format, "bin") == 0) {
+            FileHeader header{};
+            const auto records = ReadBin(path, &header);
+            CHECK(header.ticks_per_second == 1000000000000000ull,
+                  "binary header must describe fs rather than ps");
+            CHECK(header.clock_period_ticks == 500000,
+                  "binary header must retain clock period in fs");
+            CHECK(records.size() == 1 && records[0].tick == 2000000,
+                  "record timestamps must not be rescaled");
+        }
+        for (const auto& file : {path, path + ".meta.json"}) {
+            if (file == path && std::strcmp(format, "bin") == 0) continue;
+            FILE* f = std::fopen(file.c_str(), "r");
+            CHECK(f != nullptr, "trace/metadata file must exist");
+            if (!f) continue;
+            std::string contents;
+            char line[512];
+            while (std::fgets(line, sizeof(line), f)) contents += line;
+            std::fclose(f);
+            CHECK(contents.find("1000000000000000") != std::string::npos,
+                  "text and metadata must describe the same fs timebase");
+        }
+    }
+    setenv("HETTRACE_FORMAT", "bin", 1);
+    TraceWriter legacy;
+    CHECK(legacy.Open(kSrcHost, "host_default_timebase", kLevelInterconnect,
+                      kClockPeriodTicks_host), "default writer should open");
+    legacy.Close();
+    FileHeader header{};
+    ReadBin(g_dir + "/host_default_timebase.hettrace", &header);
+    CHECK(header.ticks_per_second == kTicksPerSecond,
+          "existing callers must retain their ps default");
+}
+
 static void TestAddrMapSanity() {
     // shared_buffer 是 host↔NPU 交接区；Vortex 只能经 4 GiB 以上 BAR
     // 与 host 交接，当前不存在三方以同一物理地址直连共享的区域。
@@ -541,6 +589,7 @@ int main() {
     TestMetaSidecar();
     TestFlushAcrossBuffer();
     TestAddrMapSanity();
+    TestRuntimeTimebase();
 
     std::printf("libhettrace: %d 项检查, %d 项失败\n", g_checks, g_failed);
     if (g_failed == 0) {

@@ -91,6 +91,7 @@ revert_core_patch_stack() {
 
 if [ "$REVERT" = "1" ]; then
     echo "还原 CoralNPU gem5 集成:"
+    revert_patch "$CORE_FILE" "nonblocking_start.patch"
     revert_core_patch_stack
     for spec in $PATCH_SPECS; do
         revert_patch "${spec%%:*}" "${spec##*:}"
@@ -117,6 +118,7 @@ install -m 0644 "$SELF_DIR/BUILD.bazel"      "$GEM5INT_DIR/BUILD"
 echo "  gem5int/ -> $GEM5INT_DIR"
 
 apply_core_patch_stack
+apply_patch "$CORE_FILE" "nonblocking_start.patch"
 for spec in $PATCH_SPECS; do
     apply_patch "${spec%%:*}" "${spec##*:}"
 done

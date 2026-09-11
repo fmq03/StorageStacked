@@ -55,6 +55,9 @@ inline bool IsDdr(uint32_t addr) { return addr >= kDdrBase && addr < kDdrEnd; }
 struct coralnpu_gem5_device_s {
     VerilatedContext   context;
     CoreMiniAxiWrapper wrapper{&context};
+    uint32_t startAddress = 0;
+    unsigned startStage = 3;
+    std::shared_ptr<bool> startWrite;
 
     // 用裸指针而不是成员对象，为的是 trace_close() 能确定性地关掉它而不必等
     // 整个 Device 销毁 —— gem5 不保证退出时销毁 SimObject，.meta.json 侧车
@@ -351,24 +354,34 @@ int coralnpu_gem5_load_elf(coralnpu_gem5_handle_t h, const char* path,
 
 void coralnpu_gem5_start(coralnpu_gem5_handle_t h, uint32_t start_addr) {
     if (h == nullptr) return;
-    // 同样阻塞，同样只能在 gem5 开 tick 之前调。
-    h->wrapper.WriteWord(kCtrlPcReg, start_addr);
-    h->wrapper.WriteWord(kCtrlReg, 1u);
-    h->wrapper.WriteWord(kCtrlReg, 0u);
+    h->startAddress = start_addr;
+    h->startStage = 0;
+    h->startWrite.reset();
 }
 
 bool coralnpu_gem5_tick(coralnpu_gem5_handle_t h) {
     if (h == nullptr) return false;
+    if (h->startStage < 3) {
+        if (h->startWrite && *h->startWrite) {
+            h->startWrite.reset();
+            ++h->startStage;
+        }
+        if (h->startStage < 3 && !h->startWrite) {
+            const uint32_t addr = h->startStage == 0 ? kCtrlPcReg : kCtrlReg;
+            const uint32_t value = h->startStage == 0 ? h->startAddress : (h->startStage == 1 ? 1 : 0);
+            h->startWrite = h->wrapper.EnqueueWriteWord(addr, value);
+        }
+    }
     h->wrapper.Step();
-    return !h->wrapper.halted() && !h->wrapper.wfi();
+    return h->startStage < 3 || (!h->wrapper.halted() && !h->wrapper.wfi());
 }
 
 bool coralnpu_gem5_halted(coralnpu_gem5_handle_t h) {
-    return h != nullptr && h->wrapper.halted();
+    return h != nullptr && h->startStage == 3 && h->wrapper.halted();
 }
 
 bool coralnpu_gem5_wfi(coralnpu_gem5_handle_t h) {
-    return h != nullptr && h->wrapper.wfi();
+    return h != nullptr && h->startStage == 3 && h->wrapper.wfi();
 }
 
 uint32_t coralnpu_gem5_mailbox_read(coralnpu_gem5_handle_t h, uint32_t index) {
