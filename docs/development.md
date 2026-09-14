@@ -11,8 +11,10 @@ git commit -m "说明本次行为变化的中文提交信息"
 # 验证后在main合并；涉及完整功能的分支可以使用--no-ff保留合并记录
 ```
 
-不要对五个普通目录执行git pull；它们没有独立仓库。根仓库配置团队远端后，在根目录
-同步并合并主仓库分支。当前根仓库尚未配置远端，也没有执行任何push。
+不要对五个普通目录执行git pull；它们没有独立仓库。在根目录同步并合并主仓库分支，
+主仓库地址为git@github.com:fmq03/StorageStacked.git（HTTPS地址见README）。
+更新主仓库后运行git submodule update --init --recursive，使外部依赖匹配主仓库记录。
+若子模块有自己的源码修改，先保存和核对这些修改，不要用reset清除本地适配。
 
 ## 迁移历史
 
@@ -27,12 +29,13 @@ gem5_axi原来没有远端和首次提交，因此单独建立源码基线。
 ```bash
 git log --graph --oneline --all
 git log --oneline -- mem_sim
-git log archive/mem_sim/before-monorepo
 git show <旧提交号>
 ```
 
 原历史的文件路径仍是各库导入前的相对路径；未重写旧提交哈希。
-archive/*分支只是可读的历史入口，不用于继续独立开发。原内部Git元数据已归档至本地integrate_doc/handoff_20260911/retired_git_metadata，
+archive/*分支是原维护机器上的辅助历史入口，不要求新克隆中存在，也不用于继续独立开发。
+新克隆可用env/internal_imports.json中的提交号配合git log/git show追溯。
+原内部Git元数据已归档至本地integrate_doc/handoff_20260911/retired_git_metadata，
 活动登记和.git/modules中只保留三个外部库及其递归依赖。
 这些历史分支的提交也通过导入合并
 成为主仓库的祖先，即使克隆时不额外获取这些分支，主分支历史仍包含原提交。

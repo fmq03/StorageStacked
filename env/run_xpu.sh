@@ -20,7 +20,9 @@ run_case() {
     local dir="$destination/$name"
     mkdir -p "$dir"
     echo "运行 $name"
-    "$AXI_GEM5_BIN" -d "$dir" "$AXI_PROJECT_DIR/configs/run_xpu.py" "$@" > "$dir/run.log" 2>&1
+    # Acceptance runs need no debugger; stray connections can stop simulation.
+    "$AXI_GEM5_BIN" --listener-mode=off -d "$dir" "$AXI_PROJECT_DIR/configs/run_xpu.py" "$@" > "$dir/run.log" 2>&1
+    echo "$name 仿真结束，开始数据与链路校验"
     for checker in check check_aou inspect_link check_memsim trace_view memsim_view; do
         "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/$checker.py" "$dir" >> "$dir/verification.log" 2>&1
     done

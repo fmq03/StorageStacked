@@ -11,7 +11,7 @@ run_case() {
     local name=$1
     shift
     mkdir -p "$results/$name"
-    "$AXI_GEM5_BIN" -d "$results/$name" "$AXI_PROJECT_DIR/configs/run.py" --backend aou "${common_args[@]}" "$@" > "$results/$name/run.log" 2>&1
+    "$AXI_GEM5_BIN" --listener-mode=off -d "$results/$name" "$AXI_PROJECT_DIR/configs/run.py" --backend aou "${common_args[@]}" "$@" > "$results/$name/run.log" 2>&1
     tail -4 "$results/$name/run.log"
     local check_flags=()
     [[ $name == cpu || $name == id_wrap ]] || check_flags+=(--directed)

@@ -3,7 +3,7 @@
 接手先读 integrate_doc/HANDOFF.md 和 integrate_doc/09_migration.md（本地交接资料），
 再读 README.md 和 docs/development.md。若交接资料未分发，以已提交文档为准。
 
-- 用户已授权本轮复核合并、清理遗留、验证链路、打包依赖并提交配置指引；提交说明用中文，不执行push。
+- 主仓库为git@github.com:fmq03/StorageStacked.git；提交说明用中文，push须有用户明确授权。
 - ucie-model、axi2flit、gem5_axi、mem_sim、gem5_new 是主仓库普通目录，直接维护源码。
   不重新建立内部 .git、gitlink 或构建时向内部模块应用补丁。
 - gem5、coralnpu、vortex-gpu/vortex 是外部子模块，按 env/sources.lock.json 固定版本。
@@ -17,6 +17,8 @@
   共享AoU帧格式在protocol/include。Vortex补丁只改外部SimX和ABI内部。
 - 配置和依赖包说明见docs/setup.md，打包/恢复入口env/dependency_bundle.py。
   dist/依赖包不入Git；SS_OFFLINE=1仅约束bootstrap下载，Bazel构建的离线性需另行验证。
+- 验收入口显式使用--listener-mode=off，避免交互终端中的GDB连接令仿真停住。
+  HTML优先通过本机HTTP服务查看；直接打开WSL文件路径可能无法加载数据分块。
 - 原目录 /mnt/d/storagestacked 禁止清理。integrate_doc、运行结果、构建产物不提交。
   已有AXI256结果及本次迁移备份保留；新验证使用独立结果目录。
 - 仿真必须保留AXI五通道VCD、两端带时间戳的完整Flit日志及离线数据校验。

@@ -25,8 +25,8 @@ GPU/NPU 使用下面的三源入口及更大的地址窗口。
 小请求仍按 SIZE 和字节选通传输，不会把每个8B访问自动合并为32B。
 `Gem5ToTlmBridge64` 的名字和 TLM socket 的64参数保留用于原生端口绑定，
 不限制 generic payload 长度，也不表示下游 AXI 数据仍是64bit。
-AXI2Flit 的 Flit 格式不变。宽度改动和新旧对照见
-[16_native_axi256.md](../integrate_doc/16_native_axi256.md)。
+AXI2Flit 的 Flit 格式不变，共享格式定义见
+[aou_format6.h](../protocol/include/aou_format6.h)。
 
 ## GPU/NPU 与 CPU 联合运行
 
@@ -40,7 +40,7 @@ bash env/run_xpu.sh             # 也可传入一个尚不存在的结果目录
 运行 CPU+NPU、CPU+GPU、CPU+GPU+NPU、三源内存时间尺度×4 四组，保留每组完整
 波形/Flit/DRAM/DFI/来源日志，执行独立校验、内存 C ABI 大地址测试及原生测试（当前19项）。
 `summary.json` 是验收结果；`three/memsim_view.html` 按请求展示全过程。
-HTML详情按需加载，支持直接双击打开；复制或交接时请带上同级 `view_store.js`、
+HTML详情按需加载，推荐按配置指引通过本机HTTP服务打开；复制或交接时请带上同级 `view_store.js`、
 `memsim_data/`、`trace_paths_data/`、`trace_flits_data/`，最方便是复制整个用例目录。
 请求页每页50个选项、Flit页每页100行，不再将全部字节内嵌到HTML。
 当前交接结果入口为 `results/handoff-20260911/report.html`；此前AXI256与monorepo报告保留。
@@ -70,13 +70,13 @@ Java/Scala/Chisel/Verilator及NPU交叉编译依赖。当前验证平台是 Ubun
 波形/日志，主要来自动态链接 CPU host 启动期间的周期采样与 DRAM refresh。
 
 run_xpu.py 复用 gem5_new 的 CPU/cache/PIO/device 创建逻辑，目标缓冲区均经新链路。
-地址、具体计算和当前限制见 [三源接入交接](../integrate_doc/15_xpu_online.md)。
+地址和设备构成见[运行配置](../gem5_axi/configs/run_xpu.py)，当前限制见[配置指引](../docs/setup.md)。
 
 ## 新机器的三个命令
 
 宿主：Linux x86-64、glibc ≥ 2.28、Bash、Git、curl、tar/bzip2，建议 16–32GiB 内存。
-本机 Ubuntu 20.04 / WSL2 验证，无需 sudo、Docker、物理 GPU 或外部 SystemC。
-首次准备需要网络，依赖只安装到用户目录。
+本机 Ubuntu 20.04 / WSL2 验证，无需 Docker、物理 GPU 或外部 SystemC。
+基础系统工具需预装；项目工具环境安装无需sudo。首次准备需要网络，依赖只安装到用户目录。
 
 ```bash
 cd /path/to/StorageStacked
@@ -115,7 +115,8 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 - HETTrace 时间和字节检查，以及六种 mem_sim 日志篡改、既有 AXI/Flit 故障检查。
 
 新结果默认写到 `results/memsim-<UTC时间>/`，已有目录会拒绝覆盖。
-先看 `summary.json` 和 `cpu/memsim_view.html`；后者无需服务器，可按 burst 选择全过程。
+先看 `summary.json` 和 `cpu/memsim_view.html`；后者可按 burst 选择全过程。
+若直接打开HTML无法加载数据分块，使用[配置指引中的本机HTTP服务](../docs/setup.md#查看报告)。
 `trace_view.html` 查看原 AXI/UCIe 细节，`axi_wave.vcd` 用 GTKWave/Verdi 查看五通道。
 `memsim_commands.csv` 是实发 DRAM 命令；`memsim_dfi_signals.csv` 由实发命令及其数据
 构建行为级 DFI 轨迹，不是外部 RTL 引脚采样。
@@ -129,7 +130,7 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 ```bash
 source env/activate.sh
 # workload 已由 run_memsim.sh 编译在此处。
-"$AXI_GEM5_BIN" -d results/my-cpu gem5_axi/configs/run.py \
+"$AXI_GEM5_BIN" --listener-mode=off -d results/my-cpu gem5_axi/configs/run.py \
   --backend aou --memory-backend memsim --mode cpu \
   --binary "$PWD/gem5_axi/build/memsim_check" --het-trace
 ```
@@ -146,6 +147,8 @@ source env/activate.sh
 观察器透明性。`--backend ram` 仍是底层配置默认值；完整链路必须显式选
 `--backend aou --memory-backend memsim`。`--mode tester` 不是 CPU 执行程序。
 原 `gem5_axi/scripts/setup.sh/build.sh/env.sh` 默认转入统一环境。
+验收脚本显式关闭gem5调试监听，避免交互终端默认打开7000端口后被误连接而停住；
+需要调试时另行手动启动gem5并配置监听，不修改正式验收的运行参数。
 
 HETTrace 单独校验：
 
@@ -161,9 +164,10 @@ CPU 旧 libc workload 的默认 watchdog 为 10ms；新的 freestanding workload
 
 ## 迁移与交接
 
-五个内部模块和必要的外部适配补丁已提交到主仓库。配置团队远端并推送后，新机器可
-`git clone --recurse-submodules <主仓库地址>`，再执行上述 bootstrap/build；构建会将补丁
-和系统内设备源码安装到外部依赖。当前尚无主仓库远端，也未推送。
+五个内部模块和必要的外部适配补丁由主仓库管理。新机器使用
+`git clone --recurse-submodules https://github.com/fmq03/StorageStacked.git`，
+再执行上述bootstrap/build；构建会将补丁和系统内设备源码安装到外部依赖。
+原维护机器上的results和integrate_doc不会出现在新克隆中，文档里的这些路径是本地历史证据。
 
 直接复制工作区时，保留根 `.git/modules`、三个外部子模块的 `.git` 文件及必要的
 未提交源码。运行结果与 integrate_doc 不随 clone 分发，需要时另行复制。
@@ -180,19 +184,19 @@ CPU 旧 libc workload 的默认 watchdog 为 10ms；新的 freestanding workload
 
 ## 验收记录
 
-最新交接验收见[验收说明](../docs/handoff-validation.md)与[总报告](../results/handoff-20260911/report.html)，
+最新交接验收见[验收说明](../docs/handoff-validation.md)，本地总报告为results/handoff-20260911/report.html，
 覆盖当前工作区完整流程以及新路径/新环境恢复后的构建与闭环。
 
-此前仓库整合基线：[总结果](../results/monorepo-20260911/summary.json)。
+以下结果仅保留在原维护机器，不随Git克隆分发。此前仓库整合基线：results/monorepo-20260911/summary.json。
 新版 mem_sim 的19项原生测试、7组CPU/定向完整链路、4组GPU/NPU及5组RAM兼容场景通过。
 
-- [在线内存](../results/monorepo-20260911/memsim/summary.json)：989笔父请求、1784个原生子请求。
+- 在线内存：989笔父请求、1784个原生子请求。
   CPU两组各452次访问，内存尺度×4使完成增加16286ns，严格等于逐请求延迟差之和。
-- [设备场景](../results/monorepo-20260911/xpu/summary.json)：29253笔父请求、29887个原生子请求。
+- 设备场景：29253笔父请求、29887个原生子请求。
   三源内存尺度×4使GPU周期612→1200、NPU周期5068→8359、CPU完成增加103882ns。
-- [RAM兼容](../results/monorepo-20260911/ram/regression_summary.json)：5组通过，包含逐拍与负例检查。
+- RAM兼容：5组通过，包含逐拍与负例检查。
 
-此前AXI256基线及可视化仍在[原报告](../results/axi256-20260911/report.html)。
+此前AXI256基线及可视化仍在results/axi256-20260911/report.html。
 本次同步了mem_sim上游并改用配置解析器，相关时序会重算，不能把新旧数字差异归因于仓库布局。
 原始波形、字节日志、源码/二进制哈希和分块HTML均保存在各用例目录。
 本轮未在另一台干净机器或完整离线环境重建，迁移时仍需依锁文件准备依赖。

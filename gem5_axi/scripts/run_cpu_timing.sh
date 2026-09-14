@@ -8,7 +8,7 @@ echo "Working results: $cpu_results"
 for latency in 3 9; do
     case_dir="$cpu_results/cpu_l$latency"
     mkdir -p "$case_dir"
-    "$AXI_GEM5_BIN" -d "$case_dir" "$AXI_PROJECT_DIR/configs/run.py" \
+    "$AXI_GEM5_BIN" --listener-mode=off -d "$case_dir" "$AXI_PROJECT_DIR/configs/run.py" \
         --mode cpu --binary "$AXI_PROJECT_DIR/build/memory_check" \
         --no-stalls --latency "$latency" > "$case_dir/run.log" 2>&1
     "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/check.py" "$case_dir" --latency "$latency"

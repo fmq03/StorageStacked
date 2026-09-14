@@ -16,7 +16,7 @@ bash "$AXI_PROJECT_DIR/scripts/run_tests.sh" "$destination/ram"
 for latency in 3 9; do
     case_dir="$destination/feedback/cpu_l$latency"
     mkdir -p "$case_dir"
-    "$AXI_GEM5_BIN" -d "$case_dir" "$AXI_PROJECT_DIR/configs/run.py" \
+    "$AXI_GEM5_BIN" --listener-mode=off -d "$case_dir" "$AXI_PROJECT_DIR/configs/run.py" \
         --backend aou --het-trace --mode cpu --binary "$AXI_PROJECT_DIR/build/memory_check" \
         --no-stalls --latency "$latency" > "$case_dir/run.log" 2>&1
     "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/check.py" "$case_dir"
@@ -27,7 +27,7 @@ done
     "$destination/feedback/cpu_l3" "$destination/feedback/cpu_l9" \
     --output "$destination/feedback/wave_audit"
 mkdir -p "$destination/observer_off"
-"$AXI_GEM5_BIN" -d "$destination/observer_off" "$AXI_PROJECT_DIR/configs/run.py" \
+"$AXI_GEM5_BIN" --listener-mode=off -d "$destination/observer_off" "$AXI_PROJECT_DIR/configs/run.py" \
     --backend aou --mode tester > "$destination/observer_off/run.log" 2>&1
 "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/check.py" "$destination/observer_off" --directed
 "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/check_aou.py" "$destination/observer_off"

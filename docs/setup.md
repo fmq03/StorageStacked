@@ -25,11 +25,11 @@ sudo apt-get install -y build-essential git python3 curl ca-certificates \
 
 ## 2. 没有依赖包：从Git与上游下载
 
-主仓库发布到团队服务器后使用其真实地址；当前交接阶段主仓库尚未配置远端，
-也可以先取得主仓库Git bundle或完整源码副本，再执行子模块初始化。
+主仓库为https://github.com/fmq03/StorageStacked。建议用Git克隆，保留子模块版本信息；
+GitHub的源码ZIP不包含完整的上游子模块，不能直接代替下面的步骤。
 
 ```bash
-git clone --recurse-submodules <团队主仓库地址> StorageStacked
+git clone --recurse-submodules https://github.com/fmq03/StorageStacked.git StorageStacked
 cd StorageStacked
 # 已clone但未初始化子模块时执行：
 git submodule sync --recursive
@@ -40,12 +40,17 @@ bash env/bootstrap_xpu.sh
 bash env/build_xpu.sh
 ```
 
+若新电脑已配置GitHub SSH密钥，可将克隆地址换成git@github.com:fmq03/StorageStacked.git。
+若仓库访问要求身份验证，使用有该仓库权限的GitHub账号。
+
 正确命令是`git submodule update --init --recursive`，它取主仓库记录的确切提交。
 不要使用`git submodule update --remote`或在各子模块里pull到最新分支；这会偏离已验证版本。
 以后更新团队主仓库时，先`git pull --ff-only`，再执行上述submodule update。
 五个内部目录无需分别clone或pull。
 
 bootstrap_xpu包含基础环境配置；build_xpu包含mem_sim与gem5构建，无需再重复基础步骤。
+bootstrap按锁文件下载已编译的GCC/G++、Python等工具包，不在本机从源码编译GCC，
+也不替换系统/usr/bin/gcc。build会自动选择该环境中的编译器和库。
 首次下载需要访问GitHub、conda-forge及Bazel依赖所用的上游站点。
 全量构建需要数十分钟；gem5/mem_sim默认6个编译任务，可用AXI_JOBS调整，例如
 `AXI_JOBS=12 bash env/build_xpu.sh`（本轮在32GiB内存机器上验证）。
@@ -57,7 +62,7 @@ bootstrap_xpu包含基础环境配置；build_xpu包含mem_sim与gem5构建，�
 
 | 内容 | 用途 |
 |---|---|
-| system.bundle | 主仓库源码与提交历史，方便尚无团队远端时交付 |
+| system.bundle | 打包当时的主仓库源码与提交历史快照 |
 | git/ | 三个外部库及八个递归依赖的独立bare仓库，保留固定提交和shallow边界 |
 | cache/mamba/pkgs/ | 两份显式锁文件列出的原始Conda包 |
 | cache/downloads/ | micromamba原始安装包 |
@@ -77,7 +82,8 @@ tar -xzf storagestacked-deps-20260911.tar.gz
 
 # 用解压后的真实绝对路径替换这里的路径。
 export SS_BUNDLE_DIR=/data/storagestacked-deps-20260911
-git clone "$SS_BUNDLE_DIR/system.bundle" StorageStacked
+# 先取得当前主仓库；无需在线递归下载，下面的install会从包内恢复子模块。
+git clone https://github.com/fmq03/StorageStacked.git StorageStacked
 cd StorageStacked
 export SS_DEPS_ROOT="$HOME/.local/share/storagestacked-unified"
 python3 env/dependency_bundle.py install "$SS_BUNDLE_DIR" --deps-root "$SS_DEPS_ROOT"
@@ -88,6 +94,10 @@ bash env/build_xpu.sh
 ```
 
 若已取得匹配版本的主仓库，可跳过git clone，直接运行install。
+20260911依赖包的system.bundle是旧源码快照，不包含之后的调试监听修复和文档更新；
+上面的流程使用GitHub主仓库源码并复用旧包缓存。本次更新未改变四份依赖锁。
+若只能通过bundle取得源码，可先执行git clone "$SS_BUNDLE_DIR/system.bundle" StorageStacked，
+联网后再按下面的命令更新到主仓库当前版本。
 install校验锁文件及包内容，从包内本地Git仓库初始化缺失的子模块，然后将origin恢复为
 公开上游地址；已初始化的子模块只核对HEAD，不重置本地改动。
 它只写下载缓存，不覆盖已经安装的工具环境。建议在新目录首次安装。
@@ -96,10 +106,12 @@ install校验锁文件及包内容，从包内本地Git仓库初始化缺失的�
 例如额外的Maven/JDK资源；依赖包可减少下载，但不承诺任意目标都能完全断网构建。
 宿主apt软件包也未包含在包内。完整离线交付需另外验证目标机器的系统包和所选Bazel目标。
 
-从bundle克隆后，主仓库origin指向本地bundle；团队远端就绪后可改为：
+从bundle克隆后，主仓库origin指向本地bundle；联网后更新源码：
 
 ```bash
-git remote set-url origin <团队主仓库地址>
+git remote set-url origin https://github.com/fmq03/StorageStacked.git
+git pull --ff-only origin main
+git submodule update --init --recursive
 ```
 
 ## 4. 跑完整流程
@@ -118,10 +130,37 @@ bash env/run.sh results/acceptance-compat
 - compat：SimpleBurstMemory链路、RAM和观察器对照。
 
 三个结果目录的summary.json均应为passed=true；命令遇到失败会退出非零状态。
+运行脚本自动激活工具环境，并关闭gem5调试监听。XPU入口依次打印“运行用例”、
+“仿真结束，开始数据与链路校验”和“计算与链路校验通过”；仿真退出后仍需处理完整波形。
 日志保留AXI五通道VCD、两端完整Flit、DRAM/DFI、HETTrace、数据与时间校验。
-trace_view.html和memsim_view.html可直接打开，交接时复制整个用例目录及其_data目录、view_store.js。
+交接时复制整个用例目录及其_data目录、view_store.js，不单独复制HTML。
 当前GPU是SimX，NPU是RTL；CPU程序/栈在本地主存，测试缓冲区走完整链路。
 当前没有通用functional/atomic、checkpoint或跨设备缓存一致性支持。
+
+### 查看报告
+
+推荐在工程根目录启动仅供本机访问的HTTP服务，并保持该终端运行：
+
+```bash
+python3 -m http.server 8000 --bind 127.0.0.1 --directory results
+```
+
+然后用浏览器打开：
+
+- CPU：http://localhost:8000/acceptance-memsim/cpu/memsim_view.html
+- 三源：http://localhost:8000/acceptance-xpu/three/memsim_view.html
+- AXI/Flit：http://localhost:8000/acceptance-xpu/three/trace_view.html
+
+使用其他结果目录名时相应修改URL；结束服务按Ctrl+C。如果8000端口已占用，可改用8001。
+直接双击HTML在部分环境可用，但Windows浏览器通过WSL文件路径打开时可能无法加载JS分块；
+若看到“无法加载memsim_data/00000.js”，先确认同级数据目录存在，再改用上述HTTP方式。
+
+### 运行停住时
+
+先看对应结果目录的run.log。若最后出现remote gdb attached，说明仿真进入了调试接口。
+本版所有验收入口显式传入--listener-mode=off，避免误连接或端口探测引起的停顿。
+手动调用gem5时也将这个参数放在配置脚本路径之前。不要把7000调试端口当作报告页面端口。
+--remote-gdb-port=0在当前Workload配置下不能代替--listener-mode=off。
 
 ## 5. 环境一致性与维护
 

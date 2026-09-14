@@ -18,7 +18,7 @@ run_case() {
     shift
     local dir="$destination/$name"
     mkdir -p "$dir"
-    "$AXI_GEM5_BIN" -d "$dir" "$AXI_PROJECT_DIR/configs/run.py" \
+    "$AXI_GEM5_BIN" --listener-mode=off -d "$dir" "$AXI_PROJECT_DIR/configs/run.py" \
         --backend aou --memory-backend memsim --het-trace "$@" > "$dir/run.log" 2>&1
     local flags=()
     [[ $name == cpu* ]] || flags+=(--directed)
