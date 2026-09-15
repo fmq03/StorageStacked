@@ -1,4 +1,0 @@
-Import('*')
-
-SimObject('UnifiedTimingMemory.py', sim_objects=['UnifiedTimingMemory'])
-Source('unified_timing_memory.cc')

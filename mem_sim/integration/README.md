@@ -2,7 +2,7 @@
 
 `online.h/.cpp` 将已有 MemorySystem 暴露为 C ABI，共享库目标 `storagestacked_memsim`。
 它不依赖 SystemC，不创建线程或独立时间循环。当前宿主桥在
-`../../gem5_axi/memsim_backend.hh/.cc`，由 gem5 原生 SystemC 调度；总入口见 `../../env/README.md`。
+`../../systemc/logic_die.h`，由独立 SystemC 调度；总入口见 `../../env/README.md`。
 
 宿主顺序：create → 在每个原生时刻尝试 submit → step 一次 → pop 可容纳的响应 → finish → destroy。
 `period_fs` 返回一个原生 step 在宿主时间轴上的时长；`clock` 是已完成的 step 数。
@@ -40,12 +40,10 @@ burst 槽耗尽后停止接收新请求，背压沿 AouTarget/UCIe/AXI 返回上
 独立 C ABI 验证：
 
 ```bash
-source env/activate.sh
+bash env/build.sh
 python mem_sim/integration/check_online.py \
-  "$MEMSIM_BUILD/libstoragestacked_memsim.so" results/api-check
+  build/system/mem_sim/libstoragestacked_memsim.so results/api-check
 ```
 
 它验证掩码读写、原生完成、满队列无副作用重试，以及重复 ID / 跨粒度请求拒绝。
-完整链路的 `gem5_axi/scripts/check_memsim.py` 进一步将 AXI、原始 Flit 解码结果、子请求、
-DRAM/DFI 和最终内存逐项关联。当前验收 workload 要求每个子请求均产生 RD/WR，未覆盖
-控制器写合并或读转发；检查器会明确拒绝不符合该范围的结果，而不是静默略过物理证据。
+完整链路由 `scripts/verify_system.py` 检查 AXI 事务、两端 Flit 字节、原生完成及结果。

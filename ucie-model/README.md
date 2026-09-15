@@ -176,7 +176,7 @@ make validate
 项目级全链路仍应连接为：
 
 ```text
-GEM5/AXI -> AXI2Flit -> UCIe SystemC Link
+VORTEX/AXI -> AXI2Flit -> UCIe SystemC Link
          -> Protocol Bridge/MC -> DRAMsim3/Ramulator
 ```
 

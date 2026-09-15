@@ -1,0 +1,6 @@
+set(AXI ${PROJECT_SOURCE_DIR}/axi2flit/systemc)
+add_executable(ss_sim main.cpp ${AXI}/src/axi2flit.cpp ${AXI}/src/flit_packer.cpp ${AXI}/src/flit_unpacker.cpp)
+target_include_directories(ss_sim PRIVATE ${AXI}/include ${AXI}/integration ${PROJECT_SOURCE_DIR}/ucie-model/src ${PROJECT_SOURCE_DIR}/protocol/include)
+target_compile_definitions(ss_sim PRIVATE AXI_DATA_WIDTH_CFG=256)
+target_compile_options(ss_sim PRIVATE -O2 -Wall -Wextra)
+target_link_libraries(ss_sim PRIVATE ss_vortex ss_gate_model storagestacked_memsim systemc pthread)

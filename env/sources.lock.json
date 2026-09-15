@@ -1,5 +1,6 @@
 {
-  "gem5": "c8222cc67a399bfc01e8658dd14b30d5bfd634f9",
+  "upstream_base": "cd34a4f18336c31b36def35cc1229c19bfe2e6a5",
   "vortex-gpu/vortex": "d76b7f24e658867ab57e3942d7c648c3e6af072d",
-  "coralnpu": "fcb74cfe79dbd184b9c53539490994e701981f80"
+  "hardfloat": "aaf5736dffa521603b681fd5853760c671446c85",
+  "softfloat": "b51ef8f3201669b2288104c28546fc72532a1ea4"
 }

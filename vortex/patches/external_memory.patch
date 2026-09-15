@@ -1,0 +1,2969 @@
+diff --git a/VERSION b/VERSION
+index 590f872b1..af5ac4633 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1,3 +1,2 @@
+ VORTEX_VERSION=3.0
+ TOOLCHAIN_REV=v3.0
+-GEM5_REV=v25.0.0.1
+diff --git a/ci/gem5_install.sh.in b/ci/gem5_install.sh.in
+deleted file mode 100644
+index 92210cb71..000000000
+--- a/ci/gem5_install.sh.in
++++ /dev/null
+@@ -1,140 +0,0 @@
+-#!/bin/bash
+-
+-# Copyright © 2019-2023
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-# http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-#
+-# gem5 install for the Vortex integration — see
+-# docs/designs/vortex_gem5_integration.md for the design and operator manual.
+-#
+-# Fetches a pinned gem5 release, installs build deps + the AArch64
+-# cross-toolchain (used by the ARM regression matrix), and builds
+-# gem5.opt for the selected ISA targets (X86 + ARM by default). The
+-# Vortex SimObject is installed separately via
+-# `sim/simx/gem5/install.sh` — that step has to re-run whenever the
+-# SimObject sources change, but it does NOT need a fresh gem5 clone.
+-#
+-# Idempotent: re-running with the same GEM5_REV is a no-op once
+-# $GEM5_HOME/build/<target>/gem5.opt exists.
+-
+-# exit when any command fails
+-set -e
+-
+-GEM5_REV=${GEM5_REV:=@GEM5_REV@}
+-TOOLDIR=${TOOLDIR:=@TOOLDIR@}
+-GEM5_HOME=$TOOLDIR/gem5
+-GEM5_REPO=https://github.com/gem5/gem5.git
+-
+-# Build deps. gem5 documents these at https://www.gem5.org/documentation/general_docs/building
+-# AArch64 cross-toolchain (gcc/g++-aarch64-linux-gnu) is needed for
+-# the ARM regression matrix: cross-compiles libvortex-gem5-aarch64.so
+-# and vecadd-aarch64 / sgemm-aarch64. Installing it here keeps the
+-# one-time setup self-contained.
+-DEBIAN_FRONTEND=noninteractive sudo apt install -y \
+-    scons \
+-    python3 python3-dev python3-pip python3-venv \
+-    libprotobuf-dev protobuf-compiler libprotoc-dev \
+-    libgoogle-perftools-dev \
+-    m4 \
+-    libboost-all-dev \
+-    libhdf5-serial-dev \
+-    libpng-dev \
+-    pkg-config \
+-    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+-    build-essential git wget
+-
+-mkdir -p "$TOOLDIR"
+-
+-# Two-tier layout, mirroring mesa_install.sh + chipstar_install.sh:
+-#   $TOOLDIR/gem5-src/   build tree (source + scons build/ artifacts, ~12 GB)
+-#   $TOOLDIR/gem5/       slim runtime install (binaries + configs/, ~100 MB)
+-#
+-# $GEM5_HOME points at the slim install — that's the only thing the test
+-# matrix consumes (regression.sh.in's gem5() function reads
+-# $GEM5_HOME/build/{X86,ARM}/gem5.opt). The source tree is build-time
+-# scaffolding and is what the prebuilt tarball drops.
+-GEM5_SRC=$TOOLDIR/gem5-src
+-
+-# Fetch (or update) gem5 working tree at the pinned revision.
+-if [ -d "$GEM5_SRC/.git" ]; then
+-    echo "gem5 working tree exists at $GEM5_SRC"
+-    pushd "$GEM5_SRC" > /dev/null
+-    current_rev=$(git describe --tags --always 2>/dev/null || echo "unknown")
+-    if [ "$current_rev" != "$GEM5_REV" ]; then
+-        echo "checked-out rev $current_rev != pinned $GEM5_REV; refetching"
+-        git fetch --depth=1 origin "tag" "$GEM5_REV"
+-        git checkout "$GEM5_REV"
+-    fi
+-    popd > /dev/null
+-else
+-    echo "cloning gem5 $GEM5_REV into $GEM5_SRC"
+-    git clone --depth=1 --branch "$GEM5_REV" "$GEM5_REPO" "$GEM5_SRC"
+-fi
+-
+-# Build the ARM variant. -j$(nproc) on the self-hosted runner; cap at 4
+-# on hosted runners to avoid OOM (gem5 link uses ~4 GB peak).
+-JOBS=$(nproc)
+-if [ -n "$GITHUB_ACTIONS" ] && [ -z "$VORTEX_SELF_HOSTED" ]; then
+-    JOBS=4
+-fi
+-
+-# Build both X86 (default host ISA — easier, no cross-compile needed)
+-# and ARM (used by the cross-arch regression matrix). Either can be
+-# selected at test-config time via GEM5_BIN=$GEM5_HOME/build/{X86,ARM}/gem5.opt.
+-# Default targets can be overridden via GEM5_TARGETS="X86" or "ARM" or
+-# "X86 ARM" (space-separated). Both is the default.
+-GEM5_TARGETS=${GEM5_TARGETS:-"X86 ARM"}
+-
+-cd "$GEM5_SRC"
+-for target in $GEM5_TARGETS; do
+-    if [ ! -x "$GEM5_SRC/build/$target/gem5.opt" ]; then
+-        echo "building gem5.opt ($target) with -j$JOBS"
+-        scons "build/$target/gem5.opt" -j"$JOBS"
+-    else
+-        echo "gem5.opt ($target) already built at $GEM5_SRC/build/$target/gem5.opt"
+-    fi
+-done
+-
+-# Install the slim runtime subset. The configs/ tree drives the gem5
+-# Python session; gem5.opt embeds m5 itself, so nothing else under
+-# build/ is needed at run time. Strip debug info to shrink the binary
+-# from ~830 MB to ~50 MB.
+-echo "installing slim runtime into $GEM5_HOME (strip + drop SCons intermediates)"
+-mkdir -p "$GEM5_HOME"
+-rm -rf "$GEM5_HOME/build" "$GEM5_HOME/configs"
+-cp -r "$GEM5_SRC/configs" "$GEM5_HOME/configs"
+-for target in $GEM5_TARGETS; do
+-    mkdir -p "$GEM5_HOME/build/$target"
+-    cp "$GEM5_SRC/build/$target/gem5.opt" "$GEM5_HOME/build/$target/gem5.opt"
+-    strip --strip-debug --strip-unneeded "$GEM5_HOME/build/$target/gem5.opt"
+-done
+-
+-export GEM5_HOME
+-
+-# GitHub Actions: propagate to subsequent steps. No global ~/.bashrc
+-# mutation — multiple Vortex trees on one machine should not collide
+-# on GEM5_HOME / PATH (see also sst_install.sh.in, mesa_install.sh.in).
+-if [ -n "$GITHUB_ENV" ]; then
+-    echo "GEM5_HOME=$GEM5_HOME" >> "$GITHUB_ENV"
+-fi
+-if [ -n "$GITHUB_PATH" ]; then
+-    for target in $GEM5_TARGETS; do
+-        echo "$GEM5_HOME/build/$target" >> "$GITHUB_PATH"
+-    done
+-fi
+-
+-echo ""
+-echo "gem5 $GEM5_REV installed at $GEM5_HOME"
+-for target in $GEM5_TARGETS; do
+-    echo "  binary: $GEM5_HOME/build/$target/gem5.opt"
+-done
+-echo "  GEM5_HOME exported (re-source ~/.bashrc to pick up in new shells)"
+diff --git a/ci/gem5_run_app.py b/ci/gem5_run_app.py
+deleted file mode 100644
+index 5133a8f38..000000000
+--- a/ci/gem5_run_app.py
++++ /dev/null
+@@ -1,243 +0,0 @@
+-# Copyright © 2019-2023
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-# http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-# End-to-end gem5 integration test for vortex.VortexGPGPU.
+-#
+-# Generic application runner — any Vortex regression test that
+-# follows the standard shape (host binary + kernel.vxbin in the same
+-# directory, links against libvortex.so) can run here.
+-#
+-# SE-mode CPU(s) run an unmodified Vortex regression test binary.
+-# VortexGPGPU device sits on the system membus, claiming two ranges:
+-#   CP regfile at PIO_BASE (32-bit MMIO) and BAR-mapped VRAM at PIN_BASE.
+-# Identity-mapped via Process.map() into the simulated process VA space.
+-#
+-# The simulated process loads libvortex.so, which dlopens
+-# libvortex-gem5-x86_64.so based on VORTEX_DRIVER. The dispatcher's
+-# CP submission path:
+-#   1. mem_alloc + mem_upload → ring buffer / head / cmpl slots in VRAM
+-#   2. cp_mmio_write(Q_*, ...) → program CP regfile, enable Q0 + CP
+-#   3. vx_enqueue_launch / vx_enqueue_write / etc. → CMD_* descriptors
+-#      written into the ring (mem_upload), Q_TAIL_HI doorbell (cp_mmio_write),
+-#      Q_SEQNUM polled to wait (cp_mmio_read).
+-# The host runtime is a thin platform shim — no per-command logic.
+-#
+-# Configurable via env vars:
+-#   VORTEX_GEM5_DEV_LIB     — path to sim/simx/libvortex-gem5.so
+-#                             (device-side; dlopened by the gem5 SimObject)
+-#   VORTEX_GEM5_HOST_RT_DIR — directory containing libvortex.so (the stub)
+-#                             AND libvortex-gem5-x86_64.so (the host
+-#                             runtime backend). Both are added to the
+-#                             simulated process's LD_LIBRARY_PATH.
+-#   VORTEX_TEST_DIR         — directory containing the test binary +
+-#                             kernel.vxbin
+-#   VORTEX_TEST_BIN         — name of the test binary inside that dir
+-#                             (default: vecadd)
+-#   VORTEX_TEST_ARGS        — args passed to the binary (default: -n16)
+-#   VORTEX_DRIVER           — backend selector for the stub library
+-#                             (default: gem5-x86_64; use gem5-aarch64
+-#                             when running the ARM matrix)
+-
+-import os
+-import shlex
+-
+-import m5
+-from m5.objects import (
+-    AddrRange,
+-    DDR3_1600_8x8,
+-    MemCtrl,
+-    Process,
+-    RedirectPath,
+-    Root,
+-    SEWorkload,
+-    SrcClockDomain,
+-    System,
+-    SystemXBar,
+-    AtomicSimpleCPU,
+-    VoltageDomain,
+-    VortexGPGPU,
+-)
+-
+-DEV_LIB     = os.environ.get("VORTEX_GEM5_DEV_LIB")
+-HOST_RT_DIR = os.environ.get("VORTEX_GEM5_HOST_RT_DIR")
+-TEST_DIR    = os.environ.get("VORTEX_TEST_DIR")
+-TEST_BIN    = os.environ.get("VORTEX_TEST_BIN", "vecadd")
+-TEST_ARGS   = os.environ.get("VORTEX_TEST_ARGS", "-n16")
+-DRIVER      = os.environ.get("VORTEX_DRIVER",   "gem5-x86_64")
+-
+-# Number of CPU thread contexts. The dispatcher spawns a per-Queue
+-# worker thread and helpers may spawn additional threads. We provision
+-# 4 (one main + headroom); clone() in syscall_emul finds the next
+-# idle context across all CPUs.
+-NUM_CPUS = 4
+-
+-for name, val in [
+-    ("VORTEX_GEM5_DEV_LIB",     DEV_LIB),
+-    ("VORTEX_GEM5_HOST_RT_DIR", HOST_RT_DIR),
+-    ("VORTEX_TEST_DIR",         TEST_DIR),
+-]:
+-    if not val:
+-        raise RuntimeError(f"{name} env var is required")
+-
+-APP_BIN = f"{TEST_DIR}/{TEST_BIN}"
+-
+-# Fixed mappings shared by this config and sw/runtime/gem5/driver.h;
+-# if you change one, change both.
+-PIO_BASE   = 0x20000000
+-PIO_SIZE   = 0x0200        # CP regfile (0x40 globals + 4 × 0x40 queues + pad)
+-PIN_BASE   = 0x100000000   # BAR-mapped VRAM, above 4 GiB to clear the
+-                           # simulated process's natural low-VA layout
+-PIN_SIZE   = 0x100000000   # 4 GB — full XLEN=32 device address space
+-
+-# ---------------------------------------------------------------------------
+-# System construction
+-# ---------------------------------------------------------------------------
+-system = System()
+-system.clk_domain = SrcClockDomain(clock="3GHz",
+-                                   voltage_domain=VoltageDomain())
+-system.mem_mode = "atomic"
+-system.mem_ranges = [AddrRange("1GiB")]   # advisory; actual routing
+-                                          # is by per-SimObject ranges
+-                                          # (DRAM owns [0, 1GB);
+-                                          # VortexGPGPU owns the PIO
+-                                          # and PIN ranges, both above)
+-
+-# Cross-arch interp + runtime library redirection.
+-# Two separate gem5 mechanisms are at play:
+-#   (1) `setInterpDir(prefix)` prepends `prefix` to PT_INTERP when
+-#       gem5 loads the dynamic linker. The linker is opened directly
+-#       by gem5's loader, NOT via SE-mode syscall, so RedirectPath
+-#       doesn't help here.
+-#   (2) `system.redirect_paths` redirects open()/stat()/etc syscalls
+-#       the guest process makes — used when the dynamic linker
+-#       later looks up libc.so.6, libstdc++.so.6, libvortex.so, etc.
+-# Both are no-ops for native x86.
+-if DRIVER == "gem5-aarch64":
+-    from m5.core import setInterpDir
+-    setInterpDir("/usr/aarch64-linux-gnu")
+-    system.redirect_paths = [
+-        RedirectPath(app_path="/lib/aarch64-linux-gnu",
+-                     host_paths=["/usr/aarch64-linux-gnu/lib"]),
+-        RedirectPath(app_path="/usr/lib/aarch64-linux-gnu",
+-                     host_paths=["/usr/aarch64-linux-gnu/lib"]),
+-    ]
+-
+-# Membus connects CPU ↔ memory ↔ VortexGPGPU.
+-system.membus = SystemXBar()
+-system.system_port = system.membus.cpu_side_ports
+-
+-# CPUs. Atomic — the cycle counts inside the Vortex device are
+-# driven by the device's own clock; timing CPU adds wall time without
+-# changing the kernel result. We provision NUM_CPUS instances so the
+-# dispatcher's per-Queue worker thread and any transient helper
+-# threads have free HW contexts to clone() into.
+-system.cpu = [AtomicSimpleCPU(cpu_id=i) for i in range(NUM_CPUS)]
+-system.multi_thread = True
+-for cpu in system.cpu:
+-    cpu.createInterruptController()
+-    cpu.icache_port = system.membus.cpu_side_ports
+-    cpu.dcache_port = system.membus.cpu_side_ports
+-    # x86's InterruptController has explicit pio/int_requestor/
+-    # int_responder ports that must be wired to the membus. ARM's
+-    # interrupt model doesn't expose these — skip on ARM.
+-    if DRIVER == "gem5-x86_64":
+-        cpu.interrupts[0].pio           = system.membus.mem_side_ports
+-        cpu.interrupts[0].int_requestor = system.membus.cpu_side_ports
+-        cpu.interrupts[0].int_responder = system.membus.mem_side_ports
+-
+-# Memory controller. DRAM serves the simulated process's normal
+-# low-VA address space ([0, 1 GiB) is plenty for ELF code + heap +
+-# stack). The VortexGPGPU device owns disjoint ranges higher up:
+-#   - [PIO_BASE,  PIO_BASE+PIO_SIZE)  — CP regfile (32-bit MMIO)
+-#   - [PIN_BASE,  PIN_BASE+PIN_SIZE)  — BAR-mapped VRAM; host CPU
+-#     writes land in the same bytes the CP and Vortex see via
+-#     in-process simx::RAM (single data plane).
+-# Placing PIN_BASE above 4 GiB keeps it clear of DRAM and the
+-# simulated process's natural VA layout.
+-system.mem_ctrl = MemCtrl()
+-system.mem_ctrl.dram = DDR3_1600_8x8()
+-system.mem_ctrl.dram.range = AddrRange(0, PIO_BASE)
+-system.mem_ctrl.port = system.membus.mem_side_ports
+-
+-# The Vortex device. The `library` parameter points at the
+-# device-side libvortex-gem5.so (no arch suffix; gem5 itself is
+-# always x86-host). The host-side runtime is loaded separately by
+-# the simulated process via VORTEX_DRIVER below.
+-system.vortex = VortexGPGPU(
+-    library = DEV_LIB,
+-    kernel  = "",   # NO preload — the host binary uploads the kernel
+-                    # via the dispatcher's CP submission path, the way
+-                    # a real accelerator runtime works.
+-)
+-system.vortex.pio_addr = PIO_BASE
+-system.vortex.pio_size = PIO_SIZE
+-system.vortex.pin_addr = PIN_BASE
+-system.vortex.pin_size = PIN_SIZE
+-system.vortex.pio = system.membus.mem_side_ports
+-system.vortex.dma = system.membus.cpu_side_ports
+-
+-# ---------------------------------------------------------------------------
+-# Workload (the host test binary)
+-# ---------------------------------------------------------------------------
+-argv = [APP_BIN] + shlex.split(TEST_ARGS)
+-process = Process(
+-    pid=100,
+-    cwd=TEST_DIR,
+-    cmd=argv,
+-    executable=argv[0],
+-    env=[
+-        # Tells the stub to dlopen our backend
+-        # (libvortex.so does dlopen("libvortex-${VORTEX_DRIVER}.so")).
+-        f"VORTEX_DRIVER={DRIVER}",
+-        # Library search path inside the simulated process. Must
+-        # contain libvortex.so AND libvortex-gem5-$ARCH.so (both
+-        # are in HOST_RT_DIR by construction).
+-        f"LD_LIBRARY_PATH={HOST_RT_DIR}",
+-    ],
+-)
+-
+-system.workload = SEWorkload.init_compatible(APP_BIN)
+-# gem5 SE-mode requires each CPU to have an assigned workload; the
+-# secondary CPUs are halted at boot and wake when clone() finds them.
+-# Only CPU[0] starts running; the rest sit idle until pthread spawn.
+-for cpu in system.cpu:
+-    cpu.workload = process
+-    cpu.createThreads()
+-
+-# ---------------------------------------------------------------------------
+-# Run
+-# ---------------------------------------------------------------------------
+-root = Root(full_system=False, system=system)
+-m5.instantiate()
+-
+-# Identity-map both device-owned ranges into the simulated process's
+-# address space. Must happen AFTER m5.instantiate(). The CPU's
+-# userspace touches PIO_BASE / PIN_BASE as ordinary memory; the
+-# membus routes both ranges to the VortexGPGPU SimObject.
+-#
+-# cacheable=False on PIN ensures host stores to VRAM are immediately
+-# visible to the CP — otherwise a cache line could hold the new ring
+-# entry while Q_TAIL_HI is observed by the device.
+-system.cpu[0].workload[0].map(PIO_BASE, PIO_BASE, PIO_SIZE, cacheable=False)
+-system.cpu[0].workload[0].map(PIN_BASE, PIN_BASE, PIN_SIZE, cacheable=False)
+-
+-print(f"E2E: app={APP_BIN} {TEST_ARGS}")
+-print(f"E2E: VortexGPGPU.library={DEV_LIB}")
+-print(f"E2E: VORTEX_DRIVER={DRIVER}")
+-print(f"E2E: LD_LIBRARY_PATH={HOST_RT_DIR}")
+-print(f"E2E: PIO @0x{PIO_BASE:x}+0x{PIO_SIZE:x}, PIN @0x{PIN_BASE:x}+0x{PIN_SIZE:x}")
+-print("E2E: starting simulation...")
+-
+-exit_event = m5.simulate()
+-print(f"E2E: exit_event.cause = {exit_event.getCause()!r}")
+-print(f"E2E: tick = {m5.curTick()}")
+diff --git a/ci/gem5_run_hostless_app.py b/ci/gem5_run_hostless_app.py
+deleted file mode 100644
+index 65c92602c..000000000
+--- a/ci/gem5_run_hostless_app.py
++++ /dev/null
+@@ -1,108 +0,0 @@
+-# Copyright © 2019-2023
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-# http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-# Hostless gem5 integration test for vortex.VortexGPGPU.
+-#
+-# The SimObject loads a .vxbin kernel directly via its `kernel=`
+-# parameter and runs it via its internal vortexTickEvent_ chain — no
+-# host CPU, no Command Processor, no PIO/DMA. Smoke-tests the
+-# gem5↔libvortex-gem5.so wiring: dlopen succeeds, SimObject
+-# constructs, Processor::cycle() drives from the gem5 event loop, sim
+-# exits cleanly.
+-#
+-# Hosted counterpart: [gem5_run_app.py](gem5_run_app.py) wires up the
+-# host CPU + CP regfile + BAR-mapped VRAM on top.
+-#
+-# Configurable via env vars (parallel to gem5_run_app.py):
+-#   VORTEX_GEM5_DEV_LIB — path to libvortex-gem5.so (no default)
+-#   VORTEX_TEST_DIR     — directory containing the kernel .vxbin
+-#   VORTEX_TEST_KERNEL  — kernel filename inside that dir
+-#                         (default: kernel.vxbin, matching the
+-#                          regression-test convention)
+-#
+-# Run from the Vortex build dir as:
+-#   VORTEX_GEM5_DEV_LIB=$PWD/sim/simx/libvortex-gem5.so \
+-#   VORTEX_TEST_DIR=$PWD/tests/kernel/hello \
+-#   VORTEX_TEST_KERNEL=hello.vxbin \
+-#       $GEM5_HOME/build/X86/gem5.opt ci/gem5_run_hostless_app.py
+-
+-import os
+-import m5
+-from m5.objects import (
+-    AddrRange,
+-    DDR3_1600_8x8,
+-    MemCtrl,
+-    Root,
+-    SrcClockDomain,
+-    System,
+-    SystemXBar,
+-    VoltageDomain,
+-    VortexGPGPU,
+-)
+-
+-DEV_LIB     = os.environ.get("VORTEX_GEM5_DEV_LIB")
+-TEST_DIR    = os.environ.get("VORTEX_TEST_DIR")
+-TEST_KERNEL = os.environ.get("VORTEX_TEST_KERNEL", "kernel.vxbin")
+-
+-for name, val in [("VORTEX_GEM5_DEV_LIB", DEV_LIB),
+-                  ("VORTEX_TEST_DIR",     TEST_DIR)]:
+-    if not val:
+-        raise RuntimeError(f"{name} env var is required")
+-
+-KERNEL = f"{TEST_DIR}/{TEST_KERNEL}"
+-
+-# Minimal system: just enough to hang the VortexGPGPU off a membus
+-# so gem5 considers it a properly-wired SimObject. No CPU in this
+-# test — the kernel runs entirely inside the SimObject's internal
+-# vortexTickEvent_ chain.
+-system = System()
+-system.clk_domain = SrcClockDomain(clock="1GHz",
+-                                   voltage_domain=VoltageDomain())
+-system.mem_mode = "atomic"
+-system.mem_ranges = [AddrRange("512MiB")]
+-
+-# Membus + a small backing memory so PIO ranges have somewhere to bind.
+-system.membus = SystemXBar()
+-
+-# Memory controller (unused at runtime in hostless mode but required
+-# for the system to instantiate cleanly).
+-system.mem_ctrl = MemCtrl()
+-system.mem_ctrl.dram = DDR3_1600_8x8()
+-system.mem_ctrl.dram.range = system.mem_ranges[0]
+-system.mem_ctrl.port = system.membus.mem_side_ports
+-
+-# The Vortex device. It inherits clock from the system clock domain
+-# (set above to 1GHz) via ClockedObject; no explicit `clock=` param.
+-system.vortex = VortexGPGPU(
+-    library = DEV_LIB,
+-    kernel  = KERNEL,
+-    # Explicitly disable the BAR-mapped VRAM range — the hostless
+-    # path loads the kernel via the device library's load_kernel()
+-    # entry, never via host memcpy through PIN. Leaving it enabled
+-    # here would conflict with this test's DRAM range.
+-    pin_size = 0,
+-)
+-system.vortex.pio = system.membus.mem_side_ports
+-system.vortex.dma = system.membus.cpu_side_ports
+-
+-# Root wires the system into the simulator.
+-root = Root(full_system=False, system=system)
+-m5.instantiate()
+-
+-print(f"Hostless: VortexGPGPU.library={DEV_LIB}")
+-print(f"Hostless: kernel={KERNEL}")
+-print("Hostless: running until VortexGPGPU exits the sim loop...")
+-
+-exit_event = m5.simulate()
+-print(f"Hostless: exit_event.cause = {exit_event.getCause()!r}")
+-print(f"Hostless: tick = {m5.curTick()}")
+diff --git a/ci/testcases/gem5.yaml b/ci/testcases/gem5.yaml
+deleted file mode 100644
+index 8625d6dc6..000000000
+--- a/ci/testcases/gem5.yaml
++++ /dev/null
+@@ -1,11 +0,0 @@
+-# Phase-D category: delegates to the legacy ci/regression.sh --run gem5 (multi-step
+-# build + host/python runner). Expand into native specs in a later pass.
+-category: gem5
+-defaults:
+-  xlen: [32, 64]
+-  tier: nightly
+-tests:
+-  - id: legacy
+-    via: script
+-    run: "./ci/regression.sh --run gem5"
+-    needs: [gem5]
+diff --git a/configure b/configure
+index ecde9bc79..049838742 100755
+--- a/configure
++++ b/configure
+@@ -77,7 +77,7 @@ copy_files() {
+                         continue
+                     fi
+                     mkdir -p "$dest_dir"
+-                    sed "s|@VORTEX_HOME@|$SOURCE_DIR|g; s|@XLEN@|$XLEN|g; s|@TOOLDIR@|$TOOLDIR|g; s|@OSVERSION@|$OSVERSION|g; s|@INSTALLDIR@|$PREFIX|g; s|@BUILDDIR@|$CURRENT_DIR|g; s|@TOOLCHAIN_REV@|$TOOLCHAIN_REV|g; s|@VORTEX_VERSION@|$VORTEX_VERSION|g; s|@GEM5_REV@|$GEM5_REV|g" "$file" > "$dest_file"
++                    sed "s|@VORTEX_HOME@|$SOURCE_DIR|g; s|@XLEN@|$XLEN|g; s|@TOOLDIR@|$TOOLDIR|g; s|@OSVERSION@|$OSVERSION|g; s|@INSTALLDIR@|$PREFIX|g; s|@BUILDDIR@|$CURRENT_DIR|g; s|@TOOLCHAIN_REV@|$TOOLCHAIN_REV|g; s|@VORTEX_VERSION@|$VORTEX_VERSION|g" "$file" > "$dest_file"
+                     # apply permissions to bash scripts
+                     read -r firstline < "$dest_file"
+                     if [[ "$firstline" =~ ^#!.*bash ]]; then
+diff --git a/docs/designs/vortex_gem5_integration.md b/docs/designs/vortex_gem5_integration.md
+deleted file mode 100644
+index bc90b5fed..000000000
+--- a/docs/designs/vortex_gem5_integration.md
++++ /dev/null
+@@ -1,604 +0,0 @@
+-# gem5 Integration
+-
+-Vortex runs inside the [gem5](https://www.gem5.org/) simulator as a
+-`DmaDevice` SimObject, exposing the Vortex GPGPU to a simulated host
+-CPU (x86 or ARM) through a Command Processor regfile + BAR-mapped
+-VRAM. Use this when you want to model heterogeneous host-CPU +
+-accelerator workloads with realistic cross-ISA cache and DMA timing,
+-or to validate the v2 Command Processor architecture against a real
+-host/device split.
+-
+-This document covers both the **architecture** of the integration and
+-the **build / install / run** mechanics for the current (v2 CP-first)
+-design. The CP architecture itself is in
+-[`command_processor.md`](command_processor.md).
+-The earlier OPAE-protocol and v2 CP-migration proposals have been
+-consolidated into this document (see *Source proposals* at the end).
+-
+-## At a glance
+-
+-Three parts live in this repo:
+-
+-| Part | Source | Built artifact | Loaded by |
+-|---|---|---|---|
+-| Device library | `sim/simx/gem5/vortex_gpgpu.{cpp,h}` + `dev_mem.{cpp,h}` | `build/sim/simx/libvortex-gem5.so` | gem5 SimObject via `dlopen` |
+-| gem5 SimObject | `sim/simx/gem5/vortex_gpgpu_dev.{cc,hh}` + `VortexGPGPU.py` + `SConscript` | Linked into `gem5.opt` after install | gem5 itself |
+-| Host runtime | `sw/runtime/gem5/{vortex.cpp,driver.{cpp,h},Makefile}` | `build/sw/runtime/libvortex-gem5-{x86_64,aarch64}.so` | The simulated process inside gem5 |
+-
+-Plus `ci/gem5_install.sh` which fetches gem5 v25.0.0.1, drops the
+-SimObject sources into `$GEM5_HOME/src/dev/vortex/`, and builds
+-`build/{X86,ARM}/gem5.opt`.
+-
+-## Architecture in one paragraph
+-
+-The simulated host process loads the upstream dispatcher
+-(`libvortex.so`) which dlopens the gem5 backend
+-(`libvortex-gem5-x86_64.so`). The backend's only platform primitives
+-are `mem_upload/download/copy` (regular memcpy through a host-visible
+-BAR mapped to device VRAM) and `cp_mmio_{read,write}` (32-bit PIO to
+-the device's CP regfile). All kernel launches, DCR programming, and
+-fences flow through the dispatcher's Command Processor submission
+-path: it writes `CMD_*` descriptors into a ring buffer in device VRAM
+-(via mem_upload), commits via `cp_mmio_write(Q_TAIL_HI, ...)`, and
+-polls completion via `cp_mmio_read(Q_SEQNUM, ...)`. The CP itself is
+-the upstream `vortex::CommandProcessor` C++ class embedded in the
+-device library; the SimObject ticks it on its own gem5 event chain
+-and ticks the Vortex Processor on a parallel chain. Both event chains
+-self-schedule only while they have work — the device is genuinely
+-idle between commands.
+-
+----
+-
+-## 1. The two-domain model
+-
+-Under gem5 there are two domains:
+-
+-- **Simulated host** — the runtime runs as ordinary code on a gem5 CPU
+-  model (`AtomicSimpleCPU`, x86_64 or aarch64).
+-- **Device** — the CP and the Vortex `Processor` run **natively** inside
+-  the `VortexGPGPU` gem5 SimObject (a dlopened device library).
+-
+-The only shared state is device VRAM, reached by the host through an
+-identity-mapped BAR window and by the CP/Vortex through in-process
+-`simx::RAM`.
+-
+-```
+-   simulated host (gem5 CPU, x86/arm)            VortexGPGPU SimObject (native)
+-   ───────────────────────────────              ──────────────────────────────
+-   libvortex.so (dispatcher)                     libvortex-gem5.so:
+-     │  callbacks_t HAL                            Gem5Device {
+-     ├─ cp_reg_write ── PIO 32b ──► [pio_addr] ──►   vortex::CommandProcessor cp_
+-     ├─ cp_reg_read  ◄─ PIO 32b ──  [pio_addr] ◄─    Processor proc_
+-     └─ host_mem_alloc ─► VRAM ◄── [pin_addr] ──►    RAM ram_ / InProcessDevMem
+-                                                   }
+-                                            cpTickEvent_ / vortexTickEvent_ (gem5 events)
+-```
+-
+-This is the only backend where the CP lives **across the bus** from the
+-runtime (see §4).
+-
+----
+-
+-## 2. Device library (`sim/simx/gem5/`)
+-
+-Builds `libvortex-gem5.so` (`USE_GEM5=1`), dlopened by the gem5 SimObject.
+-
+-- [`vortex_gpgpu.{h,cpp}`](../../sim/simx/gem5/vortex_gpgpu.cpp) — the C
+-  ABI contract (`vortex_gem5_create/destroy`, `load_kernel`,
+-  `cp_mmio_{write,read}`, `cp_tick/cp_has_work`, `vortex_tick/vortex_busy`,
+-  `vram_{read,write}`). `Gem5Device` owns `RAM ram_`, `Processor proc_`,
+-  `InProcessDevMem dev_mem_`, and an embedded
+-  `vortex::CommandProcessor cp_`
+-  ([`vortex_gpgpu.cpp:46-54`](../../sim/simx/gem5/vortex_gpgpu.cpp#L46)).
+-  CP hooks (`dram_read/write`, `vortex_dcr_write/read`, `vortex_start`,
+-  `vortex_busy`) are bound in `make_cp_hooks()`
+-  ([`:165-189`](../../sim/simx/gem5/vortex_gpgpu.cpp#L165)).
+-- [`dev_mem.{h,cpp}`](../../sim/simx/gem5/dev_mem.cpp) — the
+-  `DevMemAccessor` seam; `InProcessDevMem` wraps `simx::RAM` (the only
+-  implementation today; `DmaPortDevMem` is the unbuilt v2 seam, §6).
+-- [`vortex_gpgpu_dev.{cc,hh}`](../../sim/simx/gem5/vortex_gpgpu_dev.cc) —
+-  the gem5 `VortexGPGPU : public DmaDevice`. dlopens the library and
+-  resolves a 13-symbol ABI struct up front; routes PIO packets in
+-  `[pio_addr, +pio_size)` to `cp_mmio_{read,write}` (32-bit) and packets
+-  in the PIN range to `vram_{read,write}`. Two self-scheduling events
+-  `cpTickEvent_`/`vortexTickEvent_` (§3).
+-- [`VortexGPGPU.py`](../../sim/simx/gem5/VortexGPGPU.py) — SimObject
+-  params (`pio_addr=0x20000000`, `pio_size=0x0200`,
+-  `pin_addr=0x100000000`, `max_queues=4`).
+-- `SConscript`, `install.sh` — gem5 source registration + install.
+-
+-The device exposes Vortex as: **one 32-bit PIO range that *is* the CP
+-regfile** (no OPAE window, no AFU `+0x1000` split) and **one BAR-mapped
+-VRAM range**. Despite the `DmaDevice` base class, host↔VRAM today is plain
+-in-process `simx::RAM` access, not gem5 `DmaPort` traffic — the
+-`DmaDevice` base is kept only as the v2 seam.
+-
+----
+-
+-## 3. Event-driven control
+-
+-The SimObject drives two independent gem5 event chains:
+-
+-- `cpTickEvent_` self-schedules only while `cp_has_work()` (CP enabled and
+-  busy). A host doorbell PIO write (`Q_TAIL_HI`) triggers `maybeWakeCp()`
+-  ([`vortex_gpgpu_dev.cc:192-198`](../../sim/simx/gem5/vortex_gpgpu_dev.cc#L192)).
+-- `vortexTickEvent_` self-schedules only while `vortex_busy()`. A
+-  `CMD_LAUNCH` retirement fires the `vortex_start` hook → trampoline →
+-  schedules the Vortex chain
+-  ([`:200-212`](../../sim/simx/gem5/vortex_gpgpu_dev.cc#L200)).
+-
+-Idle is observable as both events unscheduled — no polled-every-cycle, no
+-bounded tick burst. Standalone vs. hosted mode is chosen in `startup()` by
+-whether a `kernel=` param is set.
+-
+----
+-
+-## 4. Runtime backend (`sw/runtime/gem5/`)
+-
+-Builds `libvortex-gem5-<arch>.so`, loaded by the simulated host process.
+-
+-- [`vortex.cpp`](../../sw/runtime/gem5/vortex.cpp) implements the
+-  **pure-v2 `callbacks_t` transport HAL** via `#include <callbacks.inc>`:
+-  `dev_open/close`, `cp_reg_read/write` (32-bit PIO + fence),
+-  `host_mem_alloc/free` (carves a 64 MB aperture at the top of the PIN
+-  window onto VRAM). No CP, no kernel logic — pure transport.
+-- [`driver.{h,cpp}`](../../sw/runtime/gem5/driver.cpp) — fixed VAs
+-  (`PIN_BASE_ADDR=0x100000000`, `PIO_BASE_ADDR=0x20000000`); `mmio_*32`
+-  are raw volatile derefs; `mmio_fence()` emits `mfence`/`dmb sy` per arch.
+-- `Makefile` — `HOST_ARCH ∈ {x86_64, aarch64, armhf}` selects the
+-  compiler and emits `libvortex-gem5-<arch>.so`.
+-
+-**CP side-of-boundary asymmetry (key architectural point).** In
+-simx/rtlsim the CP model lives in the **host runtime** (`cp_reg_write`
+-does `cp_.mmio_write` plus a bounded tick burst). In gem5 the CP lives in
+-the **device library** and the host runtime does **real MMIO** to it
+-(`cp_reg_write` → `mmio_write32` at `PIO_BASE`). Same `callbacks_t`
+-surface, same `vortex::CommandProcessor` class
+-([`sim/common/cmd_processor.{h,cpp}`](../../sim/common/cmd_processor.cpp)),
+-opposite side of the host/device boundary. The CP command-building
+-(rings, `CMD_LAUNCH`, doorbell, `Q_SEQNUM` poll) lives in the shared
+-common-core dispatcher
+-([`sw/runtime/common/device.cpp`](../../sw/runtime/common/device.cpp)),
+-identical to every other backend. See
+-[`command_processor.md`](command_processor.md).
+-
+-**ISA portability.** The device side is always an x86 gem5 binary
+-regardless of simulated ISA. Only the host runtime changes ISA: x86_64
+-native, aarch64 cross-compiled (opt-in via `VORTEX_GEM5_ARM=1`), armhf
+-supported but 32-bit-limited (BAR above 4 GiB unreachable). CI runs gem5
+-through the catalog's `gem5` category (hostless `hello`, e2e
+-`vecadd`/`sgemm`), whose `via: script` calls `ci/regression.sh --run gem5`.
+-
+----
+-
+-## 5. Kernel-run path (hosted)
+-
+-`vx_device_open` → dispatcher dlopens the host backend → `dev_open`. Queue
+-create → `host_mem_alloc` rings/head/cmpl in VRAM, `cp_reg_write` programs
+-Q0 and enables. Launch → the dispatcher writes `CMD_DCR_WRITE` +
+-`CMD_LAUNCH` descriptors into the ring (host stores through the PIN
+-window), then rings the `Q_TAIL_HI` doorbell. The SimObject's
+-`maybeWakeCp()` → `cp_.tick()` fetches the ring cache line, routes DCRs via
+-`vortex_dcr_write`, and `vortex_start` schedules the Vortex chain; the CP
+-launch FSM waits on `vortex_busy()`, then retires and writes the seqnum.
+-The host polls `cp_reg_read(Q_SEQNUM)`. Ring, staging, and VRAM are all the
+-same in-process `simx::RAM` bytes, so memory is single-source-of-truth.
+-
+----
+-
+-## One-time setup
+-
+-Vortex install / build as usual ([docs/install_vortex.md](../install_vortex.md)),
+-then add gem5:
+-
+-```bash
+-cd build/   # standard Vortex out-of-tree build directory
+-./ci/gem5_install.sh
+-```
+-
+-This runs `sudo apt install` for gem5's build dependencies (scons,
+-libprotobuf, m4, libboost, **gcc-aarch64-linux-gnu**, …), clones gem5
+-v25.0.0.1 into `$TOOLDIR/gem5`, copies the Vortex SimObject sources
+-into `$GEM5_HOME/src/dev/vortex/`, and builds `gem5.opt` for both X86
+-and ARM (~15 min on a 64-core machine, ~30-45 min on a typical CI
+-runner). The script is idempotent — re-running with the same
+-`GEM5_REV` is a no-op.
+-
+-To install only one ISA:
+-
+-```bash
+-GEM5_TARGETS="X86" ./ci/gem5_install.sh   # default
+-GEM5_TARGETS="ARM" ./ci/gem5_install.sh
+-GEM5_TARGETS="X86 ARM" ./ci/gem5_install.sh   # both (default)
+-```
+-
+-The pinned gem5 revision lives in `VERSION` (`GEM5_REV=v25.0.0.1`);
+-bumping it requires re-running `ci/gem5_install.sh` and verifying
+-both `gem5.opt` builds still load `VortexGPGPU` cleanly.
+-
+-## Building Vortex with gem5 support
+-
+-The device library is gated behind `USE_GEM5=1`. The default
+-`make -C sim/simx` is **unchanged** — no gem5 dep, no `libvortex-gem5.so`
+-produced.
+-
+-```bash
+-make -C sim/simx                     # default; no gem5 artifacts
+-make -C sim/simx USE_GEM5=1          # produces libvortex-gem5.so + gem5_smoke
+-```
+-
+-`USE_SST=1` and `USE_GEM5=1` are mutually exclusive (the Makefile
+-errors out if both are set).
+-
+-### Host runtime + tests (cross-compile)
+-
+-The simulated process inside gem5 loads the **host runtime**
+-`libvortex-gem5-$HOST_ARCH.so`, which exposes the pure-v2 `callbacks_t`
+-to the dispatcher. The `HOST_ARCH` knob is consistent across three
+-Makefiles — runtime backend, stub, and regression tests:
+-
+-```bash
+-# Native x86 (default)
+-make -C sw/runtime/stub                          # → build/sw/runtime/libvortex.so
+-make -C sw/runtime/gem5                          # → build/sw/runtime/libvortex-gem5-x86_64.so
+-make -C tests/regression/vecadd                  # → build/tests/regression/vecadd/vecadd
+-
+-# Cross-compiled aarch64 — outputs land in $arch/ subdirs so x86
+-# and ARM artifacts coexist:
+-make -C sw/runtime/stub HOST_ARCH=aarch64        # → build/sw/runtime/aarch64/libvortex.so
+-make -C sw/runtime/gem5 HOST_ARCH=aarch64        # → build/sw/runtime/aarch64/libvortex-gem5-aarch64.so
+-make -C tests/regression/vecadd HOST_ARCH=aarch64 # → build/tests/regression/vecadd/vecadd-aarch64
+-
+-# armhf works the same way (note: armhf is 32-bit so the BAR
+-# mapping above 4 GiB is out of reach — only standalone tests work):
+-make -C sw/runtime/stub HOST_ARCH=armhf
+-make -C sw/runtime/gem5 HOST_ARCH=armhf
+-```
+-
+-The ARM targets require `gcc-aarch64-linux-gnu` /
+-`gcc-arm-linux-gnueabihf` respectively — `ci/gem5_install.sh`
+-installs these.
+-
+-## Running tests
+-
+-### From the regression harness
+-
+-```bash
+-cd build/
+-./ci/regression.sh --gem5
+-```
+-
+-Runs both the standalone Phase-3 smoke test (kernel preloaded on the
+-SimObject, no host CPU) and the Phase-5 end-to-end test (real SE-mode
+-host program drives the device through CP submissions).
+-
+-To also run the ARM matrix entry (needs `gcc-aarch64-linux-gnu`):
+-
+-```bash
+-VORTEX_GEM5_ARM=1 ./ci/regression.sh --gem5
+-```
+-
+-Runs 6 tests:
+-- X86 standalone hello (no host CPU; SimObject preloads kernel)
+-- X86 e2e vecadd `-n16` (host CPU drives device via CP regfile)
+-- X86 e2e sgemm `-n4`
+-- ARM standalone hello
+-- ARM e2e vecadd `-n16`
+-- ARM e2e sgemm `-n4`
+-
+-Cross-arch e2e relies on two gem5 mechanisms working together:
+-
+-1. **`setInterpDir(prefix)`** prepends a sysroot to the dynamic
+-   linker path embedded in the cross-compiled ELF
+-   (`/lib/ld-linux-aarch64.so.1` → `/usr/aarch64-linux-gnu/lib/...`).
+-   The Python config calls this when `VORTEX_DRIVER=gem5-aarch64`.
+-2. **`system.redirect_paths`** redirects the *guest process's*
+-   open()/stat() syscalls for `/lib/aarch64-linux-gnu/*` →
+-   `/usr/aarch64-linux-gnu/lib/*` so the dynamic linker can resolve
+-   libc, libstdc++, etc.
+-
+-Both paths point at the Ubuntu `gcc-aarch64-linux-gnu` package's
+-install location — no extra setup needed.
+-
+-### By hand
+-
+-**Hostless** (no host CPU; kernel preloaded via SimObject parameter):
+-
+-```bash
+-VORTEX_GEM5_DEV_LIB=$(pwd)/sim/simx/libvortex-gem5.so \
+-VORTEX_TEST_DIR=$(pwd)/tests/kernel/hello \
+-VORTEX_TEST_KERNEL=hello.vxbin \
+-    $GEM5_HOME/build/X86/gem5.opt ci/gem5_run_hostless_app.py
+-```
+-
+-`VORTEX_TEST_KERNEL` defaults to `kernel.vxbin`, so any standard
+-regression test's kernel can be driven hostless without the host
+-binary — e.g. `VORTEX_TEST_DIR=$(pwd)/tests/regression/vecadd
+-ci/gem5_run_hostless_app.py`.
+-
+-**End-to-end** — any standard Vortex regression test (host binary +
+-kernel.vxbin) runs through the generic
+-[`ci/gem5_run_app.py`](../../ci/gem5_run_app.py) runner.
+-
+-```bash
+-# vecadd
+-VORTEX_GEM5_DEV_LIB=$(pwd)/sim/simx/libvortex-gem5.so \
+-VORTEX_GEM5_HOST_RT_DIR=$(pwd)/sw/runtime \
+-VORTEX_TEST_DIR=$(pwd)/tests/regression/vecadd \
+-VORTEX_TEST_BIN=vecadd \
+-VORTEX_TEST_ARGS="-n16" \
+-    $GEM5_HOME/build/X86/gem5.opt ci/gem5_run_app.py
+-
+-# sgemm
+-VORTEX_GEM5_DEV_LIB=$(pwd)/sim/simx/libvortex-gem5.so \
+-VORTEX_GEM5_HOST_RT_DIR=$(pwd)/sw/runtime \
+-VORTEX_TEST_DIR=$(pwd)/tests/regression/sgemm \
+-VORTEX_TEST_BIN=sgemm \
+-VORTEX_TEST_ARGS="-n4" \
+-    $GEM5_HOME/build/X86/gem5.opt ci/gem5_run_app.py
+-```
+-
+-Expected output ends with:
+-```
+-PASSED!
+-```
+-
+-### Sizing tests for the 120 s budget
+-
+-Tests are bounded by the project's 120 s per-test budget. gem5 SE-mode
+-runs the host CPU's CP poll loop in simulated time too, so **kernel
+-runtime + dispatcher poll budget translate directly into gem5 wall
+-time**. The regression script's default sizes fit; larger sizes are
+-fine when run by hand outside the budget cap.
+-
+-## Address space layout
+-
+-```
+-Host process VA (simulated, gem5 SE-mode) | Simulated PA | Backed by
+-------------------------------------------+--------------+----------------------
+-[0x0000_0000_0000, 0x0000_1000_0000)      | same         | gem5 DDR3 (process
+-                                          |              |   heap/stack/code)
+-[0x0000_2000_0000, 0x0000_2000_0200)      | same         | VortexGPGPU CP regfile
+-                                          |              |   (32-bit PIO)
+-[0x0001_0000_0000, 0x0002_0000_0000)      | same         | VortexGPGPU VRAM
+-                                          |              |   (BAR-mapped to
+-                                          |              |    in-process simx::RAM)
+-```
+-
+-PIN_BASE_ADDR = `0x100000000` is identity-mapped via `Process.map()`
+-so host stores at PIN_BASE+dev_addr land in the same in-process
+-simx::RAM bytes the CP and Vortex read. PIO_BASE_ADDR = `0x20000000`
+-is identity-mapped (cacheable=False) so the dispatcher's PIO MMIO
+-reaches the SimObject's regfile decoder.
+-
+-These constants are duplicated in two places — `sw/runtime/gem5/driver.h`
+-and `ci/gem5_run_app.py`. If you change one, change the other.
+-
+-## Writing your own gem5 Python script
+-
+-The minimal recipe for hosting Vortex inside a custom gem5 system:
+-
+-```python
+-from m5.objects import (
+-    AddrRange, AtomicSimpleCPU, DDR3_1600_8x8, MemCtrl, Process,
+-    Root, SEWorkload, SrcClockDomain, System, SystemXBar,
+-    VoltageDomain, VortexGPGPU,
+-)
+-
+-# Mappings expected by sw/runtime/gem5/driver.h.
+-PIO_BASE, PIO_SIZE = 0x20000000, 0x0200          # CP regfile (32-bit)
+-PIN_BASE, PIN_SIZE = 0x100000000, 0x100000000    # BAR-mapped VRAM
+-NUM_CPUS = 4   # >=2 required for the dispatcher's per-Queue worker thread
+-
+-system = System()
+-system.clk_domain = SrcClockDomain(clock="3GHz",
+-                                   voltage_domain=VoltageDomain())
+-system.mem_mode = "atomic"
+-system.mem_ranges = [AddrRange("1GiB")]
+-system.membus = SystemXBar()
+-system.system_port = system.membus.cpu_side_ports
+-
+-# Multiple CPU contexts — the upstream dispatcher spawns a per-Queue
+-# worker thread; clone() in SE-mode needs a free HW context to land on.
+-system.cpu = [AtomicSimpleCPU(cpu_id=i) for i in range(NUM_CPUS)]
+-system.multi_thread = True
+-for cpu in system.cpu:
+-    cpu.createInterruptController()
+-    cpu.icache_port = system.membus.cpu_side_ports
+-    cpu.dcache_port = system.membus.cpu_side_ports
+-    # X86 needs explicit interrupt port wiring; ARM does not.
+-    cpu.interrupts[0].pio           = system.membus.mem_side_ports
+-    cpu.interrupts[0].int_requestor = system.membus.cpu_side_ports
+-    cpu.interrupts[0].int_responder = system.membus.mem_side_ports
+-
+-# DRAM serves the process's address space below PIO_BASE.
+-system.mem_ctrl = MemCtrl()
+-system.mem_ctrl.dram = DDR3_1600_8x8()
+-system.mem_ctrl.dram.range = AddrRange(0, PIO_BASE)
+-system.mem_ctrl.port = system.membus.mem_side_ports
+-
+-# The Vortex device — claims both the CP regfile PIO range and the
+-# BAR-mapped VRAM range.
+-system.vortex = VortexGPGPU(
+-    library = "/path/to/build/sim/simx/libvortex-gem5.so",
+-    kernel  = "",   # NO preload — the host binary uploads via CP
+-)
+-system.vortex.pio_addr = PIO_BASE
+-system.vortex.pio_size = PIO_SIZE
+-system.vortex.pin_addr = PIN_BASE
+-system.vortex.pin_size = PIN_SIZE
+-system.vortex.pio = system.membus.mem_side_ports
+-system.vortex.dma = system.membus.cpu_side_ports
+-
+-# Workload — the host binary loads libvortex.so + libvortex-gem5-x86_64.so.
+-process = Process(
+-    pid=100,
+-    cwd="/path/to/your/test",
+-    cmd=["/path/to/your/test/binary"],
+-    executable="/path/to/your/test/binary",
+-    env=[
+-        "VORTEX_DRIVER=gem5-x86_64",
+-        "LD_LIBRARY_PATH=/path/to/build/sw/runtime",
+-    ],
+-)
+-
+-system.workload = SEWorkload.init_compatible(process.executable)
+-for cpu in system.cpu:
+-    cpu.workload = process       # required: workload size must equal numThreads
+-    cpu.createThreads()
+-
+-import m5
+-root = Root(full_system=False, system=system)
+-m5.instantiate()
+-
+-# CRITICAL: Process.map() must come AFTER m5.instantiate().
+-# Identity-mapping PIO + PIN gives the runtime direct CPU access to
+-# the device's CP regfile and to BAR-mapped VRAM.
+-system.cpu[0].workload[0].map(PIO_BASE, PIO_BASE, PIO_SIZE, cacheable=False)
+-system.cpu[0].workload[0].map(PIN_BASE, PIN_BASE, PIN_SIZE, cacheable=False)
+-
+-m5.simulate()
+-```
+-
+-Reference implementations:
+-- [ci/gem5_run_hostless_app.py](../../ci/gem5_run_hostless_app.py) — hostless variant (preload via `kernel=` param; no host CPU)
+-- [ci/gem5_run_app.py](../../ci/gem5_run_app.py) — e2e variant (any regression test via `VORTEX_TEST_BIN`)
+-
+-## Load-bearing invariants — do not violate
+-
+-### 1. Process.map() goes AFTER m5.instantiate()
+-
+-`Process.map(vaddr, paddr, size)` is a C++ method on the underlying
+-`gem5::Process` object; that object only exists after
+-`m5.instantiate()` builds the SimObject tree. Calling `.map()`
+-before instantiate raises `RuntimeError: Attempt to instantiate
+-orphan node <orphan Process>`. Confirmed by gem5's own AMD GPU
+-integration at `$GEM5_HOME/configs/example/apu_se.py:1055`.
+-
+-### 2. PIO and PIN regions must be identity-mapped — and PIN must be cacheable=False
+-
+-`sw/runtime/gem5/driver.h` hard-codes:
+-- `PIO_BASE_ADDR = 0x20000000` (CP regfile; 0x200 bytes)
+-- `PIN_BASE_ADDR = 0x100000000` (BAR-mapped VRAM; 4 GB)
+-
+-The Python config must `process.map()` both at the same physical
+-addresses, with `cacheable=False` on PIN. With caching enabled the
+-host CPU's L1 could hold the new ring entry while `Q_TAIL_HI` is
+-observed by the CP — the CP fetches a stale CL and the dispatcher
+-hangs polling `Q_SEQNUM`.
+-
+-Changing either constant requires updating both the Python config
+-**and** `sw/runtime/gem5/driver.h` (they are not auto-synced).
+-
+-### 3. CPU thread context count must be >= 2
+-
+-The upstream dispatcher (commit `157e7a1`) spawns a per-Queue worker
+-thread at `vx_queue_create`. SE-mode `clone()` returns EAGAIN if
+-there is no free HW context, which surfaces as
+-`std::system_error: Resource temporarily unavailable` at the
+-dispatcher constructor.
+-
+-Use multiple CPU instances (one per thread) and
+-`system.multi_thread = True`. Assigning the same Process to every
+-CPU is required because gem5 fatals if
+-`workload.size() != numThreads`.
+-
+-### 4. PIO accesses to the CP regfile are 32-bit
+-
+-The CP regfile is 32-bit-wide; `cp_mmio_write/read` in the host
+-runtime are explicitly 32-bit (`mmio_write32` / `mmio_read32` in
+-`driver.cpp`). Don't issue 64-bit accesses — gem5 will deliver a
+-single packet of the wrong width and the SimObject will route the
+-extra bytes into the next regfile slot.
+-
+-### 5. The Vortex `Processor` and `CommandProcessor` are independent gem5 event chains
+-
+-`cpTickEvent_` advances the CP one functional cycle; `vortexTickEvent_`
+-advances the Vortex `Processor::cycle()`. Both self-schedule only
+-while their respective busy flag is true. When the CP fires
+-`CMD_LAUNCH`, the `vortex_start` hook schedules `vortexTickEvent_`
+-via the registered start handler (set at `VortexGPGPU` construction).
+-Don't try to combine them into a single tick — that breaks
+-"concurrent host + CP + GPU progress" which is the whole point of
+-the simulation model.
+-
+-### 6. USE_SST=1 and USE_GEM5=1 are mutually exclusive
+-
+-The Makefile rejects both at once. Different external simulators,
+-different LDFLAGS, different `libvortex.so` shapes. Pick one per
+-build.
+-
+-## CI
+-
+-`./ci/regression.sh --gem5` (built into `--all` is intentionally
+-**out**: gem5 install is heavy and gated like SST). The
+-`.github/workflows/ci.yml` matrix includes a `gem5` entry that runs
+-on hosted runners; ARM matrix gated on `VORTEX_GEM5_ARM=1`.
+-
+-Apptainer integration (the `apptainer-ci.yml` pipeline) does **not**
+-include gem5 — adding it to `miscs/apptainer/vortex.def` is out of
+-scope. Use the hosted CI for gem5.
+-
+-## Troubleshooting
+-
+-| Symptom | Cause | Fix |
+-|---|---|---|
+-| `dlopen('libvortex-gem5.so') failed: cannot open shared object file` | gem5 SimObject can't find the device library | Set `VortexGPGPU(library="/abs/path/to/libvortex-gem5.so", ...)` to absolute path |
+-| `Cannot open library: libvortex-gem5-x86_64.so: cannot open shared object file` | Stub can't find the host runtime backend | Set `LD_LIBRARY_PATH=/path/to/sw/runtime` in the `env=[...]` list passed to `Process()` |
+-| `terminate called after throwing an instance of 'std::system_error': Resource temporarily unavailable` | Dispatcher's per-Queue worker `std::thread` can't `clone()` into a free HW context | Use multiple CPU instances + `system.multi_thread = True`; assign the same Process to every CPU (invariant §3) |
+-| `system.membus has two ports responding within range [...]` | DRAM `mem_ctrl.dram.range` overlaps with VortexGPGPU's PIO or PIN range | Shrink `dram.range = AddrRange(0, PIO_BASE)` so the device-owned ranges have exclusive routing |
+-| `Tried to write unmapped address 0xXXX` | Host runtime is using stale PIN_BASE_ADDR (mismatch with Python config), or `Process.map()` was skipped | Confirm both `sw/runtime/gem5/driver.h` and the Python config use the same `PIN_BASE_ADDR`; ensure `Process.map(PIN_BASE, PIN_BASE, PIN_SIZE)` runs after `m5.instantiate()` |
+-| `Attempt to instantiate orphan node <orphan Process>` | `Process.map()` called before `m5.instantiate()` | Move all `.map()` calls AFTER `m5.instantiate()` — see invariant §1 above |
+-| `fatal: VortexGPGPU: dlsym(vortex_gem5_cp_mmio_write) failed` | Device library is missing the C ABI symbol — usually means the `library=` parameter points at the wrong .so | `library=` is the **device** library `build/sim/simx/libvortex-gem5.so` (no arch suffix), NOT the host runtime `libvortex-gem5-x86_64.so` |
+-| `fatal: system.membus has two ports responding within range [0x10000000:0x20000000]` (standalone hello) | `pin_size` defaulted to non-zero in an old gem5.opt; standalone test doesn't need the BAR | Re-install + rebuild gem5.opt OR explicitly set `pin_size = 0` on the VortexGPGPU instance |
+-| Test hangs polling `Q_SEQNUM` after first launch | Cacheable PIN region — host's L1 holds the ring entry; CP sees stale bytes | Set `cacheable=False` on the PIN `Process.map()` call (invariant §2) |
+-| `ccache g++ ... undefined reference to fmt::v8::detail::error_handler::on_error` | ccache served a stale object compiled against a different `fmt` version | `CCACHE_DISABLE=1 make -C sim/simx clean && CCACHE_DISABLE=1 make ...` |
+-
+----
+-
+-## 6. Proposed but not yet implemented
+-
+-1. **v2 DMA-port memory seam.** The `DevMemAccessor` interface exists, but
+-   `DmaPortDevMem` backing VRAM through gem5's `SimpleMemory` over the
+-   SimObject DMA port is not built — VRAM is in-process `simx::RAM` despite
+-   the `DmaDevice` base class. The seam is the design's whole point;
+-   preserve the intent.
+-2. **Multi-queue host runtime.** The PIO map reserves 4 queues
+-   (`max_queues=4`) but the CP model is single-queue (`q0_`) and the host
+-   exercises Q0 only — the growth path for vortex2.h multi-queue.
+-3. **PCIe `PciDevice` / BAR upgrade.** The C ABI is shape-compatible; only
+-   the gem5 wrapper class changes. Doorbell-ring realism (vs. today's
+-   `Q_SEQNUM` polling) is the matching upgrade — let the CP raise an
+-   interrupt and let the dispatcher sleep until it fires, instead of
+-   spinning on `Q_SEQNUM` PIO reads.
+-4. **FS-mode Linux + a kernel driver** (out of scope) — SE-mode only today.
+-5. **Multi-device** (one `VortexGPGPU` per system today) and a **separate
+-   ClockDomain** for CP vs. Vortex (single-domain today; real silicon has
+-   separate clocks, so v2 would add a second `ClockDomain` and rate-match
+-   the tick events).
+-6. **Profiling timestamp writeback** — arrives "for free" once the CP
+-   `F_PROFILE` path lands (see `command_processor.md` §10).
+-
+-**Known discrepancies to fix** (not future work): the gem5 entry in
+-`.github/workflows/ci.yml` lists both `xlen: [32, 64]` with **no
+-`exclude:`** for xlen=64, contradicting the project's 32-bit-only gem5
+-policy; and `ci/gem5_run_app.py` carries **stale comments** describing the
+-superseded `cp_mmio_write`/`mem_upload` HAL rather than the landed
+-`cp_reg_*` + `host_mem_alloc` transport.
+-
+-**Superseded directions** (recorded to avoid revival): the OPAE-style MMIO
+-command FSM (`CMD_TYPE`/`CMD_RUN`/`MMIO_STATUS`) and staging-buffer DMA
+-protocol (torn out — grep-clean of OPAE leftovers); and the
+-`cp_mmio_{read,write}` + `mem_upload/download/copy` HAL signature (replaced
+-by the 5-callback `cp_pure_v2` transport HAL the whole runtime tree now
+-shares). The claim that `vortex_dcr_read` is not a hook was also discarded —
+-the shipped `CommandProcessor::Hooks` keeps it as a real 6th hook.
+-
+----
+-
+-## 7. Source proposals
+-
+-This design consolidates and supersedes the following proposals (now
+-removed from `docs/proposals/`): `gem5_simx_v3_proposal.md`,
+-`gem5_v2_cp_migration_proposal.md`. The CP architecture is in
+-[`command_processor.md`](command_processor.md).
+diff --git a/sim/simx/Makefile b/sim/simx/Makefile
+index 2e935fd9b..c127d0d7d 100644
+--- a/sim/simx/Makefile
++++ b/sim/simx/Makefile
+@@ -2,15 +2,8 @@ include ../common.mk
+ 
+ DESTDIR ?= $(CURDIR)
+ USE_SST ?= 0
+-USE_GEM5 ?= 0
+ #SST_PKG ?= SST-14.1 # default SST package name
+ 
+-# USE_SST and USE_GEM5 are mutually exclusive — different external
+-# simulator wrappers with different LDFLAGS; building both into one
+-# binary makes no sense.
+-ifeq ($(USE_SST)$(USE_GEM5),11)
+-$(error USE_SST=1 and USE_GEM5=1 are mutually exclusive)
+-endif
+ 
+ OBJ_DIR = $(DESTDIR)/obj
+ CONFIG_FILE = $(DESTDIR)/simx_config.stamp
+@@ -111,11 +104,7 @@ ifeq ($(USE_SST),1)
+ 	SRCS     += $(SRC_DIR)/sst/vortex_simulator.cpp $(SRC_DIR)/sst/vortex_gpgpu.cpp
+ endif
+ 
+-# gem5 integration: build libvortex-gem5.so (the C ABI library loaded
+-# by the gem5 VortexGPGPU SimObject). The gem5 wrapper source is kept
+-# out of the default SRCS list and pulled into VORTEX_GEM5_SRCS so the
+ # default simx binary does not carry it.
+-VORTEX_GEM5_SRCS := $(SRC_DIR)/gem5/vortex_gpgpu.cpp $(SRC_DIR)/gem5/dev_mem.cpp
+ 
+ # Debugging
+ ifdef DEBUG
+@@ -149,10 +138,6 @@ VORTEX_SST_OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(VORTEX_SST_SRCS)
+ DEPS += $(VORTEX_SST_OBJS:.o=.d)
+ endif
+ 
+-ifeq ($(USE_GEM5), 1)
+-VORTEX_GEM5_OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(VORTEX_GEM5_SRCS))
+-DEPS             += $(VORTEX_GEM5_OBJS:.o=.d)
+-endif
+ 
+ 
+ # optional: pipe through ccache if you have it
+@@ -160,14 +145,11 @@ CXX := $(if $(shell which ccache),ccache $(CXX),$(CXX))
+ 
+ PROJECT := simx
+ VORTEX_LIB := libvortex.so
+-VORTEX_GEM5_LIB := libvortex-gem5.so
+ 
+-.PHONY: all force clean clean-lib clean-exe clean-obj libvortex clean-libvortex libvortex-gem5 clean-libvortex-gem5
++.PHONY: all force clean clean-lib clean-exe clean-obj libvortex clean-libvortex
+ 
+ ifeq ($(USE_SST), 1)
+ all: $(DESTDIR)/$(PROJECT) $(DESTDIR)/$(VORTEX_LIB)
+-else ifeq ($(USE_GEM5), 1)
+-all: $(DESTDIR)/$(PROJECT) $(DESTDIR)/$(VORTEX_GEM5_LIB)
+ else
+ all: $(DESTDIR)/$(PROJECT)
+ endif
+@@ -215,13 +197,6 @@ $(DESTDIR)/$(VORTEX_LIB): $(OBJS) $(VORTEX_SST_OBJS)
+ 	-shared -o $@ \
+ 	$(LDFLAGS) $(SST_LFLAGS)
+ 
+-# Vortex gem5 device shared library — the gem5 SimObject dlopens this
+-# and calls the C ABI declared in sim/simx/gem5/vortex_gpgpu.h.
+-libvortex-gem5: $(DESTDIR)/$(VORTEX_GEM5_LIB)
+-
+-$(DESTDIR)/$(VORTEX_GEM5_LIB): $(OBJS) $(VORTEX_GEM5_OBJS)
+-	$(CXX) $(CXXFLAGS) $^ -shared $(LDFLAGS) -Wl,-soname,$(VORTEX_GEM5_LIB) -o $@
+-
+ # updates the timestamp when flags changed.
+ $(CONFIG_FILE): force
+ 	@mkdir -p $(@D)
+@@ -241,8 +216,6 @@ clean-lib:
+ clean-libvortex:
+ 	rm -f $(DESTDIR)/libvortex.so
+ 
+-clean-libvortex-gem5:
+-	rm -f $(DESTDIR)/$(VORTEX_GEM5_LIB)
+ 
+ clean-exe:
+ 	rm -f $(DESTDIR)/$(PROJECT)
+@@ -250,4 +223,4 @@ clean-exe:
+ clean-obj:
+ 	rm -rf $(OBJ_DIR)
+ 
+-clean: clean-lib clean-libvortex clean-libvortex-gem5 clean-exe clean-obj
++clean: clean-lib clean-libvortex clean-exe clean-obj
+diff --git a/sim/simx/gem5/SConscript b/sim/simx/gem5/SConscript
+deleted file mode 100644
+index 535ada56f..000000000
+--- a/sim/simx/gem5/SConscript
++++ /dev/null
+@@ -1,18 +0,0 @@
+-# -*- mode:python -*-
+-#
+-# Vortex SimObjects for gem5. Installed into $GEM5_HOME/src/dev/vortex/
+-# by sim/simx/gem5/install.sh. Picked up automatically by gem5's
+-# top-level SConstruct via the SConscript-recursion rule at
+-# SConstruct:1000.
+-#
+-# This file's source of truth lives in the Vortex tree
+-# (sim/simx/gem5/SConscript); the installer just copies it.
+-
+-Import('*')
+-
+-SimObject('VortexGPGPU.py', sim_objects=['VortexGPGPU'])
+-Source('vortex_gpgpu_dev.cc')
+-
+-# DebugFlag for VortexGPGPU traces. Enable with:
+-#   gem5.opt --debug-flags=VortexGPGPU ...
+-DebugFlag('VortexGPGPU')
+diff --git a/sim/simx/gem5/VortexGPGPU.py b/sim/simx/gem5/VortexGPGPU.py
+deleted file mode 100644
+index f48b410f8..000000000
+--- a/sim/simx/gem5/VortexGPGPU.py
++++ /dev/null
+@@ -1,55 +0,0 @@
+-# Copyright © 2019-2023
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-# http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-# Python SimObject binding for the gem5-side VortexGPGPU device.
+-
+-from m5.objects.Device import DmaDevice
+-from m5.params import *
+-
+-
+-class VortexGPGPU(DmaDevice):
+-    type = "VortexGPGPU"
+-    cxx_header = "dev/vortex/vortex_gpgpu_dev.hh"
+-    cxx_class = "gem5::VortexGPGPU"
+-
+-    # Path to libvortex-gem5.so produced by `make -C sim/simx
+-    # USE_GEM5=1` in the Vortex build dir. Required; the C++ ctor
+-    # fatals if empty.
+-    library = Param.String("Absolute path to libvortex-gem5.so")
+-
+-    # Optional kernel image preloaded at startup() via
+-    # vortex_gem5_load_kernel. When set, the device runs the kernel to
+-    # completion via its own vortexTickEvent_ scheduler and exits the
+-    # sim loop on done — no host CPU or MMIO traffic required. Hosted
+-    # mode (kernel="" or unset) starts idle; the host runtime drives
+-    # the CP via MMIO and the CP schedules its own ticks.
+-    kernel = Param.String("", "Optional .vxbin/.bin/.hex to preload at boot")
+-
+-    # PIO range covers the CP regfile: 0x40 of globals + 4 × 0x40
+-    # per-queue slots = 0x140 used, 0x200 reserved for headroom.
+-    pio_addr    = Param.Addr(0x20000000, "PIO base address (CP regfile)")
+-    pio_size    = Param.Addr(0x0200, "PIO region size (CP regfile, bytes)")
+-    pio_latency = Param.Latency("1ns", "PIO access latency")
+-
+-    # BAR-mapped VRAM. The device exposes its in-process RAM over the
+-    # same physical-address range the host's PIN_BASE_ADDR identity-maps
+-    # to via Process::map(). Host CPU writes land in the same bytes the
+-    # CP's dram_read hook sees — single source of truth for device memory.
+-    #
+-    # Disabled by default (pin_size=0); hosted (e2e) tests opt in by
+-    # setting both pin_addr and pin_size to match PIN_BASE_ADDR / PIN_REGION_SIZE.
+-    pin_addr    = Param.Addr(0x100000000, "VRAM base address (BAR-mapped)")
+-    pin_size    = Param.Addr(0, "VRAM region size (bytes); 0 disables")
+-
+-    # Number of CP queues the PIO map can address. Matches VX_CP_NUM_QUEUES default.
+-    max_queues  = Param.Unsigned(4, "Number of CP queues the PIO map covers")
+diff --git a/sim/simx/gem5/dev_mem.cpp b/sim/simx/gem5/dev_mem.cpp
+deleted file mode 100644
+index 16943bd06..000000000
+--- a/sim/simx/gem5/dev_mem.cpp
++++ /dev/null
+@@ -1,32 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-#include "dev_mem.h"
+-
+-#include <mem.h>
+-
+-namespace vortex_gem5 {
+-
+-void InProcessDevMem::read(uint64_t addr, void* dst, std::size_t bytes) {
+-    ram_.enable_acl(false);
+-    ram_.read(static_cast<uint8_t*>(dst), addr, bytes);
+-    ram_.enable_acl(true);
+-}
+-
+-void InProcessDevMem::write(uint64_t addr, const void* src, std::size_t bytes) {
+-    ram_.enable_acl(false);
+-    ram_.write(static_cast<const uint8_t*>(src), addr, bytes);
+-    ram_.enable_acl(true);
+-}
+-
+-} // namespace vortex_gem5
+diff --git a/sim/simx/gem5/dev_mem.h b/sim/simx/gem5/dev_mem.h
+deleted file mode 100644
+index 89eaae4bd..000000000
+--- a/sim/simx/gem5/dev_mem.h
++++ /dev/null
+@@ -1,51 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-// Device-memory accessor seam for the gem5 backend.
+-// All device-memory accesses (CP ring fetches, completion writebacks,
+-// DMA payloads, MemSim loads/stores) funnel through this interface.
+-// InProcessDevMem wraps simx::RAM for in-process access.
+-
+-#pragma once
+-
+-#include <cstddef>
+-#include <cstdint>
+-
+-namespace vortex {
+-class RAM;
+-} // namespace vortex
+-
+-namespace vortex_gem5 {
+-
+-class DevMemAccessor {
+-public:
+-    virtual ~DevMemAccessor() = default;
+-
+-    virtual void read (uint64_t addr, void* dst,       std::size_t bytes) = 0;
+-    virtual void write(uint64_t addr, const void* src, std::size_t bytes) = 0;
+-};
+-
+-// Backed by the simx::RAM the Processor already uses. The CP/DMA is a
+-// peer of the host runtime, not subject to per-region page protections.
+-class InProcessDevMem final : public DevMemAccessor {
+-public:
+-    explicit InProcessDevMem(vortex::RAM& ram) : ram_(ram) {}
+-
+-    void read (uint64_t addr, void* dst,       std::size_t bytes) override;
+-    void write(uint64_t addr, const void* src, std::size_t bytes) override;
+-
+-private:
+-    vortex::RAM& ram_;
+-};
+-
+-} // namespace vortex_gem5
+diff --git a/sim/simx/gem5/install.sh b/sim/simx/gem5/install.sh
+deleted file mode 100755
+index 0d171f247..000000000
+--- a/sim/simx/gem5/install.sh
++++ /dev/null
+@@ -1,42 +0,0 @@
+-#!/bin/bash
+-# Install the Vortex gem5 SimObject sources into a pinned gem5 tree.
+-#
+-# Copies vortex_gpgpu_dev.{cc,hh}, VortexGPGPU.py, and SConscript into
+-# $GEM5_HOME/src/dev/vortex/ so gem5's scons can build them. The
+-# source-of-truth lives in the Vortex tree (this directory); any
+-# change has to re-run this script before `scons build/<ISA>/gem5.opt`
+-# picks it up.
+-#
+-# Idempotent: re-running just refreshes the files.
+-#
+-# Usage:
+-#   GEM5_HOME=$HOME/tools/gem5 sim/simx/gem5/install.sh
+-# or
+-#   sim/simx/gem5/install.sh           # uses $GEM5_HOME from env
+-
+-set -e
+-
+-GEM5_HOME=${GEM5_HOME:-$HOME/tools/gem5}
+-SOURCE_DIR=$(dirname "$(readlink -f "$0")")
+-
+-if [ ! -d "$GEM5_HOME/src/dev" ]; then
+-    echo "ERROR: GEM5_HOME=$GEM5_HOME does not look like a gem5 tree" >&2
+-    echo "       (expected $GEM5_HOME/src/dev/)" >&2
+-    exit 1
+-fi
+-
+-DEST_DIR="$GEM5_HOME/src/dev/vortex"
+-mkdir -p "$DEST_DIR"
+-
+-install -m 0644 "$SOURCE_DIR/vortex_gpgpu_dev.hh" "$DEST_DIR/"
+-install -m 0644 "$SOURCE_DIR/vortex_gpgpu_dev.cc" "$DEST_DIR/"
+-install -m 0644 "$SOURCE_DIR/VortexGPGPU.py"      "$DEST_DIR/"
+-install -m 0644 "$SOURCE_DIR/SConscript"          "$DEST_DIR/"
+-
+-echo "Vortex SimObjects installed at $DEST_DIR"
+-echo "Files:"
+-ls -1 "$DEST_DIR" | sed 's/^/  /'
+-echo ""
+-echo "Re-build gem5 with one or both of:"
+-echo "  scons -C $GEM5_HOME build/X86/gem5.opt -j\$(nproc)"
+-echo "  scons -C $GEM5_HOME build/ARM/gem5.opt -j\$(nproc)"
+diff --git a/sim/simx/gem5/vortex_gpgpu.cpp b/sim/simx/gem5/vortex_gpgpu.cpp
+deleted file mode 100644
+index 6f2b243b5..000000000
+--- a/sim/simx/gem5/vortex_gpgpu.cpp
++++ /dev/null
+@@ -1,287 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-#include "vortex_gpgpu.h"
+-
+-#include "constants.h"
+-#include "dev_mem.h"
+-#include "processor.h"
+-#include <cmd_processor.h>
+-#include <mem.h>
+-#include <util.h>
+-#include <VX_config.h>
+-#include <VX_types.h>
+-
+-#include <cstdio>
+-#include <cstring>
+-#include <iostream>
+-#include <memory>
+-#include <string>
+-
+-using namespace vortex;
+-
+-// Matches GLOBAL_MEM_SIZE from the host runtime for vram_{read,write} bounds checks.
+-// Inlined to avoid pulling in the full runtime ABI.
+-#if (VX_CFG_XLEN == 64)
+-static constexpr uint64_t GEM5_GLOBAL_MEM_SIZE = 0x200000000ull;  // 8 GB
+-#else
+-static constexpr uint64_t GEM5_GLOBAL_MEM_SIZE = 0x100000000ull;  // 4 GB
+-#endif
+-
+-namespace {
+-
+-// Gem5Device — owns the Vortex Processor + RAM + CommandProcessor.
+-// The CP's hooks call back into proc_/dev_mem_, and the SimObject
+-// drives cp_tick / vortex_tick on independent gem5 events.
+-class Gem5Device {
+-public:
+-    Gem5Device()
+-        : ram_(0, VX_VM_PAGE_SIZE),
+-          proc_(std::make_unique<Processor>()),
+-          dev_mem_(std::make_unique<vortex_gem5::InProcessDevMem>(ram_)),
+-          cp_(make_cp_hooks()) {
+-        proc_->attach_ram(&ram_);
+-    }
+-
+-    ~Gem5Device() = default;
+-
+-    // ---------------- Standalone kernel preload -------------------------
+-    // Primes the KMU DCRs for a 1×1×1 CTA and loads the ELF/bin/hex into VRAM.
+-    // vortex_tick then drives execution to completion (ProcessorImpl::cycle
+-    // does lazy init and calls kmu_->start() on first tick).
+-    // The CP-driven path never calls this — kernels land via mem_upload
+-    // and KMU programming goes through CMD_DCR_*.
+-    bool load_kernel(const std::string& path) {
+-        const uint64_t startup_addr = 0x80000000;  // flat-image (vxbin/bin/hex) load address; the ELF path uses img.entry
+-        proc_->dcr_write(VX_DCR_KMU_STARTUP_ADDR0, startup_addr & 0xffffffff);
+-    #if (VX_CFG_XLEN == 64)
+-        proc_->dcr_write(VX_DCR_KMU_STARTUP_ADDR1, startup_addr >> 32);
+-    #endif
+-        proc_->dcr_write(VX_DCR_KMU_STARTUP_ARG0, 0);
+-        proc_->dcr_write(VX_DCR_KMU_STARTUP_ARG1, 0);
+-        proc_->dcr_write(VX_DCR_KMU_GRID_DIM_X,   1);
+-        proc_->dcr_write(VX_DCR_KMU_GRID_DIM_Y,   1);
+-        proc_->dcr_write(VX_DCR_KMU_GRID_DIM_Z,   1);
+-        proc_->dcr_write(VX_DCR_KMU_BLOCK_DIM_X,  1);
+-        proc_->dcr_write(VX_DCR_KMU_BLOCK_DIM_Y,  1);
+-        proc_->dcr_write(VX_DCR_KMU_BLOCK_DIM_Z,  1);
+-        proc_->dcr_write(VX_DCR_KMU_LMEM_SIZE,    0);
+-        proc_->dcr_write(VX_DCR_KMU_BLOCK_SIZE,   1);
+-        proc_->dcr_write(VX_DCR_KMU_WARP_STEP_X,  VX_CFG_NUM_THREADS);
+-        proc_->dcr_write(VX_DCR_KMU_WARP_STEP_Y,  0);
+-        proc_->dcr_write(VX_DCR_KMU_WARP_STEP_Z,  0);
+-
+-        std::string ext(fileExtension(path.c_str()));
+-        if (ext == "vxbin") {
+-            ram_.loadVxImage(path.c_str());
+-        } else if (ext == "bin") {
+-            ram_.loadBinImage(path.c_str(), startup_addr);
+-        } else if (ext == "hex") {
+-            ram_.loadHexImage(path.c_str());
+-        } else {
+-            std::cerr << "vortex_gem5: unsupported kernel extension '" << ext
+-                      << "' (need .vxbin, .bin, or .hex)" << std::endl;
+-            return false;
+-        }
+-        // Mark device running; the SimObject advances vortexTickEvent_
+-        // until cycle() reports done (hosted launches use vortex_start instead).
+-        vortex_running_ = true;
+-        return true;
+-    }
+-
+-    // ---------------- VRAM direct access --------------------------------
+-    void vram_write(uint64_t addr, const uint8_t* src, uint32_t size) {
+-        if (addr + size > GEM5_GLOBAL_MEM_SIZE) {
+-        #ifndef NDEBUG
+-            std::cerr << "vortex_gem5: vram_write overflow addr=0x"
+-                      << std::hex << addr << " size=" << std::dec << size
+-                      << std::endl;
+-        #endif
+-            return;
+-        }
+-        dev_mem_->write(addr, src, size);
+-    }
+-    void vram_read(uint64_t addr, uint8_t* dst, uint32_t size) {
+-        if (addr + size > GEM5_GLOBAL_MEM_SIZE) {
+-        #ifndef NDEBUG
+-            std::cerr << "vortex_gem5: vram_read overflow addr=0x"
+-                      << std::hex << addr << " size=" << std::dec << size
+-                      << std::endl;
+-        #endif
+-            return;
+-        }
+-        dev_mem_->read(addr, dst, size);
+-    }
+-
+-    // ---------------- CP regfile MMIO -----------------------------------
+-    // The SimObject's PIO handlers route MMIO reads/writes here.
+-    // CP regfile is 32-bit; address map is in sim/common/cmd_processor.h.
+-    void cp_mmio_write(uint32_t off, uint32_t value) { cp_.mmio_write(off, value); }
+-    uint32_t cp_mmio_read (uint32_t off) const       { return cp_.mmio_read(off); }
+-
+-    // ---------------- CP tick / introspection ---------------------------
+-    // Advances the CP one functional cycle; returns true while the CP has work.
+-    // The SimObject reschedules cpTickEvent_ while true, sleeps otherwise.
+-    bool cp_tick() {
+-        cp_.tick();
+-        return cp_.busy();
+-    }
+-    bool cp_has_work() const { return cp_.enabled() && cp_.busy(); }
+-
+-    // ---------------- Vortex tick / introspection -----------------------
+-    // Advances ProcessorImpl::cycle() one step. cycle() does lazy init
+-    // (resets SimPlatform + calls kmu_->start()) on first call.
+-    // For back-to-back launches, the CP's vortex_start hook calls
+-    // start_kmu() explicitly to re-arm the KMU (kmu_->start is idempotent).
+-    bool vortex_tick() {
+-        bool still_running = proc_->cycle();
+-        if (!still_running) {
+-            vortex_running_ = false;
+-        }
+-        return vortex_running_;
+-    }
+-    bool vortex_busy() const { return vortex_running_; }
+-
+-    // ---------------- vortex_start handler registration -----------------
+-    // The CP fires this callback on CMD_LAUNCH retirement. The SimObject
+-    // uses it to schedule vortexTickEvent_, decoupling CP and Vortex tick chains.
+-    void set_start_handler(vortex_gem5_start_handler_t fn, void* ctx) {
+-        start_fn_  = fn;
+-        start_ctx_ = ctx;
+-    }
+-
+-private:
+-    vortex::CommandProcessor::Hooks make_cp_hooks() {
+-        vortex::CommandProcessor::Hooks h;
+-        h.dram_read = [this](uint64_t addr, void* dst, std::size_t bytes) {
+-            dev_mem_->read(addr, dst, bytes);
+-        };
+-        h.dram_write = [this](uint64_t addr, const void* src, std::size_t bytes) {
+-            dev_mem_->write(addr, src, bytes);
+-        };
+-        h.vortex_dcr_write = [this](uint32_t addr, uint32_t value) {
+-            proc_->dcr_write(addr, value);
+-        };
+-        h.vortex_dcr_read = [this](uint32_t addr, uint32_t tag) -> uint32_t {
+-            uint32_t v = 0;
+-            proc_->dcr_read(addr, tag, &v);
+-            return v;
+-        };
+-        h.vortex_start = [this]() {
+-            // Mark Vortex as in-flight, re-arm the KMU, and notify the SimObject.
+-            vortex_running_ = true;
+-            proc_->start_kmu();
+-            if (start_fn_) start_fn_(start_ctx_);
+-        };
+-        h.vortex_busy = [this]() -> bool { return vortex_running_; };
+-        return h;
+-    }
+-
+-    RAM ram_;
+-    std::unique_ptr<Processor> proc_;
+-    std::unique_ptr<vortex_gem5::DevMemAccessor> dev_mem_;
+-    vortex::CommandProcessor cp_;
+-    bool vortex_running_ = false;
+-    vortex_gem5_start_handler_t start_fn_  = nullptr;
+-    void* start_ctx_ = nullptr;
+-};
+-
+-} // namespace
+-
+-// ----- C ABI -----------------------------------------------------------------
+-
+-extern "C" {
+-
+-const char* vortex_gem5_build_info(void) {
+-    static char info[256];
+-    std::snprintf(info, sizeof(info),
+-                  "vortex-gem5 (XLEN=%d, threads=%d, warps=%d, cores=%d, clusters=%d)",
+-                  VX_CFG_XLEN, VX_CFG_NUM_THREADS, VX_CFG_NUM_WARPS, VX_CFG_NUM_CORES, VX_CFG_NUM_CLUSTERS);
+-    return info;
+-}
+-
+-vortex_gem5_handle_t vortex_gem5_create(void) {
+-    try {
+-        return reinterpret_cast<vortex_gem5_handle_t>(new Gem5Device());
+-    } catch (const std::exception& e) {
+-        std::cerr << "vortex_gem5_create: " << e.what() << std::endl;
+-        return nullptr;
+-    } catch (...) {
+-        std::cerr << "vortex_gem5_create: unknown exception" << std::endl;
+-        return nullptr;
+-    }
+-}
+-
+-void vortex_gem5_destroy(vortex_gem5_handle_t h) {
+-    if (h == nullptr) return;
+-    delete reinterpret_cast<Gem5Device*>(h);
+-}
+-
+-void vortex_gem5_set_start_handler(vortex_gem5_handle_t h,
+-                                   vortex_gem5_start_handler_t fn,
+-                                   void* ctx) {
+-    if (h == nullptr) return;
+-    reinterpret_cast<Gem5Device*>(h)->set_start_handler(fn, ctx);
+-}
+-
+-int vortex_gem5_load_kernel(vortex_gem5_handle_t h, const char* path) {
+-    if (h == nullptr || path == nullptr) return -1;
+-    return reinterpret_cast<Gem5Device*>(h)->load_kernel(path) ? 0 : -1;
+-}
+-
+-void vortex_gem5_cp_mmio_write(vortex_gem5_handle_t h,
+-                               uint32_t off, uint32_t value) {
+-    if (h == nullptr) return;
+-    reinterpret_cast<Gem5Device*>(h)->cp_mmio_write(off, value);
+-}
+-
+-uint32_t vortex_gem5_cp_mmio_read(vortex_gem5_handle_t h, uint32_t off) {
+-    if (h == nullptr) return 0;
+-    return reinterpret_cast<Gem5Device*>(h)->cp_mmio_read(off);
+-}
+-
+-bool vortex_gem5_cp_tick(vortex_gem5_handle_t h) {
+-    if (h == nullptr) return false;
+-    return reinterpret_cast<Gem5Device*>(h)->cp_tick();
+-}
+-
+-bool vortex_gem5_cp_has_work(vortex_gem5_handle_t h) {
+-    if (h == nullptr) return false;
+-    return reinterpret_cast<Gem5Device*>(h)->cp_has_work();
+-}
+-
+-bool vortex_gem5_vortex_tick(vortex_gem5_handle_t h) {
+-    if (h == nullptr) return false;
+-    return reinterpret_cast<Gem5Device*>(h)->vortex_tick();
+-}
+-
+-bool vortex_gem5_vortex_busy(vortex_gem5_handle_t h) {
+-    if (h == nullptr) return false;
+-    return reinterpret_cast<Gem5Device*>(h)->vortex_busy();
+-}
+-
+-void vortex_gem5_vram_write(vortex_gem5_handle_t h,
+-                            uint64_t dev_addr, const uint8_t* src,
+-                            uint32_t size) {
+-    if (h == nullptr || src == nullptr) return;
+-    reinterpret_cast<Gem5Device*>(h)->vram_write(dev_addr, src, size);
+-}
+-
+-void vortex_gem5_vram_read(vortex_gem5_handle_t h,
+-                           uint64_t dev_addr, uint8_t* dst,
+-                           uint32_t size) {
+-    if (h == nullptr || dst == nullptr) return;
+-    reinterpret_cast<Gem5Device*>(h)->vram_read(dev_addr, dst, size);
+-}
+-
+-} // extern "C"
+diff --git a/sim/simx/gem5/vortex_gpgpu.h b/sim/simx/gem5/vortex_gpgpu.h
+deleted file mode 100644
+index 0951554e2..000000000
+--- a/sim/simx/gem5/vortex_gpgpu.h
++++ /dev/null
+@@ -1,116 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-// libvortex-gem5 — C ABI for the gem5 VortexGPGPU SimObject.
+-//
+-// The device library hosts a vortex::Processor + vortex::CommandProcessor pair,
+-// exposes a 32-bit CP MMIO regfile (PIO_BASE_ADDR + 0x0 .. + 0x1FF), and
+-// provides two independently-tickable engines so the SimObject can drive CP and
+-// Vortex as separate gem5 event chains:
+-//
+-//     cpTickEvent_      -> vortex_gem5_cp_tick()
+-//     vortexTickEvent_  -> vortex_gem5_vortex_tick()
+-//
+-// Both engines self-report whether they still have work via
+-// vortex_gem5_cp_has_work() / vortex_gem5_vortex_busy(). The CP's vortex_start
+-// hook calls back into the SimObject via the start-handler registered at
+-// construction so a CMD_LAUNCH retirement schedules vortexTickEvent_ from
+-// inside cpTickEvent_'s execution.
+-//
+-// The ABI is C so the gem5 side does not depend on SimX's internal types.
+-//
+-// Concurrency: all calls are serialized on the gem5 event-loop thread.
+-// No internal locking. No re-entrancy.
+-
+-#pragma once
+-
+-#include <VX_types.h>
+-#include <stdbool.h>
+-#include <stddef.h>
+-#include <stdint.h>
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-// Opaque handle. Owns a vortex::Processor, RAM, MemoryAllocator, and
+-// vortex::CommandProcessor.
+-typedef struct vortex_gem5_device_s* vortex_gem5_handle_t;
+-
+-// Returns a printable description of the build config (cores, warps,
+-// threads, VX_CFG_XLEN). Returned pointer is static; do not free.
+-const char* vortex_gem5_build_info(void);
+-
+-// Construct a Vortex device instance. Returns NULL on failure.
+-// VRAM is allocated lazily; no kernel is loaded until
+-// vortex_gem5_load_kernel is called.
+-vortex_gem5_handle_t vortex_gem5_create(void);
+-
+-// Destroy the device. Safe to call with NULL.
+-void vortex_gem5_destroy(vortex_gem5_handle_t h);
+-
+-// Register a callback the device library invokes from inside its CP
+-// vortex_start hook. The SimObject uses this to schedule its Vortex
+-// tick event when the CP launches a kernel. Pass NULL to clear.
+-// `ctx` is forwarded back unchanged.
+-typedef void (*vortex_gem5_start_handler_t)(void* ctx);
+-void vortex_gem5_set_start_handler(vortex_gem5_handle_t h,
+-                                   vortex_gem5_start_handler_t fn,
+-                                   void* ctx);
+-
+-// Load a kernel image (.vxbin / .bin / .hex) into VRAM and prime KMU DCRs
+-// for a 1×1×1 CTA at the standalone load address. In hosted mode the
+-// dispatcher uploads kernels via mem_upload + CMD_DCR_WRITE through the CP.
+-// Returns 0 on success, -1 on file-not-found or unsupported format.
+-int vortex_gem5_load_kernel(vortex_gem5_handle_t h, const char* path);
+-
+-// CP regfile MMIO. `off` is the CP-internal byte offset (0..0x13F for queue 0).
+-// All accesses are 32-bit. The gem5 device's PIO range maps directly to the
+-// CP regfile; the SimObject translates each PIO packet into one of these calls.
+-void     vortex_gem5_cp_mmio_write(vortex_gem5_handle_t h,
+-                                   uint32_t off, uint32_t value);
+-uint32_t vortex_gem5_cp_mmio_read (vortex_gem5_handle_t h, uint32_t off);
+-
+-// Advance the embedded CommandProcessor by one functional cycle.
+-// Returns true if the CP has more work (ring non-empty, command in
+-// flight) and should be ticked again.
+-bool vortex_gem5_cp_tick(vortex_gem5_handle_t h);
+-
+-// True iff the CP would benefit from being ticked: enabled and busy.
+-// The SimObject uses this from PIO write handlers (after a CP regfile
+-// update may have armed work) to decide whether to schedule
+-// cpTickEvent_.
+-bool vortex_gem5_cp_has_work(vortex_gem5_handle_t h);
+-
+-// Advance the Vortex Processor by one cycle. Returns true while the
+-// processor is still running (clusters active or channels carrying
+-// packets); the SimObject's vortexTickEvent_ reschedules itself while
+-// this returns true and stops otherwise.
+-bool vortex_gem5_vortex_tick(vortex_gem5_handle_t h);
+-
+-// True iff Vortex is currently executing a kernel (any cluster
+-// running, any in-flight memory transactions). Used by the CP's
+-// vortex_busy hook to know when to retire a CMD_LAUNCH.
+-bool vortex_gem5_vortex_busy(vortex_gem5_handle_t h);
+-
+-// Direct device-VRAM access for the SimObject's DMA-path scratch buffers.
+-void vortex_gem5_vram_write(vortex_gem5_handle_t h,
+-                            uint64_t dev_addr, const uint8_t* src,
+-                            uint32_t size);
+-void vortex_gem5_vram_read (vortex_gem5_handle_t h,
+-                            uint64_t dev_addr, uint8_t* dst,
+-                            uint32_t size);
+-
+-#ifdef __cplusplus
+-} // extern "C"
+-#endif
+diff --git a/sim/simx/gem5/vortex_gpgpu_dev.cc b/sim/simx/gem5/vortex_gpgpu_dev.cc
+deleted file mode 100644
+index 396ec33e0..000000000
+--- a/sim/simx/gem5/vortex_gpgpu_dev.cc
++++ /dev/null
+@@ -1,274 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-#include "dev/vortex/vortex_gpgpu_dev.hh"
+-
+-#include "base/logging.hh"
+-#include "base/trace.hh"
+-#include "mem/packet_access.hh"
+-#include "sim/sim_exit.hh"
+-
+-#include <dlfcn.h>
+-
+-namespace gem5
+-{
+-
+-namespace {
+-
+-template <typename T>
+-T dlsym_or_fatal(void* handle, const char* symbol, const char* libpath)
+-{
+-    void* p = dlsym(handle, symbol);
+-    if (p == nullptr) {
+-        fatal("VortexGPGPU: dlsym(%s) failed in %s: %s",
+-              symbol, libpath, dlerror());
+-    }
+-    return reinterpret_cast<T>(p);
+-}
+-
+-} // namespace
+-
+-VortexGPGPU::VortexGPGPU(const Params &p)
+-  : DmaDevice(p),
+-    libHandle_(nullptr),
+-    deviceHandle_(nullptr),
+-    abi_{},
+-    libraryPath_(p.library),
+-    kernelPath_(p.kernel),
+-    pioAddr_(p.pio_addr),
+-    pioSize_(p.pio_size),
+-    pinAddr_(p.pin_addr),
+-    pinSize_(p.pin_size),
+-    pioLatency_(p.pio_latency),
+-    cpTickEvent_([this]{ this->cpTick(); }, name() + ".cpTickEvent"),
+-    vortexTickEvent_([this]{ this->vortexTick(); }, name() + ".vortexTickEvent"),
+-    standalone_(false)
+-{
+-    if (libraryPath_.empty()) {
+-        fatal("VortexGPGPU: 'library' parameter is required "
+-              "(path to libvortex-gem5.so)");
+-    }
+-
+-    libHandle_ = dlopen(libraryPath_.c_str(), RTLD_LAZY | RTLD_LOCAL);
+-    if (libHandle_ == nullptr) {
+-        fatal("VortexGPGPU: dlopen('%s') failed: %s",
+-              libraryPath_, dlerror());
+-    }
+-
+-    // Resolve the ABI surface. Any missing symbol is a hard build
+-    // mismatch — fatal at construction rather than mid-simulation.
+-    abi_.build_info        = dlsym_or_fatal<const char*(*)(void)>
+-                              (libHandle_, "vortex_gem5_build_info",        libraryPath_.c_str());
+-    abi_.create            = dlsym_or_fatal<void*(*)(void)>
+-                              (libHandle_, "vortex_gem5_create",            libraryPath_.c_str());
+-    abi_.destroy           = dlsym_or_fatal<void(*)(void*)>
+-                              (libHandle_, "vortex_gem5_destroy",           libraryPath_.c_str());
+-    abi_.set_start_handler = dlsym_or_fatal<void(*)(void*, void(*)(void*), void*)>
+-                              (libHandle_, "vortex_gem5_set_start_handler", libraryPath_.c_str());
+-    abi_.load_kernel       = dlsym_or_fatal<int(*)(void*, const char*)>
+-                              (libHandle_, "vortex_gem5_load_kernel",       libraryPath_.c_str());
+-    abi_.cp_mmio_write     = dlsym_or_fatal<void(*)(void*, uint32_t, uint32_t)>
+-                              (libHandle_, "vortex_gem5_cp_mmio_write",     libraryPath_.c_str());
+-    abi_.cp_mmio_read      = dlsym_or_fatal<uint32_t(*)(void*, uint32_t)>
+-                              (libHandle_, "vortex_gem5_cp_mmio_read",      libraryPath_.c_str());
+-    abi_.cp_tick           = dlsym_or_fatal<bool(*)(void*)>
+-                              (libHandle_, "vortex_gem5_cp_tick",           libraryPath_.c_str());
+-    abi_.cp_has_work       = dlsym_or_fatal<bool(*)(void*)>
+-                              (libHandle_, "vortex_gem5_cp_has_work",       libraryPath_.c_str());
+-    abi_.vortex_tick       = dlsym_or_fatal<bool(*)(void*)>
+-                              (libHandle_, "vortex_gem5_vortex_tick",       libraryPath_.c_str());
+-    abi_.vortex_busy       = dlsym_or_fatal<bool(*)(void*)>
+-                              (libHandle_, "vortex_gem5_vortex_busy",       libraryPath_.c_str());
+-    abi_.vram_write        = dlsym_or_fatal<void(*)(void*, uint64_t, const uint8_t*, uint32_t)>
+-                              (libHandle_, "vortex_gem5_vram_write",        libraryPath_.c_str());
+-    abi_.vram_read         = dlsym_or_fatal<void(*)(void*, uint64_t, uint8_t*, uint32_t)>
+-                              (libHandle_, "vortex_gem5_vram_read",         libraryPath_.c_str());
+-
+-    inform("VortexGPGPU: %s", abi_.build_info());
+-    inform("VortexGPGPU: library=%s", libraryPath_);
+-    inform("VortexGPGPU: pio[CP regfile]=[0x%llx,+0x%llx)",
+-           static_cast<unsigned long long>(pioAddr_),
+-           static_cast<unsigned long long>(pioSize_));
+-    if (pinSize_ != 0) {
+-        inform("VortexGPGPU: pin[BAR-mapped VRAM]=[0x%llx,+0x%llx)",
+-               static_cast<unsigned long long>(pinAddr_),
+-               static_cast<unsigned long long>(pinSize_));
+-    }
+-
+-    deviceHandle_ = abi_.create();
+-    if (deviceHandle_ == nullptr) {
+-        fatal("VortexGPGPU: vortex_gem5_create returned NULL");
+-    }
+-
+-    // Register the vortex_start trampoline so the CP can schedule
+-    // Vortex ticks from inside cp_tick.
+-    abi_.set_start_handler(deviceHandle_, &VortexGPGPU::onVortexStartTrampoline, this);
+-}
+-
+-VortexGPGPU::~VortexGPGPU()
+-{
+-    if (deviceHandle_ != nullptr && abi_.destroy != nullptr) {
+-        abi_.destroy(deviceHandle_);
+-    }
+-    if (libHandle_ != nullptr) {
+-        dlclose(libHandle_);
+-    }
+-}
+-
+-void
+-VortexGPGPU::init()
+-{
+-    DmaDevice::init();
+-}
+-
+-void
+-VortexGPGPU::startup()
+-{
+-    DmaDevice::startup();
+-
+-    if (!kernelPath_.empty()) {
+-        // Standalone mode: preload a kernel and self-drive to completion.
+-        // No host CPU involvement; used as a smoke test for the device library.
+-        inform("VortexGPGPU: standalone mode (preload + auto-tick)");
+-        inform("VortexGPGPU: preloading kernel=%s", kernelPath_);
+-        if (abi_.load_kernel(deviceHandle_, kernelPath_.c_str()) != 0) {
+-            fatal("VortexGPGPU: vortex_gem5_load_kernel('%s') failed",
+-                  kernelPath_);
+-        }
+-        standalone_ = true;
+-        schedule(vortexTickEvent_, clockEdge(Cycles(1)));
+-    } else {
+-        // Hosted mode: the host runtime issues CP MMIO writes to configure
+-        // queues and commit commands; the CP schedules ticks via maybeWakeCp()
+-        // and the vortex tick via the start handler. Idle at boot.
+-        inform("VortexGPGPU: hosted mode (waiting for CP enable)");
+-        standalone_ = false;
+-    }
+-}
+-
+-void
+-VortexGPGPU::cpTick()
+-{
+-    const bool still_busy = abi_.cp_tick(deviceHandle_);
+-    if (still_busy) {
+-        schedule(cpTickEvent_, clockEdge(Cycles(1)));
+-    }
+-    // Idle drop-out: no reschedule. PIO writes that arm new work will
+-    // call maybeWakeCp() and reschedule us.
+-}
+-
+-void
+-VortexGPGPU::vortexTick()
+-{
+-    const bool still_running = abi_.vortex_tick(deviceHandle_);
+-    if (still_running) {
+-        schedule(vortexTickEvent_, clockEdge(Cycles(1)));
+-        return;
+-    }
+-    if (standalone_) {
+-        inform("VortexGPGPU: standalone kernel complete — exiting sim loop");
+-        exitSimLoop("VortexGPGPU: kernel complete");
+-        return;
+-    }
+-    // Hosted mode: Vortex finished. The CP's launch FSM observes
+-    // vortex_busy() == false on its next tick and retires the
+-    // CMD_LAUNCH. If the CP is already idle (no scheduled tick) we
+-    // need to wake it so the retirement actually happens.
+-    maybeWakeCp();
+-}
+-
+-void
+-VortexGPGPU::maybeWakeCp()
+-{
+-    if (abi_.cp_has_work(deviceHandle_) && !cpTickEvent_.scheduled()) {
+-        schedule(cpTickEvent_, clockEdge(Cycles(1)));
+-    }
+-}
+-
+-void
+-VortexGPGPU::onVortexStartTrampoline(void* ctx)
+-{
+-    static_cast<VortexGPGPU*>(ctx)->onVortexStart();
+-}
+-
+-void
+-VortexGPGPU::onVortexStart()
+-{
+-    if (!vortexTickEvent_.scheduled()) {
+-        schedule(vortexTickEvent_, clockEdge(Cycles(1)));
+-    }
+-}
+-
+-Tick
+-VortexGPGPU::read(PacketPtr pkt)
+-{
+-    const Addr a = pkt->getAddr();
+-    if (a >= pioAddr_ && a < pioAddr_ + pioSize_) {
+-        // CP regfile access — 32-bit only.
+-        const uint32_t off = uint32_t(a - pioAddr_);
+-        const uint32_t value = abi_.cp_mmio_read(deviceHandle_, off);
+-        pkt->setUintX(static_cast<uint64_t>(value), ByteOrder::little);
+-        pkt->makeAtomicResponse();
+-        return pioLatency_;
+-    }
+-    // BAR-mapped VRAM access (CPU is reading device memory directly).
+-    // Variable-width packet (host load / cache-line fill).
+-    const uint64_t dev_addr = a - pinAddr_;
+-    abi_.vram_read(deviceHandle_,
+-                   dev_addr,
+-                   pkt->getPtr<uint8_t>(),
+-                   uint32_t(pkt->getSize()));
+-    pkt->makeAtomicResponse();
+-    return pioLatency_;
+-}
+-
+-Tick
+-VortexGPGPU::write(PacketPtr pkt)
+-{
+-    const Addr a = pkt->getAddr();
+-    if (a >= pioAddr_ && a < pioAddr_ + pioSize_) {
+-        // CP regfile write — 32-bit only.
+-        const uint32_t off = uint32_t(a - pioAddr_);
+-        const uint64_t raw = pkt->getUintX(ByteOrder::little);
+-        abi_.cp_mmio_write(deviceHandle_, off, uint32_t(raw));
+-        maybeWakeCp();
+-        pkt->makeAtomicResponse();
+-        return pioLatency_;
+-    }
+-    // BAR-mapped VRAM write — variable-width packet (host store /
+-    // cache writeback). Subsequent device reads at the same address
+-    // see the bytes written here.
+-    const uint64_t dev_addr = a - pinAddr_;
+-    abi_.vram_write(deviceHandle_,
+-                    dev_addr,
+-                    pkt->getConstPtr<uint8_t>(),
+-                    uint32_t(pkt->getSize()));
+-    // Writes to device VRAM may seed CP ring entries; if the CP is
+-    // dormant, leave it dormant (the CP only wakes on a doorbell PIO
+-    // write, not on a ring-fill).
+-    pkt->makeAtomicResponse();
+-    return pioLatency_;
+-}
+-
+-AddrRangeList
+-VortexGPGPU::getAddrRanges() const
+-{
+-    AddrRangeList ranges;
+-    ranges.push_back(RangeSize(pioAddr_, pioSize_));
+-    if (pinSize_ != 0) {
+-        ranges.push_back(RangeSize(pinAddr_, pinSize_));
+-    }
+-    return ranges;
+-}
+-
+-} // namespace gem5
+diff --git a/sim/simx/gem5/vortex_gpgpu_dev.hh b/sim/simx/gem5/vortex_gpgpu_dev.hh
+deleted file mode 100644
+index 54aab326f..000000000
+--- a/sim/simx/gem5/vortex_gpgpu_dev.hh
++++ /dev/null
+@@ -1,133 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-// VortexGPGPU — gem5 SimObject wrapper for libvortex-gem5.so.
+-//
+-// Lives at $GEM5_HOME/src/dev/vortex/vortex_gpgpu_dev.{cc,hh} after
+-// sim/simx/gem5/install.sh runs. The host-side source of truth is the
+-// Vortex tree (sim/simx/gem5/) so API drift between gem5 and the Vortex
+-// C ABI surfaces as a build error in Vortex CI, not as a gem5
+-// integration mystery.
+-//
+-// Design (gem5_v2_cp_migration_proposal §2.3, §2.4):
+-//   - dlopen the Vortex library at construction; resolve all
+-//     vortex_gem5_* symbols up-front so the hot paths (cpTick,
+-//     vortexTick, PIO read/write) are direct indirect calls.
+-//   - PIO range is exactly the CP regfile (PIO_BASE_ADDR + 0..+0x1FF,
+-//     proposal §3); no legacy OPAE register window.
+-//   - cpTickEvent_ self-schedules only while the CP has work; goes
+-//     dormant otherwise (proposal §2.3). PIO writes that may have
+-//     armed work re-arm the schedule.
+-//   - vortexTickEvent_ self-schedules only while Vortex is running;
+-//     scheduled by the CP's vortex_start hook via the registered
+-//     start handler (proposal §2.4). Standalone mode skips the CP
+-//     and schedules vortexTickEvent_ directly at startup.
+-//   - DmaDevice base class kept for forward compatibility with the
+-//     v2 DMA-port seam (proposal §2.5) and for the standalone smoke
+-//     test path that still uses gem5's pio interface.
+-
+-#ifndef __DEV_VORTEX_VORTEX_GPGPU_DEV_HH__
+-#define __DEV_VORTEX_VORTEX_GPGPU_DEV_HH__
+-
+-#include "dev/dma_device.hh"
+-#include "dev/io_device.hh"
+-#include "params/VortexGPGPU.hh"
+-#include "sim/eventq.hh"
+-
+-#include <cstdint>
+-#include <string>
+-
+-namespace gem5
+-{
+-
+-class VortexGPGPU : public DmaDevice
+-{
+-public:
+-    using Params = VortexGPGPUParams;
+-
+-    VortexGPGPU(const Params &p);
+-    ~VortexGPGPU() override;
+-
+-    // PioDevice interface
+-    Tick read(PacketPtr pkt) override;
+-    Tick write(PacketPtr pkt) override;
+-    AddrRangeList getAddrRanges() const override;
+-
+-    // SimObject lifecycle
+-    void init() override;
+-    void startup() override;
+-
+-private:
+-    // CP tick — advances the embedded CommandProcessor one functional
+-    // cycle. Self-reschedules iff cp_tick reported still-busy.
+-    void cpTick();
+-
+-    // Vortex tick — advances the Vortex Processor one cycle.
+-    // Self-reschedules iff vortex_tick reported still-running.
+-    // Standalone mode exits the sim loop when vortex_tick returns false.
+-    void vortexTick();
+-
+-    // Called from a PIO write to schedule cpTickEvent_ if (a) the CP
+-    // reports new work and (b) the event isn't already pending.
+-    void maybeWakeCp();
+-
+-    // Static trampoline registered with the device library so the CP's
+-    // vortex_start hook can schedule vortexTickEvent_ via the gem5
+-    // event scheduler. Passing `this` via the void* ctx avoids any
+-    // dependency on gem5 types in the library.
+-    static void onVortexStartTrampoline(void* ctx);
+-    void onVortexStart();
+-
+-    // Library binding ------------------------------------------------
+-    void* libHandle_;
+-    void* deviceHandle_;
+-
+-    struct AbiV2 {
+-        const char* (*build_info)(void);
+-        void*       (*create)(void);
+-        void        (*destroy)(void* h);
+-        void        (*set_start_handler)(void* h, void (*fn)(void*), void* ctx);
+-        int         (*load_kernel)(void* h, const char* path);
+-        void        (*cp_mmio_write)(void* h, uint32_t off, uint32_t value);
+-        uint32_t    (*cp_mmio_read)(void* h, uint32_t off);
+-        bool        (*cp_tick)(void* h);
+-        bool        (*cp_has_work)(void* h);
+-        bool        (*vortex_tick)(void* h);
+-        bool        (*vortex_busy)(void* h);
+-        void        (*vram_write)(void* h, uint64_t addr,
+-                                  const uint8_t* src, uint32_t size);
+-        void        (*vram_read)(void* h, uint64_t addr,
+-                                 uint8_t* dst, uint32_t size);
+-    } abi_;
+-
+-    // Configuration --------------------------------------------------
+-    const std::string libraryPath_;
+-    const std::string kernelPath_;
+-    const Addr        pioAddr_;
+-    const Addr        pioSize_;
+-    const Addr        pinAddr_;   // device VRAM, host-visible as BAR
+-    const Addr        pinSize_;
+-    const Tick        pioLatency_;
+-
+-    // Event scheduling
+-    EventFunctionWrapper cpTickEvent_;
+-    EventFunctionWrapper vortexTickEvent_;
+-
+-    // Standalone (Phase 3) vs. hosted mode. Set by startup() based on
+-    // whether the `kernel=` Python param was provided.
+-    bool standalone_;
+-};
+-
+-} // namespace gem5
+-
+-#endif // __DEV_VORTEX_VORTEX_GPGPU_DEV_HH__
+diff --git a/sim/simx/mem/memory.cpp b/sim/simx/mem/memory.cpp
+index 9dd791a79..243e3be5a 100644
+--- a/sim/simx/mem/memory.cpp
++++ b/sim/simx/mem/memory.cpp
+@@ -13,13 +13,14 @@
+ 
+ #include <VX_types.h>
+ #include "memory.h"
++#include <algorithm>
++#include <stdexcept>
+ #include <vector>
+ #include <queue>
+ #include <sstream>
+ #include <unordered_map>
+ #include <iostream>
+ #include <stdlib.h>
+-#include <dram_sim.h>
+ 
+ #include "mem_block_pool.h"
+ #include "constants.h"
+@@ -34,23 +35,23 @@ private:
+ 	Memory*   simobject_;
+ 	Config    config_;
+ 	MemCrossBar::Ptr mem_xbar_;
+-	DramSim   dram_sim_;
+-	RAM*      ram_;
+ 	Memory::PreSendHook pre_send_hook_;
+-	mutable PerfStats perf_stats_;
+-	struct DramCallbackArgs {
+-		Memory::Impl* memsim;
++	Memory::ExternalIssueHook external_issue_hook_;
++	uint64_t next_external_token_ = 1;
++	struct ExternalPending {
+ 		MemReq request;
+ 		uint32_t bank_id;
+-		std::shared_ptr<mem_block_t> rsp_data;  // captured at request time for reads
++		std::shared_ptr<mem_block_t> rsp_data;
++		bool complete = false;
+ 	};
++	std::unordered_map<uint64_t, ExternalPending> external_pending_;
++	std::queue<uint64_t> external_completed_;
++	mutable PerfStats perf_stats_;
+ 
+ public:
+ 	Impl(Memory* simobject, const Config& config)
+ 		: simobject_(simobject)
+ 		, config_(config)
+-		, dram_sim_(config.num_banks, config.block_size, config.clock_ratio)
+-		, ram_(nullptr)
+ 	{
+ 		char sname[100];
+ 		snprintf(sname, 100, "%s-xbar", simobject->name().c_str());
+@@ -73,11 +74,34 @@ public:
+ 	}
+ 
+ 	void reset() {
+-		dram_sim_.reset();
++		external_pending_.clear();
++		while (!external_completed_.empty()) external_completed_.pop();
+ 	}
+ 
+ 	void tick() {
+-		dram_sim_.tick();
++		// Completion callbacks arrive on the embedding simulator's event queue.
++		// Deliver them only from Memory::tick(), keeping SimChannel mutations on
++		// the ordinary Vortex cycle boundary.
++		while (!external_completed_.empty()) {
++			const uint64_t token = external_completed_.front();
++			auto found = external_pending_.find(token);
++			if (found == external_pending_.end()) {
++				external_completed_.pop();
++				continue;
++			}
++			auto& pending = found->second;
++			if (!pending.request.is_write()) {
++				MemRsp mem_rsp{pending.request.tag, pending.request.hart_id,
++				               pending.request.uuid};
++				mem_rsp.data = pending.rsp_data;
++				if (!mem_xbar_->RspIn.at(pending.bank_id).try_send(mem_rsp))
++					break;
++			}
++			external_pending_.erase(found);
++			external_completed_.pop();
++		}
++
++		if (!external_issue_hook_) throw std::runtime_error("external memory backend required");
+ 
+ 		for (uint32_t i = 0; i < config_.num_banks; ++i) {
+ 			if (mem_xbar_->ReqOut.at(i).empty())
+@@ -85,75 +109,64 @@ public:
+ 
+ 			auto& mem_req = mem_xbar_->ReqOut.at(i).peek();
+ 
+-			std::shared_ptr<mem_block_t> rsp_data;
+-			if (ram_) {
+-				uint64_t line_addr = mem_req.addr & ~uint64_t(VX_CFG_MEM_BLOCK_SIZE - 1);
+-				// Cache fills/writebacks are simulator-internal traffic and
+-				// don't carry the kernel's intent (e.g. a write-back cache
+-				// reads a write-only buffer to fill the line on write-miss,
+-				// since memory buses lack per-region read/write permissions).
+-				// Suppress ACL for the duration; ACL still guards upload/download.
+-				ram_->enable_acl(false);
+-				if (mem_req.is_write()) {
+-					// Apply byte-enabled write to RAM at request arrival.
+-					// IO_COUT-range bytes are tapped to the print buffer and
+-					// not stored in RAM.
+-					if (mem_req.data) {
+-						for (uint32_t b = 0; b < VX_CFG_MEM_BLOCK_SIZE; ++b) {
+-							if (mem_req.byteen & (1ull << b)) {
+-								uint8_t value = (*mem_req.data)[b];
+-								ram_->write(&value, line_addr + b, 1);
+-							}
+-						}
+-					}
+-				} else {
+-					// Capture the line at request time; response carries it back.
+-					rsp_data = make_mem_block();
+-					ram_->read(rsp_data->data(), line_addr, VX_CFG_MEM_BLOCK_SIZE);
++			if (external_issue_hook_) {
++				if (external_pending_.size() >= 32) continue;
++				const uint64_t token = next_external_token_;
++				std::shared_ptr<mem_block_t> rsp_data;
++				if (!mem_req.is_write()) rsp_data = make_mem_block();
++				external_pending_.emplace(
++					token, ExternalPending{mem_req, i, rsp_data, false});
++				const uint8_t* write_data =
++					(mem_req.is_write() && mem_req.data)
++						? mem_req.data->data() : nullptr;
++				if (!external_issue_hook_(token, mem_req, write_data,
++				                          mem_req.byteen, config_.block_size)) {
++					external_pending_.erase(token);
++					continue;
+ 				}
+-				ram_->enable_acl(true);
+-			}
+-
+-			if (pre_send_hook_) {
+-				pre_send_hook_(mem_req);
++				++next_external_token_;
++				if (pre_send_hook_) pre_send_hook_(mem_req);
++				mem_xbar_->ReqOut.at(i).pop();
++				continue;
+ 			}
+ 
+-			// enqueue the request to the memory system
+-			auto req_args = new DramCallbackArgs{this, mem_req, i, rsp_data};
+-			dram_sim_.send_request(
+-				mem_req.addr,
+-				mem_req.is_write(),
+-				[](void* arg)->bool {
+-					auto rsp_args = reinterpret_cast<const DramCallbackArgs*>(arg);
+-					if (rsp_args->request.is_write()) {
+-						delete rsp_args;
+-						return true;
+-					} else {
+-								MemRsp mem_rsp{rsp_args->request.tag, rsp_args->request.hart_id, rsp_args->request.uuid};
+-						mem_rsp.data = rsp_args->rsp_data;
+-						if (rsp_args->memsim->mem_xbar_->RspIn.at(rsp_args->bank_id).try_send(mem_rsp)) {
+-							DT(3, rsp_args->memsim->simobject_->name() << " mem-rsp" << rsp_args->bank_id << ": " << mem_rsp);
+-							delete rsp_args;
+-							return true;
+-						}
+-					}
+-					return false; // stall
+-				},
+-				req_args
+-			);
+-
+-			DT(3, simobject_->name() << " mem-req" << i << ": " << mem_req);
+-			mem_xbar_->ReqOut.at(i).pop();
+ 		}
+ 	}
+ 
+-	void attach_ram(RAM* ram) {
+-		ram_ = ram;
++	void attach_ram(RAM*) {
+ 	}
+ 
+ 	void set_pre_send_hook(Memory::PreSendHook hook) {
+ 		pre_send_hook_ = std::move(hook);
+ 	}
++
++	void set_external_timing_hook(Memory::ExternalIssueHook hook) {
++		external_issue_hook_ = std::move(hook);
++	}
++
++	void complete_external(uint64_t token, const uint8_t* read_data,
++	                       uint32_t size) {
++		auto found = external_pending_.find(token);
++		if (found == external_pending_.end() || found->second.complete)
++			throw std::runtime_error("unknown or duplicate external response");
++		if (size != config_.block_size || (!found->second.request.is_write() && !read_data))
++			throw std::runtime_error("invalid external response payload");
++		auto& pending = found->second;
++		if (!pending.request.is_write() && pending.rsp_data) {
++			std::fill(pending.rsp_data->begin(), pending.rsp_data->end(), 0);
++			if (read_data != nullptr) {
++				std::copy_n(read_data,
++				            std::min<uint32_t>(size, config_.block_size),
++				            pending.rsp_data->begin());
++			}
++		}
++		pending.complete = true;
++		external_completed_.push(token);
++	}
++
++	bool has_external_pending() const {
++		return !external_pending_.empty();
++	}
+ };
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+@@ -185,6 +198,19 @@ void Memory::set_pre_send_hook(PreSendHook hook) {
+   impl_->set_pre_send_hook(std::move(hook));
+ }
+ 
++void Memory::set_external_timing_hook(ExternalIssueHook hook) {
++  impl_->set_external_timing_hook(std::move(hook));
++}
++
++void Memory::complete_external(uint64_t token, const uint8_t* read_data,
++                               uint32_t size) {
++  impl_->complete_external(token, read_data, size);
++}
++
++bool Memory::has_external_pending() const {
++	return impl_->has_external_pending();
++}
++
+ const Memory::PerfStats &Memory::perf_stats() const {
+ 	return impl_->perf_stats();
+-}
+\ No newline at end of file
++}
+diff --git a/sim/simx/mem/memory.h b/sim/simx/mem/memory.h
+index 51e82c915..e4fd56432 100644
+--- a/sim/simx/mem/memory.h
++++ b/sim/simx/mem/memory.h
+@@ -59,6 +59,18 @@ public:
+ 	using PreSendHook = std::function<void(const MemReq&)>;
+ 	void set_pre_send_hook(PreSendHook hook);
+ 
++	// Optional replacement for the local DramSim/RAM data path.  An accepted
++	// request is identified by token and remains pending until
++	// complete_external() is called by the embedding simulator.  Returning
++	// false applies backpressure and leaves the request at the memory xbar.
++	using ExternalIssueHook = std::function<bool(
++		uint64_t token, const MemReq& request, const uint8_t* write_data,
++		uint64_t byteen, uint32_t size)>;
++	void set_external_timing_hook(ExternalIssueHook hook);
++	void complete_external(uint64_t token, const uint8_t* read_data,
++	                       uint32_t size);
++	bool has_external_pending() const;
++
+ 	const PerfStats& perf_stats() const;
+ 
+ protected:
+@@ -72,4 +84,4 @@ private:
+ 	friend class SimObject<Memory>;
+ };
+ 
+-};
+\ No newline at end of file
++};
+diff --git a/sim/simx/processor.cpp b/sim/simx/processor.cpp
+index 0b5cf16df..14ade4f30 100644
+--- a/sim/simx/processor.cpp
++++ b/sim/simx/processor.cpp
+@@ -324,7 +324,8 @@ bool ProcessorImpl::any_running() const {
+   for (auto& cluster : clusters_) {
+     if (cluster->running()) return true;
+   }
+-  return (SimChannelBase::inflight_count() != 0);
++  return (SimChannelBase::inflight_count() != 0)
++      || memsim_->has_external_pending();
+ }
+ 
+ ProcessorImpl::PerfStats ProcessorImpl::perf_stats() const {
+@@ -392,6 +393,15 @@ void Processor::set_mem_telemetry_hook(std::function<void(const MemReq&)> hook)
+   impl_->set_mem_telemetry_hook(std::move(hook));
+ }
+ 
++void Processor::set_mem_timing_hook(MemTimingIssueHook hook) {
++  impl_->set_mem_timing_hook(std::move(hook));
++}
++
++void Processor::complete_mem_timing(uint64_t token, const uint8_t* read_data,
++                                    uint32_t size) {
++  impl_->complete_mem_timing(token, read_data, size);
++}
++
+ int Processor::dcr_write(uint32_t addr, uint32_t value) {
+   return impl_->dcr_write(addr, value);
+ }
+diff --git a/sim/simx/processor.h b/sim/simx/processor.h
+index 66081ebbd..12dc4f07a 100644
+--- a/sim/simx/processor.h
++++ b/sim/simx/processor.h
+@@ -40,7 +40,7 @@ public:
+   // program has finished and the channels have drained.
+   //
+   // Used by external simulators that drive Vortex's clock from their
+-  // own event loop (SST in sim/simx/sst/, gem5 in sim/simx/gem5/).
++  // own event loop.
+   bool cycle();
+ 
+   void start_kmu();
+@@ -55,6 +55,13 @@ public:
+   // Vortex's RAM.
+   void set_mem_telemetry_hook(std::function<void(const struct MemReq&)> hook);
+ 
++  using MemTimingIssueHook = std::function<bool(
++      uint64_t token, const struct MemReq& request,
++      const uint8_t* write_data, uint64_t byteen, uint32_t size)>;
++  void set_mem_timing_hook(MemTimingIssueHook hook);
++  void complete_mem_timing(uint64_t token, const uint8_t* read_data,
++                           uint32_t size);
++
+   int dcr_write(uint32_t addr, uint32_t value);
+ 
+   int dcr_read(uint32_t addr, uint32_t tag, uint32_t* value);
+diff --git a/sim/simx/processor_impl.h b/sim/simx/processor_impl.h
+index ea4120f74..5e1d6fd6a 100644
+--- a/sim/simx/processor_impl.h
++++ b/sim/simx/processor_impl.h
+@@ -57,6 +57,15 @@ public:
+     memsim_->set_pre_send_hook(std::move(hook));
+   }
+ 
++  void set_mem_timing_hook(Memory::ExternalIssueHook hook) {
++    memsim_->set_external_timing_hook(std::move(hook));
++  }
++
++  void complete_mem_timing(uint64_t token, const uint8_t* read_data,
++                           uint32_t size) {
++    memsim_->complete_external(token, read_data, size);
++  }
++
+   // Functional backing store (device physical memory). Exposed so the raster
+   // early-Z stage can read the committed depth buffer synchronously during its
+   // walk (a peek, not a substitute for the cycle-modeled ocache path).
+diff --git a/sw/runtime/gem5/Makefile b/sw/runtime/gem5/Makefile
+deleted file mode 100644
+index 9aa0720c8..000000000
+--- a/sw/runtime/gem5/Makefile
++++ /dev/null
+@@ -1,66 +0,0 @@
+-include ../common.mk
+-
+-# HOST_ARCH selects the cross-compiler for the simulated host ISA
+-# inside gem5. Default x86_64 has no toolchain install requirement;
+-# aarch64/armhf need ci/gem5_install.sh to have run sudo-apt for the
+-# cross-compilers.
+-HOST_ARCH ?= x86_64
+-
+-DESTDIR ?= $(CURDIR)/..
+-
+-SRC_DIR := $(VORTEX_HOME)/sw/runtime/gem5
+-
+-CXXFLAGS += -std=c++17 -Wall -Wextra -pedantic -Wfatal-errors -Werror
+-CXXFLAGS += -I$(INC_DIR) -I$(ROOT_DIR)/sw -I$(ROOT_DIR)/hw -I$(DESTDIR) -I$(SW_COMMON_DIR) -I$(RT_COMMON_DIR)
+-CXXFLAGS += -DVX_CFG_XLEN=$(XLEN) -DVX_CFG_XLEN_$(XLEN)
+-CXXFLAGS += -fPIC
+-CXXFLAGS += $(CONFIGS)
+-
+-# Per-arch compiler selection. The cross-compilers are sysroot-aware
+-# (Ubuntu's gcc-aarch64-linux-gnu ships the matching libstdc++); no
+-# extra --sysroot flags needed.
+-#
+-# Cross-compiled outputs land in $(DESTDIR)/$(HOST_ARCH)/ alongside
+-# the stub's libvortex.so (also cross-compiled). The simulated ARM
+-# process's LD_LIBRARY_PATH points at that one dir to find both.
+-ifeq ($(HOST_ARCH),x86_64)
+-    CXX := g++
+-    ARCH_SUFFIX := x86_64
+-    OUT_DIR := $(DESTDIR)
+-else ifeq ($(HOST_ARCH),aarch64)
+-    CXX := aarch64-linux-gnu-g++
+-    ARCH_SUFFIX := aarch64
+-    OUT_DIR := $(DESTDIR)/aarch64
+-else ifeq ($(HOST_ARCH),armhf)
+-    CXX := arm-linux-gnueabihf-g++
+-    ARCH_SUFFIX := armhf
+-    OUT_DIR := $(DESTDIR)/armhf
+-else
+-    $(error HOST_ARCH must be one of: x86_64, aarch64, armhf (got $(HOST_ARCH)))
+-endif
+-
+-LDFLAGS += -shared -pthread
+-
+-SRCS = $(SRC_DIR)/vortex.cpp $(SRC_DIR)/driver.cpp $(RT_COMMON_DIR)/utils.cpp
+-
+-# Debug / release
+-ifdef DEBUG
+-    CXXFLAGS += -g -O0
+-else
+-    CXXFLAGS += -O2 -DNDEBUG
+-endif
+-
+-PROJECT := libvortex-gem5-$(ARCH_SUFFIX).so
+-
+-.PHONY: all force clean
+-
+-all: $(OUT_DIR)/$(PROJECT)
+-
+-$(OUT_DIR)/$(PROJECT): $(SRCS)
+-	@mkdir -p $(OUT_DIR)
+-	$(CXX) $(CXXFLAGS) $(SRCS) $(LDFLAGS) -Wl,-soname,$(PROJECT) -o $@
+-
+-clean:
+-	rm -f $(DESTDIR)/libvortex-gem5-*.so
+-	rm -f $(DESTDIR)/aarch64/libvortex-gem5-*.so
+-	rm -f $(DESTDIR)/armhf/libvortex-gem5-*.so
+diff --git a/sw/runtime/gem5/driver.cpp b/sw/runtime/gem5/driver.cpp
+deleted file mode 100644
+index 97db6fd92..000000000
+--- a/sw/runtime/gem5/driver.cpp
++++ /dev/null
+@@ -1,55 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-#include "driver.h"
+-
+-namespace vortex {
+-
+-namespace {
+-bool g_inited = false;
+-}
+-
+-int drv_init() {
+-    // PIO and PIN regions are mapped by the gem5 SE-mode Python config
+-    // before this binary runs; no mmap() is needed.
+-    g_inited = true;
+-    return 0;
+-}
+-
+-void drv_close() {
+-    g_inited = false;
+-}
+-
+-uint32_t mmio_read32(uint32_t offset) {
+-    auto* p = reinterpret_cast<volatile uint32_t*>(PIO_BASE_ADDR + offset);
+-    return *p;
+-}
+-
+-void mmio_write32(uint32_t offset, uint32_t value) {
+-    auto* p = reinterpret_cast<volatile uint32_t*>(PIO_BASE_ADDR + offset);
+-    *p = value;
+-}
+-
+-// Full store barrier: ensures ring-buffer payloads are visible before
+-// Q_TAIL_HI is written. Arch-specific fence instruction.
+-void mmio_fence() {
+-#if defined(__x86_64__) || defined(__i386__)
+-    __asm__ __volatile__ ("mfence" ::: "memory");
+-#elif defined(__aarch64__) || defined(__arm__)
+-    __asm__ __volatile__ ("dmb sy" ::: "memory");
+-#else
+-    __asm__ __volatile__ ("" ::: "memory");
+-#endif
+-}
+-
+-} // namespace vortex
+diff --git a/sw/runtime/gem5/driver.h b/sw/runtime/gem5/driver.h
+deleted file mode 100644
+index 4402cd959..000000000
+--- a/sw/runtime/gem5/driver.h
++++ /dev/null
+@@ -1,67 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-// Direct-MMIO + pinned-region driver for the gem5 VortexGPGPU device.
+-//
+-// Inside a gem5 SE-mode process the device is reached by:
+-//
+-//   1. MMIO accesses to the CP regfile via a fixed virtual address that
+-//      the gem5 Python config maps to the SimObject's PIO range
+-//      (PIO_BASE_ADDR below; default 0x20000000). The CP regfile is
+-//      32-bit; only 32-bit accesses are used.
+-//
+-//   2. Direct memory access to device VRAM via a fixed pinned region
+-//      that the gem5 Python config identity-maps virtual→physical
+-//      (PIN_BASE_ADDR; default 0x10000000). The runtime treats it as
+-//      ordinary memory: regular stores from the host process land in
+-//      the same physical bytes the SimObject sees as device VRAM.
+-
+-#pragma once
+-
+-#include <stddef.h>
+-#include <stdint.h>
+-
+-namespace vortex {
+-
+-// Fixed virtual addresses the runtime expects to find mapped by the
+-// gem5 Python config. PIN_BASE..PIN_BASE+PIN_REGION_SIZE is the
+-// host-visible window onto device VRAM — `memcpy(PIN_BASE+dev_addr,
+-// host_src, sz)` lands in the same in-process simx::RAM bytes the CP
+-// and Vortex see. Sized to cover the full VX_CFG_XLEN device address space
+-// so any address mem_alloc / mem_reserve can hand out is reachable
+-// via the host BAR; placed above 4 GiB so it doesn't collide with the
+-// simulated process's natural low-VA layout (heap/stack/code).
+-constexpr uintptr_t PIN_BASE_ADDR    = 0x100000000ull;
+-constexpr size_t    PIN_REGION_SIZE  = 0x100000000ull;  // 4 GB (= VX_CFG_XLEN=32 device VRAM)
+-constexpr uintptr_t PIO_BASE_ADDR    = 0x20000000ull;
+-constexpr size_t    PIO_REGION_SIZE  = 0x00000200ull;   // 0x200 — CP regfile
+-
+-// Init / shutdown. Both are idempotent in practice but should be
+-// paired 1:1.
+-int  drv_init();
+-void drv_close();
+-
+-// CP regfile MMIO. `offset` is the CP-internal byte offset.
+-// All accesses are 32-bit — the CP regfile is 32-bit wide, and gem5's
+-// PIO model honors the packet width verbatim.
+-//
+-// mmio_fence() emits the right barrier for HOST_ARCH (mfence on x86,
+-// dmb sy on AArch64/ARMv7). The host runtime issues a fence between
+-// any non-MMIO publication (e.g. seeding a ring buffer through
+-// PIN_BASE_ADDR) and the doorbell write (Q_TAIL_HI) so the device
+-// sees the new ring entries before the tail advance.
+-uint32_t mmio_read32 (uint32_t offset);
+-void     mmio_write32(uint32_t offset, uint32_t value);
+-void     mmio_fence();
+-
+-} // namespace vortex
+diff --git a/sw/runtime/gem5/vortex.cpp b/sw/runtime/gem5/vortex.cpp
+deleted file mode 100644
+index f60f170ca..000000000
+--- a/sw/runtime/gem5/vortex.cpp
++++ /dev/null
+@@ -1,109 +0,0 @@
+-// Copyright © 2019-2023
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-// ============================================================================
+-// gem5 host runtime backend — a pure transport HAL (see callbacks.h):
+-//   * device lifecycle      — init() / ~vx_device()
+-//   * CP register channel   — cp_reg_read / cp_reg_write  (32-bit PIO)
+-//   * CP-visible host memory — host_mem_alloc / host_mem_free
+-//
+-// Device-memory allocation and caps decoding live in the common core; the
+-// Command Processor is the sole memory engine.
+-//
+-// gem5 is architecturally unique: the CP runs natively inside the device
+-// SimObject, while the host runtime runs as simulated-CPU code — separate
+-// domains. The ONLY memory both can reach is device VRAM: the CP addresses
+-// it directly, and the host reaches it through the PIN_BASE_ADDR window.
+-// So CP-visible host memory must be VRAM.
+-//
+-// host_mem_alloc carves the command ring + DMA staging from a dedicated
+-// aperture at the top of the PIN window — host_ptr = PIN_BASE_ADDR + addr,
+-// cp_addr = addr. The common-core device allocator grows bottom-up from
+-// ALLOC_BASE_ADDR; this aperture sits above that region.
+-//
+-// cp_reg_{write,read} are 32-bit PIO accesses at PIO_BASE_ADDR + off — no
+-// CP_BASE 0x1000 offset (the gem5 device's PIO range IS the CP regfile).
+-// ============================================================================
+-
+-#include <common.h>
+-#include "driver.h"
+-
+-#include <cstdint>
+-#include <cstdio>
+-#include <cstdlib>
+-#include <mutex>
+-
+-using namespace vortex;
+-
+-// CP-visible host-memory aperture: the top of the PIN window onto VRAM.
+-static constexpr uint64_t GEM5_HOST_APERTURE = 64ull << 20;   // 64 MB
+-static constexpr uint64_t GEM5_HOST_BASE     = PIN_REGION_SIZE - GEM5_HOST_APERTURE;
+-
+-class vx_device {
+-public:
+-    vx_device()
+-        : host_mem_(GEM5_HOST_BASE, GEM5_HOST_APERTURE,
+-                    RAM_PAGE_SIZE, CACHE_BLOCK_SIZE) {}
+-
+-    ~vx_device() {
+-        drv_close();
+-    }
+-
+-    int init() {
+-        if (drv_init() != 0) {
+-            std::fprintf(stderr, "[VXDRV] drv_init failed\n");
+-            return -1;
+-        }
+-        return 0;
+-    }
+-
+-    // ----- CP register channel -----
+-    // `off` is the CP-internal regfile offset. The gem5 device exposes the
+-    // CP regfile at PIO_BASE_ADDR + 0 (no AFU bit-12 split). The fences
+-    // order ring/staging publication (host stores through PIN_BASE_ADDR)
+-    // against the doorbell write and the completion read.
+-    int cp_reg_write(uint32_t off, uint32_t value) {
+-        mmio_fence();             // ring writes visible before the doorbell
+-        mmio_write32(off, value);
+-        return 0;
+-    }
+-    int cp_reg_read(uint32_t off, uint32_t* value) {
+-        *value = mmio_read32(off);
+-        mmio_fence();             // device writes visible before host reads
+-        return 0;
+-    }
+-
+-    // ----- CP-visible host memory (command ring + DMA staging) -----
+-    // VRAM carved from the PIN-window aperture: the CP addresses cp_addr
+-    // directly; the host writes the same bytes through PIN_BASE_ADDR.
+-    int host_mem_alloc(uint64_t size, void** host_ptr, uint64_t* cp_addr) {
+-        uint64_t asize = aligned_size(size, CACHE_BLOCK_SIZE);
+-        uint64_t addr  = 0;
+-        std::lock_guard<std::mutex> g(host_mu_);
+-        CHECK_ERR(host_mem_.allocate(asize, &addr), { return err; });
+-        *host_ptr = reinterpret_cast<void*>(PIN_BASE_ADDR + addr);
+-        *cp_addr  = addr;
+-        return 0;
+-    }
+-
+-    int host_mem_free(uint64_t cp_addr) {
+-        std::lock_guard<std::mutex> g(host_mu_);
+-        return host_mem_.release(cp_addr);
+-    }
+-
+-private:
+-    std::mutex      host_mu_;
+-    MemoryAllocator host_mem_;   // CP-visible host-memory aperture
+-};
+-
+-#include <callbacks.inc>

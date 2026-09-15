@@ -40,7 +40,7 @@ PASS=82 FAIL=0
 CPU/GPU/NPU
     │ 访存请求
     ▼
-GEM5 SoC/MMU/Cache
+VORTEX SoC/Cache
     │ AXI
     ▼
 AXI2Flit 协议转换
@@ -1118,7 +1118,7 @@ DRAM bank冲突和刷新均不在本仿真中，因此不能独立完成项目�
 项目级验收则应把本模型接入：
 
 ```text
-GEM5/AXI Trace
+VORTEX/AXI Trace
  -> AXI2Flit
  -> UCIe SystemC Link
  -> Flit2DFI/Protocol Bridge

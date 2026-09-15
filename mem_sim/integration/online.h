@@ -4,7 +4,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* No SystemC/C++ types cross this boundary. All calls run on gem5's thread. */
+/* No SystemC/C++ types cross this boundary. All calls run on the single SystemC host thread. */
 typedef struct ss_mem ss_mem;
 typedef struct {
  uint64_t id, issued_cycle, completion_cycle;

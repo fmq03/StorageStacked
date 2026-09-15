@@ -19,17 +19,14 @@ AXI 激励 ⇄ Axi2Flit ⇄ UcieAouAdapter ⇄ UcieLink ⇄ AouTarget ⇄ Simple
 - 存储侧：整笔突发请求/响应 FIFO。简单内存保存实际字节数据，支持读写、掩码和错误响应。
 - 全链路：实例化 UcieLink，包含链路训练、行为物理层、CRC 和重放；生成 AXI 波形、事务记录和自动检查结果。
 
-这是时钟驱动桥、事件驱动链路和事务级存储的联合行为仿真。项目不包含 RTL 实现、DRAM 引脚时序、独占访问执行、原子操作或运行期间单端热复位。链路帧头和 CRC 的具体行为见字节格式文档。
+这是时钟驱动桥、事件驱动链路和事务级存储的联合行为仿真。本桥不包含 RTL 实现、DRAM 引脚时序、独占访问执行、原子操作或运行期间单端热复位。链路帧头和 CRC 的具体行为见字节格式文档。
 
 ## 主机与存储接入入口
 
 | 接入方 | 当前可连接的边界 | 首先阅读 |
 |---|---|---|
-| SoC/主机开发者 | `Axi2Flit` 的 AXI 从机端口：AW/W/AR 输入，B/R 输出 | [SoC 侧接口对接表](doc/SoC侧接口对接表.md) |
 | 存储开发者 | `AouTarget.mem_req/mem_rsp`，整突发 `SimpleMemRequest/Response` FIFO | [存储侧接口对接表第 1～3 节](doc/存储侧接口对接表.md) |
-| 联合仿真顶层开发者 | 参考 `tb_full_link.cpp` 装配模块和监视器 | [联仿交接约定](doc/全链路联合仿真接入指南.md#11-联仿交接约定) |
 
-gem5/Vortex/Ramulator 适配器、trace 文件回放器和独立的统一链路顶层尚未实现。文档中的精简存储接口属于可选设计方案，不能直接替代当前头文件；首轮集成使用现有类型，后端不匹配的部分由包装层转换。Adapter 是桥到 UCIe 的内部适配，不是主机接口。
 
 ## 构建与运行
 
@@ -74,9 +71,6 @@ make SYSTEMC_HOME=/work/systemc UCIE_DIR=/work/models/ucie-model preflight
 
 - [设计文档](systemc/doc/design.md)：模块职责、握手、容量和顺序规则。
 - [字节格式与接口](systemc/doc/wire_contract.md)：消息、帧头、物理布局和接线约定。
-- [SoC 侧接口对接表](doc/SoC侧接口对接表.md)：端口方向、字段、窄访问、握手和主机接入职责。
 - [存储侧接口对接表](doc/存储侧接口对接表.md)：请求/响应字段、功能、单 RP 简化及外部存储模型映射。
 - [验证文档](systemc/doc/verification.md)：测试范围、判据、性能口径和验证边界。
-- [全链路使用说明](doc/UCIe全链路仿真计划与使用.md)：场景配置、产物和波形判读。
-- [全链路联合仿真接入指南](doc/全链路联合仿真接入指南.md)：现有接口、gem5/Vortex/Ramulator 适配、时间同步及验收计划。
 - [接入与交付说明](systemc/integration/README.md)：依赖安装和路径迁移。

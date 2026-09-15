@@ -1,36 +1,20 @@
 # 统一系统中的链路接入
 
-AXI2Flit、UCIe、gem5前端和mem_sim均作为StorageStacked主仓库普通目录维护。
-UCIe的AoU支持和观察接口已直接纳入ucie-model源码，不需要额外安装补丁。
-
-| 文件 | 职责 |
-|---|---|
-| ucie_aou_adapter.h | Flit握手与UCIe FDI FIFO的双向适配 |
-| aou_target.h | 存储请求解包、后端提交及响应打包 |
-| simple_burst_memory.h | 独立链路测试使用的内存 |
-| [aou_format6.h](../../../protocol/include/aou_format6.h) | 共享帧映射，实际位于系统根protocol/include |
-| ../include/simple_mem_if.h | 存储请求与响应类型 |
-
-当前完整在线入口在系统根目录env/run_memsim.sh和env/run_xpu.sh；它们使用gem5原生
-SystemC，并经MemSimBackend接在线mem_sim。不能另外链接独立libsystemc。
-
-AXI2Flit自己的独立SystemC测试入口仍保留，需另备独立SystemC测试环境：
-
-```bash
-make -C axi2flit/systemc reference-check
-make -C axi2flit/systemc preflight
-make -C axi2flit/systemc full-link-all
-make -C axi2flit/systemc ucie-unit
-```
-
-默认UCIE_DIR=../../ucie-model（相对systemc目录），公共协议头来自../../protocol/include。
-reference-check只检查依赖文件存在；模型接口由编译和回归验证，不再依赖git apply。
+AXI2Flit 和 UCIe 为普通源码目录，公共帧映射在 protocol/include。
+整机入口是根目录 env/run.sh，宿主在 systemc/，使用单个 SystemC 内核。
 
 ```text
-Axi2Flit ⇄ UcieAouAdapter ⇄ 双向UcieLink ⇄ AouTarget ⇄ Memory
+VORTEX AXI256 ⇄ Axi2Flit ⇄ UcieAouAdapter ⇄ UcieLink ⇄ AouTarget ⇄ Logic Die ⇄ mem_sim
 ```
 
-Adapter连接sc_signal握手与四个sc_fifo<FdiFlit>端口，Target与内存通过
-SimpleMemRequest/Response FIFO连接。训练完成后释放复位；存储响应走原链路返回。
-详细接口见../doc/wire_contract.md及../doc/design.md。
-交接建议复制整个系统及所需结果目录，不再单独克隆或给内部模块打补丁。
+Adapter 在信号握手和 FDI FIFO 之间转换。AouTarget 在 Flit 消息和
+SimpleMemRequest/Response FIFO 之间转换。Logic Die 实现普通存储访问、
+门控寄存器以及本地 DMA 仲裁。SimpleBurstMemory 仅供桥的独立测试。
+
+```bash
+make -C axi2flit/systemc SYSTEMC_HOME=/usr preflight
+make -C axi2flit/systemc SYSTEMC_HOME=/usr full-link-all full-link-negative
+```
+
+项目整体接口见 [架构说明](../../../docs/architecture.md)；
+桥的字节契约见 ../doc/wire_contract.md。

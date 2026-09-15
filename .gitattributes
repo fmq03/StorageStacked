@@ -1,0 +1,2 @@
+# Patch context lines intentionally contain a leading space before upstream tabs.
+vortex/patches/*.patch -whitespace

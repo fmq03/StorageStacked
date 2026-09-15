@@ -1,40 +1,27 @@
-# StorageStacked
+# StorageStacked: VORTEX + Logic Die MoBA
 
-CPU / Vortex GPU / CoralNPU → 原生AXI256 → AXI2Flit → UCIe → 在线mem_sim的统一系统。
+VORTEX 执行 RISC-V 工作负载并发出真实访存请求，经 AXI256、AXI2Flit 和 UCIe 到达
+堆叠存储的 **Logic Die**。Logic Die 在存储侧执行 BF16 块均值池化、驻留 Kmean、
+FP32 门控打分与因果 Top-K 筛选，VORTEX 读取紧凑结果后继续执行。
 
-| 普通源码目录 | 职责 |
+| 目录 | 内容 |
 |---|---|
-| gem5_new | 三源设备、观察器、工作负载及外部依赖适配 |
-| gem5_axi | gem5原生TLM、AXI256 Master、在线内存桥及验证 |
-| axi2flit | AXI与Flit转换 |
-| ucie-model | UCIe链路、重放与观察接口 |
-| mem_sim | 内存控制器与DRAM行为模型 |
-| protocol/include | 两端共享的AoU帧格式 |
-
-外部子模块仍为gem5、coralnpu、vortex-gpu/vortex（含Vortex递归依赖）。
-内部五个目录已通过保留完整历史的导入合并成为主仓库源码，不再各自维护Git仓库。
+| vortex | VORTEX SimX 外部存储适配与固定版本补丁 |
+| systemc | 独立 SystemC 宿主、AXI 主机和存储侧 DMA 调度 |
+| logic_die | 可综合门控 RTL、独立参考测试、DC 综合脚本 |
+| axi2flit / ucie-model / protocol | AXI256 与双向 Flit 链路 |
+| mem_sim | 在线堆叠存储控制器、DRAM 和 DFI 行为模型 |
+| workloads | VORTEX 门控控制内核 |
+| paper | IEEE 双栏论文、图片、测量数据及复现脚本 |
 
 ```bash
-git clone --recurse-submodules https://github.com/fmq03/StorageStacked.git
-cd StorageStacked
-bash env/bootstrap_xpu.sh
-bash env/build_xpu.sh
-bash env/run_memsim.sh results/acceptance-memsim
-bash env/run_xpu.sh results/acceptance-xpu
+bash env/bootstrap.sh
+bash env/build.sh
+make acceptance
 ```
 
-新机器先按[主机条件](docs/setup.md#1-主机条件)安装基础工具。bootstrap_xpu/build_xpu
-包含CPU基础环境与构建；GCC、Python等版本由锁文件指定，无需手动选择编译器。
-仅验证CPU时可以使用env/bootstrap.sh、env/build.sh、env/run_memsim.sh。
+系统连接和寄存器见 [架构说明](docs/architecture.md)，验收证据和范围见
+[验证说明](docs/verification.md)，参考论文的设计映射见 [来源说明](docs/reference-design.md)。
 
-首次安装、依赖包恢复和无依赖包配置见[配置与交接指引](docs/setup.md)。
-环境版本与操作见[env/README.md](env/README.md)，分支协作、历史追溯、源码归属见
-[开发说明](docs/development.md)。外部版本在env/sources.lock.json，内部导入来源在
-[env/internal_imports.json](env/internal_imports.json)。
-
-交接验收见[验收记录](docs/handoff-validation.md)：
-完整构建、19项原生测试、7组在线内存、4组GPU/NPU、旧链路/RAM兼容，以及新目录恢复构建和闭环验证通过。
-旧AXI256与monorepo报告继续保留；HTML交接请复制整个用例目录。
-结果/构建产物和integrate_doc本地交接资料不入库。原/mnt/d/storagestacked保留。
-运行结果不随Git克隆分发，需要在本机运行生成。HTML查看方式见配置指引；推荐通过本机HTTP服务打开。
-主仓库：https://github.com/fmq03/StorageStacked 。新提交说明使用中文。
+VORTEX、Berkeley HardFloat/SoftFloat 为复用的开源组件；门控控制、驻留管理、
+数据流和系统适配在本项目实现。SRAM 数字行为与物理存算宏的边界在论文中单独说明。
