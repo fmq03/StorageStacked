@@ -1,0 +1,77 @@
+{
+  "source_commit": "232e252",
+  "build": "passed in independent clean checkout",
+  "rtl": {
+    "prepare_cycles": 2587,
+    "query_cycles": [
+      183,
+      637,
+      641
+    ],
+    "dma_stalls": 86,
+    "passed": true
+  },
+  "system": {
+    "passed": true,
+    "mode": "logic_die",
+    "chunks": 4,
+    "chunk_log2": 1,
+    "top_k": 3,
+    "queries": 4,
+    "elapsed_fs": 29476000000,
+    "vortex_cycles": 14738,
+    "vortex_requests": 96,
+    "vortex_read_bytes": 3392,
+    "vortex_write_bytes": 2752,
+    "local_dma_bytes": 3072,
+    "host_dram_bytes": 960,
+    "forward_flits": 250,
+    "reverse_flits": 398,
+    "response_stalls": 93,
+    "prepare_cycles": 2503,
+    "query_results": [
+      {
+        "mask": 13,
+        "cycles": 650,
+        "dma_beats": 8
+      },
+      {
+        "mask": 13,
+        "cycles": 691,
+        "dma_beats": 8
+      },
+      {
+        "mask": 11,
+        "cycles": 686,
+        "dma_beats": 8
+      },
+      {
+        "mask": 11,
+        "cycles": 686,
+        "dma_beats": 8
+      }
+    ]
+  },
+  "offline": {
+    "passed": true,
+    "link": {
+      "forward": {
+        "logical_flits": 587,
+        "checked_physical_events": 1174
+      },
+      "reverse": {
+        "logical_flits": 973,
+        "checked_physical_events": 1946
+      }
+    },
+    "axi_handshakes": {
+      "AW": 127,
+      "W": 254,
+      "B": 127,
+      "AR": 53,
+      "R": 106
+    },
+    "axi_data_beats_checked": 30,
+    "dma_data_beats_checked": 96
+  }
+}

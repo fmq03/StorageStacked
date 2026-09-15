@@ -1,0 +1,28 @@
+{
+  "logic_die_concept.png": {
+    "kind": "AI-assisted conceptual illustration",
+    "tool": "image_gen.imagegen (built-in)",
+    "prompt": "imagegen_prompt.txt",
+    "purpose": "Logic Die placement illustration; no measured performance or physical layout data",
+    "generated_file": "exec-48fe8c97-f59d-4bf3-b8c6-5c061770a352.png",
+    "visual_review": "Stack is above the orange Logic Die; VORTEX connects to Logic Die; required labels legible.",
+    "sha256": "e14dad96f54fcefc95ad924629c4401bc9196bde09db43d511b71b91092ca824"
+  },
+  "python_figures": {
+    "script": "../make_figures.py",
+    "artifacts": [
+      "architecture",
+      "traffic",
+      "latency",
+      "area"
+    ],
+    "formats": [
+      "pdf",
+      "svg",
+      "png"
+    ],
+    "matplotlib": "3.7.5",
+    "numpy": "1.24.4",
+    "numeric_data": "../data/*.json"
+  }
+}

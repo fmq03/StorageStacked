@@ -1,0 +1,15 @@
+{
+  "clock_ns": 4.0,
+  "area_um2": 321366.359999,
+  "worst_slack_ns": 0.000313,
+  "worst_hold_slack_ns": -0.051082,
+  "leaf_cells": 222656,
+  "unmapped_cells": 0,
+  "memory_implementation": "standard_cell_registers",
+  "power_status": "vectorless_estimate_only",
+  "weight_banks_area_um2": 271761.8388,
+  "topk_area_um2": 6164.4239,
+  "setup_met": true,
+  "hold_met": false,
+  "physical_signoff": false
+}

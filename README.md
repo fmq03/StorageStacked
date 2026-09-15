@@ -25,3 +25,17 @@ make acceptance
 
 VORTEX、Berkeley HardFloat/SoftFloat 为复用的开源组件；门控控制、驻留管理、
 数据流和系统适配在本项目实现。SRAM 数字行为与物理存算宏的边界在论文中单独说明。
+
+## 论文与实测结果
+
+[IEEE 双栏论文 PDF](paper/main.pdf) · [论文源码与复现](paper/README.md) ·
+[原始测量摘要](paper/data/measurements.json) · [综合摘要](paper/data/synthesis.json)
+
+- 24 个 RTL 用例、72 次正常查询、8 个存储测试、AXI/UCIe 回归和负向控制通过。
+- 10 个主实验：32 块、128 维、Top-12、4 次查询，块大小为 1/2/4/8/16。
+  门控模式的 VORTEX 请求跨度为 6 KiB，总时间为 124.116–484.548 μs。
+- DC 映射面积约 0.321366 mm²；4 ns 约束下建立裕量为 +0.313 ps，
+  保持裕量为 −51.082 ps，保持时间未闭合。
+
+软件对照是 VORTEX 单活跃 lane 的标量实现。当前权重存储综合成寄存器，
+尚未绑定物理 SRAM-CIM 宏；上述结果不代表商用 GPU 加速比、完整 LLM 或物理 signoff。

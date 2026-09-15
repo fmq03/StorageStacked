@@ -30,7 +30,13 @@ def main():
     records=[]
     configs=[(4,1,3),(8,2,4)] if a.quick else [(32,lg,12) for lg in (0,1,2,3,4)]
     for c,lg,k in configs:
-        f=out/f"c{c}-b{1<<lg}.bin";fixture(f,c,lg,k,4)
+        f=out/f"c{c}-b{1<<lg}.bin"
+        if a.resume and f.exists():
+            candidate=f.with_suffix(".candidate")
+            fixture(candidate,c,lg,k,4)
+            same=candidate.read_bytes()==f.read_bytes();candidate.unlink()
+            if not same:raise RuntimeError("Regenerated fixture differs from saved input: "+str(f))
+        else:fixture(f,c,lg,k,4)
         for mode in ["logic_die","vortex_software"]:
             run=out/f"c{c}-b{1<<lg}-{mode}"
             cmd=[str(ROOT/"build/system/systemc/ss_sim"),str(f),str(ROOT/"build/workloads/moba.bin"),str(run)]

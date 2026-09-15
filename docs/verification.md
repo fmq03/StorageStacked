@@ -3,10 +3,13 @@
 ## 可执行验收
 
 `make acceptance` 先构建，再执行以下检查；任意失败都必须返回非零状态。
+重复执行时，只有源码、依赖、二进制和输入均匹配的在线用例可以恢复并重新离线核验。
+修改运行实现后，使用 `make acceptance ACCEPTANCE_DIR=results/acceptance-new` 保存新证据。
 
 1. RTL：NumPy 参考独立计算 BF16 RNE 池化、FP32 顺序点积、稳定 Top-K。
    测试随机值、相同分数、负分数、早期因果位置、K 的边界、权重复用、错误 epoch、
-   非法寄存器值、DMA 随机背压/延迟、传输错误恢复和非有限 Q。
+   非法寄存器值、DMA 随机背压/延迟、传输错误恢复、非有限 Q、打分溢出、
+   子正规数、RNE 舍入边界与 4096-token 块，共 24 个用例及 72 次正常查询。
 2. 存储：原生 8 个 C++ 测试，以及 C ABI 的掩码读写、队列压力和非法请求检查。
 3. 链路：原生 AXI 多位宽功能、固定字节向量、边界、credit、UCIe、全链路重放
    与负向记分板回归。
@@ -20,6 +23,8 @@
 结果文件保存于各用例 results 子目录。summary.json 表示在线工作负载通过；
 offline_verification.json 表示离线证据检查通过；memsim_core.json 表示 DRAM/DFI 检查通过。
 缺少其中任一个都不能把整机用例判为 PASS。论文数据以最后核验的精简副本为准。
+顶层 `results/acceptance/summary.json` 汇总各层结果和证据哈希；每次验收开始先删除
+旧汇总，失败时不写入新的 PASS。原生内存日志与链路日志同时保存在该目录。
 
 ## 可信范围
 

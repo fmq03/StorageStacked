@@ -1,0 +1,352 @@
+{
+  "c32-b1-logic_die": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 973,
+          "checked_physical_events": 1946
+        },
+        "reverse": {
+          "logical_flits": 1652,
+          "checked_physical_events": 3304
+        }
+      },
+      "axi_handshakes": {
+        "AW": 223,
+        "W": 446,
+        "B": 223,
+        "AR": 53,
+        "R": 106
+      },
+      "axi_data_beats_checked": 30,
+      "dma_data_beats_checked": 288
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 646,
+      "returned": 646,
+      "submit_stalls": 0,
+      "cycles": 551940,
+      "commands": 18835,
+      "dfi_events": 20127,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b1-vortex_software": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 1517,
+          "checked_physical_events": 3034
+        },
+        "reverse": {
+          "logical_flits": 2659,
+          "checked_physical_events": 5318
+        }
+      },
+      "axi_handshakes": {
+        "AW": 203,
+        "W": 406,
+        "B": 203,
+        "AR": 323,
+        "R": 646
+      },
+      "axi_data_beats_checked": 616,
+      "dma_data_beats_checked": 0
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 964,
+      "returned": 964,
+      "submit_stalls": 0,
+      "cycles": 24615980,
+      "commands": 808657,
+      "dfi_events": 810585,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b2-logic_die": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 1485,
+          "checked_physical_events": 2970
+        },
+        "reverse": {
+          "logical_flits": 2546,
+          "checked_physical_events": 5092
+        }
+      },
+      "axi_handshakes": {
+        "AW": 351,
+        "W": 702,
+        "B": 351,
+        "AR": 53,
+        "R": 106
+      },
+      "axi_data_beats_checked": 30,
+      "dma_data_beats_checked": 544
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 1158,
+      "returned": 1158,
+      "submit_stalls": 0,
+      "cycles": 682356,
+      "commands": 23657,
+      "dfi_events": 25973,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b2-vortex_software": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 2733,
+          "checked_physical_events": 5466
+        },
+        "reverse": {
+          "logical_flits": 4772,
+          "checked_physical_events": 9544
+        }
+      },
+      "axi_handshakes": {
+        "AW": 395,
+        "W": 790,
+        "B": 395,
+        "AR": 515,
+        "R": 1030
+      },
+      "axi_data_beats_checked": 1000,
+      "dma_data_beats_checked": 0
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 1732,
+      "returned": 1732,
+      "submit_stalls": 0,
+      "cycles": 27722804,
+      "commands": 911837,
+      "dfi_events": 915301,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b4-logic_die": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 2513,
+          "checked_physical_events": 5026
+        },
+        "reverse": {
+          "logical_flits": 4339,
+          "checked_physical_events": 8678
+        }
+      },
+      "axi_handshakes": {
+        "AW": 607,
+        "W": 1214,
+        "B": 607,
+        "AR": 53,
+        "R": 106
+      },
+      "axi_data_beats_checked": 30,
+      "dma_data_beats_checked": 1056
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 2182,
+      "returned": 2182,
+      "submit_stalls": 0,
+      "cycles": 952508,
+      "commands": 33601,
+      "dfi_events": 37965,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b4-vortex_software": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 4503,
+          "checked_physical_events": 9006
+        },
+        "reverse": {
+          "logical_flits": 7908,
+          "checked_physical_events": 15816
+        }
+      },
+      "axi_handshakes": {
+        "AW": 680,
+        "W": 1360,
+        "B": 680,
+        "AR": 800,
+        "R": 1600
+      },
+      "axi_data_beats_checked": 1570,
+      "dma_data_beats_checked": 0
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 2872,
+      "returned": 2872,
+      "submit_stalls": 0,
+      "cycles": 33931948,
+      "commands": 1117201,
+      "dfi_events": 1122945,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b8-logic_die": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 4555,
+          "checked_physical_events": 9110
+        },
+        "reverse": {
+          "logical_flits": 7919,
+          "checked_physical_events": 15838
+        }
+      },
+      "axi_handshakes": {
+        "AW": 1119,
+        "W": 2238,
+        "B": 1119,
+        "AR": 53,
+        "R": 106
+      },
+      "axi_data_beats_checked": 30,
+      "dma_data_beats_checked": 2080
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 4230,
+      "returned": 4230,
+      "submit_stalls": 0,
+      "cycles": 1491604,
+      "commands": 53539,
+      "dfi_events": 61999,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b8-vortex_software": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 7979,
+          "checked_physical_events": 15958
+        },
+        "reverse": {
+          "logical_flits": 13991,
+          "checked_physical_events": 27982
+        }
+      },
+      "axi_handshakes": {
+        "AW": 1234,
+        "W": 2468,
+        "B": 1234,
+        "AR": 1354,
+        "R": 2708
+      },
+      "axi_data_beats_checked": 2678,
+      "dma_data_beats_checked": 0
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 5088,
+      "returned": 5088,
+      "submit_stalls": 0,
+      "cycles": 46366204,
+      "commands": 1528354,
+      "dfi_events": 1538530,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b16-logic_die": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 8652,
+          "checked_physical_events": 17304
+        },
+        "reverse": {
+          "logical_flits": 15090,
+          "checked_physical_events": 30180
+        }
+      },
+      "axi_handshakes": {
+        "AW": 2143,
+        "W": 4286,
+        "B": 2143,
+        "AR": 53,
+        "R": 106
+      },
+      "axi_data_beats_checked": 30,
+      "dma_data_beats_checked": 4128
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 8326,
+      "returned": 8326,
+      "submit_stalls": 0,
+      "cycles": 2566132,
+      "commands": 93257,
+      "dfi_events": 109909,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  },
+  "c32-b16-vortex_software": {
+    "offline": {
+      "passed": true,
+      "link": {
+        "forward": {
+          "logical_flits": 14646,
+          "checked_physical_events": 29292
+        },
+        "reverse": {
+          "logical_flits": 25751,
+          "checked_physical_events": 51502
+        }
+      },
+      "axi_handshakes": {
+        "AW": 2304,
+        "W": 4608,
+        "B": 2304,
+        "AR": 2424,
+        "R": 4848
+      },
+      "axi_data_beats_checked": 4818,
+      "dma_data_beats_checked": 0
+    },
+    "memory": {
+      "passed": true,
+      "submitted": 9368,
+      "returned": 9368,
+      "submit_stalls": 0,
+      "cycles": 71212220,
+      "commands": 2349624,
+      "dfi_events": 2368360,
+      "command_errors": 0,
+      "dfi_errors": 0
+    }
+  }
+}

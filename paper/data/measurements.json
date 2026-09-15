@@ -1,0 +1,432 @@
+[
+  {
+    "passed": true,
+    "mode": "logic_die",
+    "chunks": 32,
+    "chunk_log2": 0,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 124116000000,
+    "vortex_cycles": 62058,
+    "vortex_requests": 96,
+    "vortex_read_bytes": 3392,
+    "vortex_write_bytes": 2752,
+    "local_dma_bytes": 9216,
+    "host_dram_bytes": 960,
+    "forward_flits": 252,
+    "reverse_flits": 406,
+    "response_stalls": 102,
+    "prepare_cycles": 14308,
+    "query_results": [
+      {
+        "mask": 4161380644,
+        "cycles": 3660,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3173691392,
+        "cycles": 3662,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3187974816,
+        "cycles": 3649,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3325627908,
+        "cycles": 3631,
+        "dma_beats": 8
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b1-logic_die",
+    "fixture_sha256": "094fd34be0bd0da73ea754eab77e98285fde0ccb20c11bdbffeab1f7c0735758"
+  },
+  {
+    "passed": true,
+    "mode": "vortex_software",
+    "chunks": 32,
+    "chunk_log2": 0,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 6140126000000,
+    "vortex_cycles": 3070063,
+    "vortex_requests": 346,
+    "vortex_read_bytes": 20672,
+    "vortex_write_bytes": 1472,
+    "local_dma_bytes": 0,
+    "host_dram_bytes": 20352,
+    "forward_flits": 796,
+    "reverse_flits": 1413,
+    "response_stalls": 248,
+    "prepare_cycles": 0,
+    "query_results": [
+      {
+        "mask": 4161380644,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3173691392,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3187974816,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3325627908,
+        "cycles": 0,
+        "dma_beats": 0
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b1-vortex_software",
+    "fixture_sha256": "094fd34be0bd0da73ea754eab77e98285fde0ccb20c11bdbffeab1f7c0735758"
+  },
+  {
+    "passed": true,
+    "mode": "logic_die",
+    "chunks": 32,
+    "chunk_log2": 1,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 147458000000,
+    "vortex_cycles": 73729,
+    "vortex_requests": 96,
+    "vortex_read_bytes": 3392,
+    "vortex_write_bytes": 2752,
+    "local_dma_bytes": 17408,
+    "host_dram_bytes": 960,
+    "forward_flits": 252,
+    "reverse_flits": 402,
+    "response_stalls": 165,
+    "prepare_cycles": 20250,
+    "query_results": [
+      {
+        "mask": 2195349808,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 4027163150,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3516678674,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2252468500,
+        "cycles": 3614,
+        "dma_beats": 8
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b2-logic_die",
+    "fixture_sha256": "f03b4d9c7e89ba99830d3510057650900fb9775ac5f24aa48601c5684cb0826f"
+  },
+  {
+    "passed": true,
+    "mode": "vortex_software",
+    "chunks": 32,
+    "chunk_log2": 1,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 6907570000000,
+    "vortex_cycles": 3453785,
+    "vortex_requests": 602,
+    "vortex_read_bytes": 32960,
+    "vortex_write_bytes": 5568,
+    "local_dma_bytes": 0,
+    "host_dram_bytes": 36736,
+    "forward_flits": 1500,
+    "reverse_flits": 2628,
+    "response_stalls": 498,
+    "prepare_cycles": 0,
+    "query_results": [
+      {
+        "mask": 2195349808,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 4027163150,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3516678674,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2252468500,
+        "cycles": 0,
+        "dma_beats": 0
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b2-vortex_software",
+    "fixture_sha256": "f03b4d9c7e89ba99830d3510057650900fb9775ac5f24aa48601c5684cb0826f"
+  },
+  {
+    "passed": true,
+    "mode": "logic_die",
+    "chunks": 32,
+    "chunk_log2": 2,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 195870000000,
+    "vortex_cycles": 97935,
+    "vortex_requests": 96,
+    "vortex_read_bytes": 3392,
+    "vortex_write_bytes": 2752,
+    "local_dma_bytes": 33792,
+    "host_dram_bytes": 960,
+    "forward_flits": 256,
+    "reverse_flits": 401,
+    "response_stalls": 271,
+    "prepare_cycles": 32334,
+    "query_results": [
+      {
+        "mask": 3393589797,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2618634251,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3359164816,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2370839896,
+        "cycles": 3614,
+        "dma_beats": 8
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b4-logic_die",
+    "fixture_sha256": "c8dbeddd1984d52aa533f0b154f22a56dc837cc13c922c0de8636c91ec6f2a18"
+  },
+  {
+    "passed": true,
+    "mode": "vortex_software",
+    "chunks": 32,
+    "chunk_log2": 2,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 8440730000000,
+    "vortex_cycles": 4220365,
+    "vortex_requests": 916,
+    "vortex_read_bytes": 51200,
+    "vortex_write_bytes": 7424,
+    "local_dma_bytes": 0,
+    "host_dram_bytes": 56832,
+    "forward_flits": 2246,
+    "reverse_flits": 3970,
+    "response_stalls": 760,
+    "prepare_cycles": 0,
+    "query_results": [
+      {
+        "mask": 3393589797,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2618634251,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3359164816,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2370839896,
+        "cycles": 0,
+        "dma_beats": 0
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b4-vortex_software",
+    "fixture_sha256": "c8dbeddd1984d52aa533f0b154f22a56dc837cc13c922c0de8636c91ec6f2a18"
+  },
+  {
+    "passed": true,
+    "mode": "logic_die",
+    "chunks": 32,
+    "chunk_log2": 3,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 292308000000,
+    "vortex_cycles": 146154,
+    "vortex_requests": 96,
+    "vortex_read_bytes": 3392,
+    "vortex_write_bytes": 2752,
+    "local_dma_bytes": 66560,
+    "host_dram_bytes": 960,
+    "forward_flits": 250,
+    "reverse_flits": 399,
+    "response_stalls": 417,
+    "prepare_cycles": 56511,
+    "query_results": [
+      {
+        "mask": 2969710940,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2504070245,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3230223443,
+        "cycles": 3614,
+        "dma_beats": 8
+      },
+      {
+        "mask": 3492167774,
+        "cycles": 3614,
+        "dma_beats": 8
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b8-logic_die",
+    "fixture_sha256": "b730cc2064243fa0885db690c6359f0af7e041edde877d78139c727c6633328e"
+  },
+  {
+    "passed": true,
+    "mode": "vortex_software",
+    "chunks": 32,
+    "chunk_log2": 3,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 11510958000000,
+    "vortex_cycles": 5755479,
+    "vortex_requests": 1512,
+    "vortex_read_bytes": 86656,
+    "vortex_write_bytes": 10112,
+    "local_dma_bytes": 0,
+    "host_dram_bytes": 94976,
+    "forward_flits": 3674,
+    "reverse_flits": 6471,
+    "response_stalls": 1339,
+    "prepare_cycles": 0,
+    "query_results": [
+      {
+        "mask": 2969710940,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2504070245,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3230223443,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 3492167774,
+        "cycles": 0,
+        "dma_beats": 0
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b8-vortex_software",
+    "fixture_sha256": "b730cc2064243fa0885db690c6359f0af7e041edde877d78139c727c6633328e"
+  },
+  {
+    "passed": true,
+    "mode": "logic_die",
+    "chunks": 32,
+    "chunk_log2": 4,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 484548000000,
+    "vortex_cycles": 242274,
+    "vortex_requests": 96,
+    "vortex_read_bytes": 3392,
+    "vortex_write_bytes": 2752,
+    "local_dma_bytes": 132096,
+    "host_dram_bytes": 960,
+    "forward_flits": 251,
+    "reverse_flits": 402,
+    "response_stalls": 780,
+    "prepare_cycles": 104342,
+    "query_results": [
+      {
+        "mask": 2323880160,
+        "cycles": 3674,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2191550615,
+        "cycles": 3678,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2362065201,
+        "cycles": 3680,
+        "dma_beats": 8
+      },
+      {
+        "mask": 2452357980,
+        "cycles": 3662,
+        "dma_beats": 8
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b16-logic_die",
+    "fixture_sha256": "ee2c1c2f464d010c514bf79b1c16e0024c36c9136aa0e4eab9af15556c34f3f8"
+  },
+  {
+    "passed": true,
+    "mode": "vortex_software",
+    "chunks": 32,
+    "chunk_log2": 4,
+    "top_k": 12,
+    "queries": 4,
+    "elapsed_fs": 17646070000000,
+    "vortex_cycles": 8823035,
+    "vortex_requests": 2628,
+    "vortex_read_bytes": 155136,
+    "vortex_write_bytes": 13056,
+    "local_dma_bytes": 0,
+    "host_dram_bytes": 166400,
+    "forward_flits": 6245,
+    "reverse_flits": 11063,
+    "response_stalls": 2407,
+    "prepare_cycles": 0,
+    "query_results": [
+      {
+        "mask": 2323880160,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2191550615,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2362065201,
+        "cycles": 0,
+        "dma_beats": 0
+      },
+      {
+        "mask": 2452357980,
+        "cycles": 0,
+        "dma_beats": 0
+      }
+    ],
+    "artifact_directory": "results/experiments-final/c32-b16-vortex_software",
+    "fixture_sha256": "ee2c1c2f464d010c514bf79b1c16e0024c36c9136aa0e4eab9af15556c34f3f8"
+  }
+]

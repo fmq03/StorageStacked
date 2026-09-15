@@ -1,0 +1,11 @@
+{
+  "python": "3.8.20",
+  "numpy_reference": "1.24.3",
+  "systemc": "2.3.4",
+  "dc": "X-2025.06-SP4",
+  "verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)",
+  "g++": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "riscv_gcc": "riscv64-unknown-elf-gcc (13.2.0-11ubuntu1+12) 13.2.0",
+  "cmake": "cmake version 3.28.3",
+  "xelatex": "XeTeX 3.141592653-2.6-0.999995 (TeX Live 2023/Debian)"
+}

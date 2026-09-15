@@ -1,2 +1,4 @@
 # Patch context lines intentionally contain a leading space before upstream tabs.
 vortex/patches/*.patch -whitespace
+# Matplotlib emits harmless whitespace inside generated SVG path attributes.
+paper/figures/*.svg linguist-generated=true -whitespace

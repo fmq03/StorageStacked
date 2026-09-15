@@ -1,0 +1,18 @@
+{
+  "standard": "HBM4",
+  "channels": 8,
+  "timing_scale": 1,
+  "period_fs": 250000,
+  "transaction_bytes": 32,
+  "queue_depth": 16,
+  "window_bytes": 67108864,
+  "phy": "behavioral",
+  "tick_multiplier": 2,
+  "tCK_ps": 500,
+  "effective_tCK_ps": 500,
+  "density_gbit": 8,
+  "data_bus_bits": 512,
+  "data_rate_mbps": 8000,
+  "capacity_bytes": 8589934592,
+  "provisional_timing_entries": 23
+}

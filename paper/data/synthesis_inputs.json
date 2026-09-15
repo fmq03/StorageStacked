@@ -1,0 +1,13 @@
+{
+  "library_name": "tcbn28hpcplusbwp12t40p140tt0p9v25c.db",
+  "library_sha256": "5363ad782af12e7cec187d23d27696c136d9d9014b8ba645b544228b18caf8e4",
+  "rtl_sha256": {
+    "logic_die/rtl/ld_fp32.sv": "65274f2b43e33cd0c392d3560c9912aae53959841a1dfbcf493c85333f96b3df",
+    "logic_die/rtl/ld_hardfloat_clz.sv": "e184b1c065c20621a230706b7f6c776095ed4b91ee542b4a13cd1c025ffaa7fd",
+    "logic_die/rtl/ld_radix_topk.sv": "65d83f52cb88de7e49b0e106bde9a2ffdd10d8a26f73c008c4db2959bf20c155",
+    "logic_die/rtl/ld_weight_bank.sv": "a6d355d154f2ffa15a311a5bbacb519ce5407ada423af52a511c6b8f9a228669",
+    "logic_die/rtl/logic_die_top.sv": "3e4340d91e0f0e615ef1ca42002275a94fd99b12a26b2da397c2c4aa570b6205"
+  },
+  "clock_ns": 4.0,
+  "tool": "Design Compiler X-2025.06-SP4"
+}
