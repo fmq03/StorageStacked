@@ -190,6 +190,9 @@ ResultFields collect_stats(const Stats& stats) {
   record_field(fields, "stack_ingress_stalls", stats.stack_ingress_stall_cycles);
   record_field(fields, "stack_ingress_peak", stats.stack_ingress_peak);
   record_field(fields, "qos_priority_dispatches", stats.qos_priority_dispatches);
+  record_field(fields, "dispatch_budget_exhausted", stats.dispatch_budget_exhausted);
+  record_field(fields, "controller_refused_dispatches",
+               stats.controller_refused_dispatches);
   record_field(fields, "system_cycles", stats.system_cycles);
   record_field(fields, "aggregate_ctrl_cycles", stats.aggregate_controller_cycles);
   record_field(fields, "read_bytes", stats.read_bytes);

@@ -217,6 +217,14 @@ struct Stats {
   std::uint64_t stack_ingress_stall_cycles = 0;
   std::uint64_t stack_ingress_peak = 0;
   std::uint64_t qos_priority_dispatches = 0;
+  // 分发额度耗尽：本拍成功分发达到 stack_dispatch_width，且入口仍有请求。
+  // 只说明上限被触及，不保证增大该值一定改善最终吞吐。
+  std::uint64_t dispatch_budget_exhausted = 0;
+  // 控制器拒收：本拍目标控制器 enqueue() 失败导致本 stack 当拍退出分发。
+  // 只能定位到下游接收受限，不能单凭它区分队列深度、行冲突或其他原因。
+  // 两者均按每 tick、每 stack 最多各计一次，全局值为各 stack 累加，
+  // 因此可以大于 system_cycles。
+  std::uint64_t controller_refused_dispatches = 0;
   // system_cycles 是外层 MemorySystem 推进的周期数；aggregate_controller_cycles
   // 是所有 channel controller 周期数之和。单 controller 模式下二者相同。
   std::uint64_t system_cycles = 0;

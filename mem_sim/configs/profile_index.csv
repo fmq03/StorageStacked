@@ -8,8 +8,8 @@ HBM4,configs/validation/hbm4.cfg,ramulator2_reference_1ch,8000,1,8,differential_
 HBM4,experiments/local/hx_hbm4_9000_48gb_16hi.cfg,,9000,48,16,full_stack_crc16_ras_research,research_default,Self-contained synthetic research model; not a real datasheet,
 LPDDR5,configs/lpddr.cfg,,6400,16,0,default,external_reference,Ramulator2.1-derived research parameters; not device calibration,Ramulator2.1:LPDDR5_16Gb_x16
 LPDDR5,configs/validation/lpddr5.cfg,ramulator2_reference_1ch,6400,16,0,differential_x16,external_reference,normalized 64 transaction columns and 2GiB per reference channel/subchannel; not full-device calibration,Ramulator2.1:LPDDR5_16Gb_x16
-LPDDR6,configs/lpddr.cfg,,10667,16,0,dvfsl_linkprot_off_bl24,jedec+research_default,JESD209-6-oriented timings; research training/control defaults; not device calibration,
-LPDDR6,configs/lpddr.cfg,link_protection,10667,16,0,dvfsl_linkprot_on_eff_on_bl24,jedec+research_default,JESD-oriented link-protection mode with research control defaults,
-LPDDR6,configs/lpddr.cfg,low_dvfs_4267,4267,16,0,dvfsl_low_bl24,jedec+research_default,JESD-oriented low-DVFS mode with research training/control defaults,
+LPDDR6,configs/lpddr.cfg,,10667,16,0,linkprot_off_bl24,jedec+research_default,JESD209-6-oriented timings; research training/control defaults; not device calibration,
+LPDDR6,configs/lpddr.cfg,link_protection,10667,16,0,linkprot_on_eff_on_bl24,jedec+research_default,JESD-oriented link-protection mode with research control defaults; no DVFS claim at this nominal rate,
+LPDDR6,configs/lpddr.cfg,low_rate_4267,4267,16,0,low_rate_4267_bl24,jedec+research_default,Low-rate operating point (4267 Mb/s); DVFS/training flow is modeled but JEDEC DVFSL timing/nACU columns are used only at <=3200 Mb/s,
 LPDDR6,configs/validation/lpddr6.cfg,ramulator2_reference_1ch,10667,16,0,differential_x12_bl24,external_reference,normalized 64 transaction columns and 2GiB per reference channel/subchannel; not full-device calibration,Ramulator2.1:LPDDR6_16Gb_x12
-LPDDR6,experiments/local/lpddr6_synthetic_linkprot.cfg,,10667,16,0,dvfsl_linkprot_on_eff_on_bl24_test,research_default,Self-contained synthetic research model; not a real datasheet,
+LPDDR6,experiments/local/lpddr6_synthetic_linkprot.cfg,,10667,16,0,linkprot_on_eff_on_bl24_test,research_default,Self-contained synthetic research model; not a real datasheet,

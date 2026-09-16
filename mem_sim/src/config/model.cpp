@@ -225,7 +225,15 @@ static void apply_resolved_overrides(hbm_sim::DramSpec& spec,
     spec.lpddr_link_ecc_bits_per_request = 16;
   }
   if (spec.lpddr_dbi_enabled && spec.lpddr_dbi_bits_per_request == 0) {
-    spec.lpddr_dbi_bits_per_request = 8;
+    // DBI 位数默认值按标准区分。此处是配置生效后的唯一入口：profile 展开
+    // 发生在配置覆盖之前，那时 lpddr_dbi_enabled 仍为默认 false，故 profile
+    // 内的同类分支不会命中。
+    // LPDDR6: JESD209-6 7.5.5 —— 16 个 metadata 位承载每 256 数据位，
+    //         即一个 32B(256bit) 事务对应 16 位；LPDDR6 无 DMI 引脚。
+    // LPDDR5: DBI 走 DMI 引脚，本项目按每事务 8 位的研究口径统计；
+    //         当前无 JESD209-5 依据，不能声明为标准值。
+    spec.lpddr_dbi_bits_per_request =
+        spec.standard == hbm_sim::DramStandard::Lpddr6 ? 16 : 8;
   }
 }
 
@@ -282,17 +290,17 @@ ResolvedModelInputs resolve_coupled_inputs(const DramSpec& baseline,
     }
   };
 
-  const bool low_dvfs = baseline.standard == DramStandard::Lpddr6 &&
+  const bool low_rate = baseline.standard == DramStandard::Lpddr6 &&
       explicit_values.contains("lpddr_dvfs_mode") &&
       parse_lpddr_dvfs_mode(explicit_values.at("lpddr_dvfs_mode")) == LpddrDvfsMode::Low;
-  const int default_rate = low_dvfs
+  const int default_rate = low_rate
       ? positive_int("lpddr_low_data_rate_mbps", baseline.lpddr_low_data_rate_mbps)
       : baseline.data_rate_mbps;
   const int rate = !automatic("data_rate_mbps")
                        ? positive_int("data_rate_mbps", baseline.data_rate_mbps)
                        : positive_int("speed_bin_mbps", default_rate);
-  if (low_dvfs && rate != default_rate)
-    throw std::invalid_argument("low DVFS data_rate_mbps must match lpddr_low_data_rate_mbps");
+  if (low_rate && rate != default_rate)
+    throw std::invalid_argument("LPDDR low-rate data_rate_mbps must match lpddr_low_data_rate_mbps");
   derive("data_rate_mbps", rate, "selected data rate in Mb/s/pin");
   derive("speed_bin_mbps", rate, "data_rate_mbps (timing speed selector)");
   const int ratio = baseline.standard == DramStandard::Lpddr5

@@ -1,7 +1,3 @@
-> 本目录现为 StorageStacked 主仓库普通源码，已同步原远端 c383152 并合并在线接口。
-> 整机通过 [integration](integration/README.md) 接入 gem5/AXI/UCIe；构建与运行统一使用
-> [根目录环境入口](../env/README.md)。下文说明内存模型自身的功能与独立运行方式。
-
 # hbm_sim
 
 `hbm_sim` 是面向 HBM3、HBM4、LPDDR5、LPDDR6 的 C++20 内存仿真器。
@@ -170,14 +166,18 @@ bash examples/multistack_demos/lpddr5_nstack.sh
 bash examples/multistack_demos/lpddr6_nstack.sh
 ```
 
-定制 bank/row-column/refresh 架构趋势实验：
+定制 bank/geometry/refresh 架构实验：
 
 ```bash
 python3 experiments/architecture_sweep/run.py
 ```
 
-脚本使用定向 trace 激发目标结构，输出 `results.csv`、`checks.csv`、`summary.md` 和
-离线 `trends.html`；检查不通过时返回非零。详细口径见
+密度组按各标准的真实 JEDEC 规格取点（HBM3 8/16/32Gb、HBM4 32Gb 8H / 24Gb 12H /
+32Gb 16H、LPDDR5 12/16Gb、LPDDR6 8/16/24Gb per SC），变密度时只改 `rows` 与
+（HBM4 的）`stack_height`/`sids`，`channels`、`banks_per_group`、`columns` 保持标准；
+每个用例的容量由容量公式自动核算。
+脚本输出 `results.csv`、`checks.csv`、`summary.md` 和离线 `trends.html`；
+检查不通过时返回非零。详细口径见
 [experiments/architecture_sweep/README.md](experiments/architecture_sweep/README.md)。
 
 ## Trace

@@ -528,7 +528,16 @@ run_and_check lpddr6_link_protection "$HBM_SIM_BIN" --stats-view diagnostic --co
 run_and_check lpddr6_synthetic_research "$HBM_SIM_BIN" --stats-view diagnostic \
   --config experiments/local/lpddr6_synthetic_linkprot.cfg --requests 32
 run_and_check lpddr6_lowdvfs "$HBM_SIM_BIN" --stats-view diagnostic --config configs/lpddr.cfg \
-  --standard lpddr6 --preset low_dvfs_4267 --requests 32
+  --standard lpddr6 --preset low_rate_4267 --requests 32
+if "$HBM_SIM_BIN" --stats-view diagnostic --config configs/lpddr.cfg --standard lpddr6 \
+    --validation-mode standard --lpddr-link-protection true --lpddr-link-ecc true \
+    --lpddr-dbi true --requests 1 >/tmp/hbm_sim_bad_lpddr_meta.out 2>&1; then
+  cat /tmp/hbm_sim_bad_lpddr_meta.out
+  echo "expected LPDDR6 link-protection + DBI to fail in standard mode" >&2
+  exit 1
+fi
+grep -Eq "DBI are mutually exclusive|prohibited setting" /tmp/hbm_sim_bad_lpddr_meta.out
+rm -f /tmp/hbm_sim_bad_lpddr_meta.out
 run_and_check lpddr6_ca_parity "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 32 \
   --lpddr-wck always_on --lpddr-ca-parity true --validate-cmd-trace
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 1 --lpddr-ca-parity true >/tmp/hbm_sim_bad_ca_parity.out 2>&1; then

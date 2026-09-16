@@ -29,6 +29,7 @@ HBM3 的参考 preset 显式保存 `nRFC=560 nCK`（参考器件 350 ns / 625 ps
 4000 Mb/s/pin；这是 HBM3 执行语义下的旧协议公共面抽象，不声明真实 HBM2 接口速率。
 该夹具按 DRAMsim3 的 HBM 原始列数×2/BL 换算为 32 个 64 B 事务槽，
 每行 2 KiB、单 Channel 512 MiB；`stack_height=4` 对齐参考 `num_dies=4`。
+该 preset 的 timing 中 `nCCDR`、`nRTW`、`nRFCpb`、`nRREFD` 四项在 DRAMsim3 中没有对应字段，是本项目研究值（`nRFCpb` 数值等于其 `tRFC`），不作为 DRAMsim3 共同面证据。
 
 差分脚本检查参考组织换算、项目实际执行组织和容量，并在 Ramulator 命令场景中覆盖行尾、
 下一行、最后一个 Bank 与最后一个事务。参考端仍使用 pass-through 坐标映射，

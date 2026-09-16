@@ -134,7 +134,10 @@ int main() {
     const auto low = build_model("lpddr6", {{"lpddr_dvfs_mode", "low"},
         {"lpddr_low_data_rate_mbps", "4267"}}, 3);
     require(low.data_rate_mbps == 4267 && low.timing.nCL == 46,
-            "low DVFS must resolve rate before profile selection");
+            "low-rate LPDDR6 mode must resolve rate before profile selection");
+    require(low.timing.nRCDRD == jedec::max_ns_or_nck(18.0, 2, low.timing.tCK_ps) &&
+                low.timing.nRP == 24 + jedec::max_ns_or_nck(18.0, 4, low.timing.tCK_ps),
+            "4267 Mb/s low-rate mode must not borrow JEDEC DVFSL-only timing columns");
     // Independent JEDEC Table 381/382 expectations, not values copied from
     // the generated constraint list. Test both sides of each speed boundary.
     for (const auto [rate, same_bg] : {std::pair{4267, 6}, {6400, 6},

@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
                 std::find(lpddr6_presets.begin(), lpddr6_presets.end(),
                           "link_protection") != lpddr6_presets.end() &&
                 std::find(lpddr6_presets.begin(), lpddr6_presets.end(),
-                          "low_dvfs_4267") != lpddr6_presets.end(),
+                          "low_rate_4267") != lpddr6_presets.end(),
             "LPDDR master may contain only its two standard mode variants");
 
     const auto hbm3_validation = hbm_sim::config::load_document_tree(
