@@ -421,10 +421,38 @@ def run_project_scenario(binary: Path, config_args: list[str], standard: str, na
     return events, stats
 
 
+_COLUMN_COMMANDS = {"RD", "WR", "RDA", "WRA",
+                    "RD_S", "WR_S", "RDA_S", "WRA_S",
+                    "RD_L", "WR_L", "RDA_L", "WRA_L"}
+
+
+def drop_lpddr_cas(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    """规范化 LPDDR 的 CAS + RD/WR 与合并表示这两种等价列访问编码。
+
+    hbm_sim 对每条 LPDDR 列命令都显式发 CAS_RD/CAS_WR，Ramulator2 在部分路径上
+    不单独发。CAS 指向的 bank/row/column 与其后的列命令完全相同，本身不携带列
+    命令之外的地址信息，因此显式规范化掉。只丢弃「紧跟一条指向同一位置的列命令」
+    的 CAS；孤立出现的 CAS 仍然保留并参与命令序列比较，不会被静默掩盖。
+    """
+    keys = ("Channel", "Rank", "Sid", "PseudoChannel",
+            "BankGroup", "Bank", "Row", "Column")
+    kept: list[dict[str, object]] = []
+    for index, event in enumerate(events):
+        if (event["command"] in {"CAS_RD", "CAS_WR"} and index + 1 < len(events)):
+            following = events[index + 1]
+            if (following["command"] in _COLUMN_COMMANDS and
+                    all(following["decoded"].get(key) == event["decoded"].get(key)
+                        for key in keys)):
+                continue
+        kept.append(event)
+    return kept
+
+
 def canonical_events(standard: str, scenario_name: str,
                      events: list[dict[str, object]]) -> list[dict[str, object]]:
     """Normalize equivalent policy encodings without hiding timing information."""
-    canonical = [dict(event, decoded=dict(event["decoded"])) for event in events]
+    canonical = drop_lpddr_cas([dict(event, decoded=dict(event["decoded"]))
+                                for event in events])
     if scenario_name == "auto_precharge_read":
         collapsed = []
         index = 0
@@ -584,8 +612,11 @@ def main() -> int:
                     latency_tolerance = max(
                         float(meta["latency_tolerance"]),
                         3.0 if name in {"parallel_pseudo_channel", "write_to_read"} else 0.0)
+                    # 延迟由 ns/ticks 换算而来，会带约 1e-14 量级的浮点残差。
+                    # 没有 epsilon 时，「差值恰好等于容差」会被残差推成失败，
+                    # 报出的是浮点噪声而不是模型分歧。
                     add(checks, f"{standard}_{name}_read_latency",
-                        abs(latency_delta) <= latency_tolerance,
+                        abs(latency_delta) <= latency_tolerance + 1e-9,
                         f"hbm_sim={project_latency} ramulator={ram_latency} delta={latency_delta} "
                         f"tolerance={latency_tolerance}")
                 results[name] = {

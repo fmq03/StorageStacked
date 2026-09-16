@@ -1274,12 +1274,12 @@ void test_timing_profile_dimensions() {
   hbm_sim::apply_standard_timing_profile(lpddr);
   hbm_sim::finalize_spec(lpddr);
   require(lpddr.data_rate_mbps == 4267,
-          "LPDDR6 low DVFS profile did not change data rate");
+          "LPDDR6 low-rate profile did not change data rate");
   require(lpddr.timing.tCK_ps > hbm_sim::make_spec("lpddr6").timing.tCK_ps,
-          "LPDDR6 low DVFS profile did not increase tCK");
+          "LPDDR6 low-rate profile did not increase tCK");
   require(lpddr.timing.nRP ==
-              27 + hbm_sim::jedec::max_ns_or_nck(20.7, 4, lpddr.timing.tCK_ps),
-          "LPDDR6 low DVFS profile did not use JESD209-6 nACU speed band");
+              24 + hbm_sim::jedec::max_ns_or_nck(18.0, 4, lpddr.timing.tCK_ps),
+          "LPDDR6 4267 Mb/s low-rate profile must use non-DVFSL nACU/timing columns");
   require(lpddr.timing.nREFDB2ACT ==
               hbm_sim::jedec::ns_to_nck(7.5, lpddr.timing.tCK_ps),
           "LPDDR6 profile did not expose REFdb->ACT timing");
@@ -1297,11 +1297,11 @@ void test_timing_profile_dimensions() {
   hbm_sim::finalize_spec(lpddr_link_eff);
   require(
       lpddr_link_eff.timing.nWR ==
-          hbm_sim::jedec::max_ns_or_nck(20.7, 6, lpddr_link_eff.timing.tCK_ps),
+          hbm_sim::jedec::max_ns_or_nck(18.0, 6, lpddr_link_eff.timing.tCK_ps),
       "LPDDR6 link+efficiency profile did not use the correct tWTP branch");
   require(
       lpddr_link_eff.timing.nWTRS ==
-          hbm_sim::jedec::max_ns_or_nck(14.1, 6, lpddr_link_eff.timing.tCK_ps),
+          hbm_sim::jedec::max_ns_or_nck(12.25, 6, lpddr_link_eff.timing.tCK_ps),
       "LPDDR6 link+efficiency profile did not use the correct tWTR_S branch");
 
   DramSpec lpddr8 = hbm_sim::make_spec("lpddr6");
@@ -2307,11 +2307,16 @@ void test_lpddr6_efficiency_mode_mapping() {
   }
 }
 
-void test_lpddr6_shared_metadata_lane_overhead() {
+void test_lpddr_shared_metadata_lane_research_overhead() {
   DramSpec spec = hbm_sim::make_spec("lpddr6");
+  // Non-standard research contract only: JESD209-6 Table 5 prohibits enabling
+  // link-protection metadata and DBI together. CLI/config validation rejects
+  // this combination outside exploratory mode; the low-level accounting helper
+  // still defines how a shared metadata lane would be charged if a research
+  // caller constructs such a spec directly.
   spec.lpddr_dbi_enabled = true;
   spec.lpddr_link_ecc_enabled = true;
-  spec.lpddr_dbi_bits_per_request = 8;
+  spec.lpddr_dbi_bits_per_request = 16;
   spec.lpddr_link_ecc_bits_per_request = 16;
 
   require(hbm_sim::lpddr_metadata_lane_bits_per_request(spec) == 16,
@@ -4388,7 +4393,7 @@ int main() {
   test_refresh_credit_and_low_power();
   test_refresh_credit_conservation_and_rank_rotation();
   test_lpddr6_efficiency_mode_mapping();
-  test_lpddr6_shared_metadata_lane_overhead();
+  test_lpddr_shared_metadata_lane_research_overhead();
   test_lpddr6_host_line_transaction_split();
   test_hbm3_lpddr5_host_line_transaction_split();
   test_hbm4_host_line_transaction_split();

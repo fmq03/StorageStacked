@@ -178,9 +178,13 @@ class MemorySystem {
   std::uint64_t stack_ingress_stall_cycles_ = 0;
   std::uint64_t stack_ingress_peak_ = 0;
   std::uint64_t qos_priority_dispatches_ = 0;
+  std::uint64_t dispatch_budget_exhausted_ = 0;
+  std::uint64_t controller_refused_dispatches_ = 0;
   std::vector<std::uint64_t> per_stack_ingress_stalls_;
   std::vector<std::uint64_t> per_stack_ingress_peak_;
   std::vector<std::uint64_t> per_stack_qos_dispatches_;
+  std::vector<std::uint64_t> per_stack_dispatch_budget_exhausted_;
+  std::vector<std::uint64_t> per_stack_controller_refused_;
   // max_cycles 结束时尚未注入的 frontend 请求数。
   std::uint64_t remaining_frontend_requests_ = 0;
   // RoundRobin mapper 的内部游标。

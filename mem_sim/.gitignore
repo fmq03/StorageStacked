@@ -39,6 +39,3 @@ __pycache__/
 /memory_image*.bin.present
 /outputs/*
 !/outputs/README.md
-
-# CTest 在本地运行时生成。
-/Testing/

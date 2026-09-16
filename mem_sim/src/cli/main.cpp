@@ -741,7 +741,10 @@ void write_timing_table_csv(const std::string& path, const hbm_sim::TimingTable&
   }
 }
 
-std::vector<std::string> validate_protocol_config(const hbm_sim::DramSpec& spec) {
+std::vector<std::string> validate_protocol_config(
+    const hbm_sim::DramSpec& spec,
+    hbm_sim::config::ValidationMode mode = hbm_sim::config::ValidationMode::Exploratory,
+    std::vector<std::string>* warnings = nullptr) {
   std::vector<std::string> errors;
   if (spec.org.line_size <= 0) {
     errors.push_back("line_size must be > 0");
@@ -781,6 +784,29 @@ std::vector<std::string> validate_protocol_config(const hbm_sim::DramSpec& spec)
   if (spec.lpddr_wck_mode == hbm_sim::LpddrWckMode::BurstSync) {
     errors.push_back(
         "lpddr_wck_mode=burst_sync is reserved and has no executable semantics");
+  }
+  if (spec.lpddr_link_ecc_enabled && spec.lpddr_dbi_enabled) {
+    // JESD209-6 Table 5「Features Related to Metadata Contents」把
+    // Link-protection 与 DBI 同时使能列为 Prohibited setting：
+    //   "Link-protection and DBI are exclusive function"
+    //   "All features cannot be enabled together"
+    // 因此这是标准禁止组合，而不是可调参数。只有显式声明为非标准研究模式
+    // （validation_mode=exploratory，即项目的可执行但偏离标准档）才放行，
+    // 且必须留下可见记录。
+    if (mode == hbm_sim::config::ValidationMode::Exploratory) {
+      if (warnings != nullptr) {
+        warnings->push_back(
+            "LPDDR6 link ECC/EDC 与 DBI 同时启用：JESD209-6 Table 5 列为 "
+            "Prohibited setting，当前仅在 exploratory 研究模式下执行；"
+            "标准合规配置须二者取一");
+      }
+    } else {
+      errors.push_back(
+          "LPDDR6 link ECC/EDC and DBI are mutually exclusive "
+          "(JESD209-6 Table 5: prohibited setting); disable one of them, "
+          "or declare validation_mode=exploratory for a non-standard "
+          "research model");
+    }
   }
   if (spec.lpddr_ca_parity_enabled) {
     // JESD209-6 CA Parity Check Mode 是 LPDDR6 命令/地址总线保护特性：
@@ -1922,7 +1948,12 @@ int main(int argc, char** argv) {
       }
       throw std::runtime_error(msg);
     }
-    std::vector<std::string> protocol_errors = validate_protocol_config(spec);
+    std::vector<std::string> protocol_warnings;
+    std::vector<std::string> protocol_errors =
+        validate_protocol_config(spec, cli.validation_mode, &protocol_warnings);
+    for (const auto& warning : protocol_warnings) {
+      std::cerr << "warning: " << warning << '\n';
+    }
     if (!protocol_errors.empty()) {
       std::string msg = "protocol config validation failed:";
       for (const auto& error : protocol_errors) {

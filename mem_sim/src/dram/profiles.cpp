@@ -92,7 +92,14 @@ struct Lpddr6CoreTimingNs {
   double wtr_l = 0.0;
 };
 
-int lpddr6_nacu_for_speed(int data_rate_mbps, bool dvfsl_enabled) {
+bool lpddr6_jedec_dvfsl_timing_enabled(const DramSpec& spec) {
+  // JESD209-6 的 DVFSL timing/nACU 表列只适用于 <=3200 Mb/s。项目的
+  // lpddr_dvfs_mode=low 还可表示更高速度的低速研究运行点（如 4267），
+  // 但这种运行点不能继续引用 DVFSL 列，只保留 DVFS/训练流程语义。
+  return spec.lpddr_dvfs_mode == LpddrDvfsMode::Low && spec.data_rate_mbps <= 3200;
+}
+
+int lpddr6_nacu_for_speed(int data_rate_mbps, bool jedec_dvfsl_timing) {
   // JESD209-6 表 415 和 420 按数据速率区间给出 nACU。10667Mbps 以上仍为
   // TBD，因此沿用最后一个已定义区间。
   struct Band {
@@ -108,16 +115,16 @@ int lpddr6_nacu_for_speed(int data_rate_mbps, bool dvfsl_enabled) {
   };
   for (const auto& band : bands) {
     if (data_rate_mbps <= band.upper_mbps) {
-      return dvfsl_enabled ? band.nacu_dvfsl : band.nacu_no_dvfsl;
+      return jedec_dvfsl_timing ? band.nacu_dvfsl : band.nacu_no_dvfsl;
     }
   }
-  return dvfsl_enabled ? 68 : 59;
+  return jedec_dvfsl_timing ? 68 : 59;
 }
 
-Lpddr6CoreTimingNs lpddr6_core_timing_ns(bool dvfsl_enabled, bool link_protection, bool efficiency_mode) {
+Lpddr6CoreTimingNs lpddr6_core_timing_ns(bool jedec_dvfsl_timing, bool link_protection, bool efficiency_mode) {
   // JESD209-6 表 414/416/417/418/419/421/422/423 按 DVFSL、链路保护和
   // 静态/动态 efficiency mode 划分核心时序。这里只映射控制器可见时序。
-  if (!dvfsl_enabled) {
+  if (!jedec_dvfsl_timing) {
     Lpddr6CoreTimingNs t{8.0, 18.0, 22.0, 21.0, 18.0, 1.25, 12.0, 6.25, 12.0};
     if (!link_protection && efficiency_mode) {
       t.wtp = 14.0;
@@ -486,12 +493,13 @@ void apply_lpddr6_profile(DramSpec& spec, double resolved_tck_ps) {
   }
 
   const int speed = spec.data_rate_mbps;
-  const bool dvfsl_enabled = spec.lpddr_dvfs_mode != LpddrDvfsMode::Disabled;
+  const bool dvfs_enabled = spec.lpddr_dvfs_mode != LpddrDvfsMode::Disabled;
+  const bool jedec_dvfsl_timing = lpddr6_jedec_dvfsl_timing_enabled(spec);
   // Identity labels must not secretly enable protocol features.
   const bool ca_parity_requested = spec.lpddr_ca_parity_enabled;
   const bool link_protection = spec.lpddr_link_protection || spec.lpddr_link_ecc_enabled;
   const bool efficiency_mode = spec.lpddr_efficiency_mode != LpddrEfficiencyMode::Normal;
-  const Lpddr6CoreTimingNs core = lpddr6_core_timing_ns(dvfsl_enabled, link_protection, efficiency_mode);
+  const Lpddr6CoreTimingNs core = lpddr6_core_timing_ns(jedec_dvfsl_timing, link_protection, efficiency_mode);
 
   spec.lpddr_link_protection = link_protection;
   spec.lpddr_link_ecc_enabled = spec.lpddr_link_ecc_enabled || link_protection;
@@ -504,7 +512,7 @@ void apply_lpddr6_profile(DramSpec& spec, double resolved_tck_ps) {
   spec.timing.nCWL = speed >= 10000 ? 26 : (speed >= 8533 ? 22 : 18);
   spec.timing.nRCDRD = jedec::max_ns_or_nck(core.rcd_read, 2, spec.timing.tCK_ps);
   spec.timing.nRCDWR = jedec::max_ns_or_nck(core.rcd_write, 2, spec.timing.tCK_ps);
-  const int nACU = lpddr6_nacu_for_speed(speed, dvfsl_enabled);
+  const int nACU = lpddr6_nacu_for_speed(speed, jedec_dvfsl_timing);
   spec.timing.nRP = nACU + jedec::max_ns_or_nck(core.rp_pb, 4, spec.timing.tCK_ps);
   spec.timing.nRPab = nACU + jedec::max_ns_or_nck(core.rp_ab, 4, spec.timing.tCK_ps);
   spec.timing.nRAS = jedec::max_ns_or_nck(20.0, 4, spec.timing.tCK_ps);
@@ -561,7 +569,11 @@ void apply_lpddr6_profile(DramSpec& spec, double resolved_tck_ps) {
     spec.lpddr_link_ecc_bits_per_request = 16;
   }
   if (spec.lpddr_dbi_enabled && spec.lpddr_dbi_bits_per_request == 0) {
-    spec.lpddr_dbi_bits_per_request = 8;
+    // JESD209-6 7.5.5: DBI 由 16 个 metadata 位承载每 256 数据位，
+    // 即一个 32B(256bit) 事务对应 16 位。LPDDR6 无 DMI 引脚。
+    // 注意：配置路径下 profile 展开先于配置覆盖，此分支只服务于在展开前
+    // 就已置位 lpddr_dbi_enabled 的库调用方；配置默认值见 model.cpp。
+    spec.lpddr_dbi_bits_per_request = 16;
   }
   if (spec.lpddr_ca_parity_enabled && spec.lpddr_ca_parity_bits_per_command <= 0) {
     spec.lpddr_ca_parity_bits_per_command = 1;
@@ -570,7 +582,7 @@ void apply_lpddr6_profile(DramSpec& spec, double resolved_tck_ps) {
       spec.lpddr_link_protection ?
       (spec.lpddr_ca_parity_enabled ? "link_ecc_crc_retry_ca_parity" : "link_ecc_crc_retry") :
       (spec.lpddr_ca_parity_enabled ? "ca_parity_only" : "off");
-  spec.lpddr_dvfs_transition_policy = dvfsl_enabled ? "idle_channel_nacu_guarded" : "disabled";
+  spec.lpddr_dvfs_transition_policy = dvfs_enabled ? "idle_channel_nacu_guarded" : "disabled";
   spec.lpddr_wck_training_mode =
       spec.lpddr_wck_training_required ? "startup_and_dvfs_retrain" : "cas_sync_only";
   spec.lpddr_low_power_state_policy =

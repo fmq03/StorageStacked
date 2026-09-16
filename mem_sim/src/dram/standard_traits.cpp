@@ -53,7 +53,7 @@ constexpr std::array<StandardTraits, 4> kStandardTraits{{
         .aliases = {"lpddr6", "lpddr", "ldppr"},
         .alias_count = 3,
         .default_timing_profile = "lpddr6_jedec_10667_16gb",
-        .default_mode_profile = "dvfsl_linkprot_off_bl24",
+        .default_mode_profile = "linkprot_off_bl24",
         .default_speed_bin_mbps = 10667,
         .default_density_gb = 16,
         .default_stack_height = 0,
