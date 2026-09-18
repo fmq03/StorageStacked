@@ -102,7 +102,9 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 
 源码版本：gem5 `c8222cc...`（gem5_new 锁定的 v25.1.0.1）；mem_sim 已同步远端
 `c383152...` 并合并在线接口。内部源码版本统一由主仓库提交标识，导入来源见
-`env/internal_imports.json`；不再使用旧 gem5_new 锁文件控制内部模块。
+`env/internal_imports.json`；不再使用旧 gem5_new 锁文件控制内部模块。特别是
+`gem5_new/upstream.lock.json` 的 `memsim` 条目仅保留给离线源码包导入/校验流，统一在线流
+不读取它来校验主仓库内的 `mem_sim`。
 
 ## 运行与证据
 
@@ -124,6 +126,10 @@ KVM 编译支持满足 Python 导入，仿真不使用 `/dev/kvm`。
 `environment/manifest.json` 记录源码/未提交文件、工具包、二进制和共享库哈希及实际链接库；
 内部目录（包括公共 protocol）记录同一个主仓库提交及各自文件哈希，外部目录记录子模块提交。
 同目录patch仅记录对应目录的未提交差异；内部导入来源另见env/internal_imports.json。
+其中 `binary_sha256`（`gem5.opt`）只作来源存档，不能用于可复现性或跨机一致性比对：gem5 的
+`src/base/date.cc` 把 `__DATE__ " " __TIME__` 编进二进制，任何一次重链接都会改变该哈希。
+判断构建是否最新应看 scons 的 `is up to date`，判断行为是否一致应看同一用例的仿真结果与
+各层校验，而不是二进制哈希。
 
 手动跑一个 CPU 场景：
 

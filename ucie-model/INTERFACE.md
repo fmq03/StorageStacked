@@ -44,8 +44,9 @@ struct FdiFlit {
 
 字段约束：
 
-- `payload.size()` 必须等于当前格式的固定 Payload 容量：Standard256 为 236 B，Compact68 为 64 B；
+- `payload.size()` 必须等于当前格式的固定 Payload 容量：Standard256 为 236 B，Compact68 为 64 B，AoU Format6 为 250 B；
 - `valid_bytes <= payload.size()`，短事务的其余字节补零；
+- AoU Format6 的 `valid_bytes` 必须为 250 B；它用共享 `aou_format6.h` 将完整 PLP 映射到 256 B 物理帧，并在 126/127 与 254/255 写入两组 CRC16；
 - `transaction_id`、`vc`、`kind` 和时间戳是事务级仿真元数据；
 - 当前只有 `payload` 被封装进 `Frame.bytes` 并经过 PAM4/NRZ 和信道损伤；
 - RX 完成 CRC、序号检查及必要重传后，去除链路 Header/CRC，并重新输出 `FdiFlit`。

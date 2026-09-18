@@ -28,7 +28,8 @@
 
 两种源分别运行。新增 `--backend aou` 路径已纳入联合调试，运行
 `bash gem5_axi/scripts/run_aou_tests.sh`；详见[联调说明](../integrate_doc/07_axi2flit_joint_debug.md)。
-存储对端仍是测试内存，尚未接 mem_sim，周期数不代表 DRAM 性能。
+`--memory-backend simple` 的存储对端仍是测试内存，周期数不代表 DRAM 性能；完整在线链路使用
+`--backend aou --memory-backend memsim`，经 AXI2Flit/UCIe/AouTarget 访问在线 `mem_sim`。
 
 可以直接打开[运行记录查看页](results/aou/directed/trace_view.html)，按 AXI ID 查看实际
 握手、对应 Flit、两端时间戳和完整原始字节；[阅读方法](../integrate_doc/08_observability_and_expected_behavior.md)

@@ -1,5 +1,10 @@
 # 上游版本记录
 
+> 本页维护**上游版本锁**与**离线 trace 消费流**的契约。统一在线流（CPU/GPU/NPU → AXI256 →
+> AXI2Flit → UCIe → 进程内 mem_sim C ABI）不经 HETTrace 文件交接，mem_sim 的 completion 会
+> 沿原链路反馈给发起方；入口见[环境说明](../env/README.md)与
+> [集成说明](docs/04-integration.md)。
+
 本项目不直接修改上游基线，而是把自己的集成代码装进去（见
 [docs/04-integration.md](docs/04-integration.md)）。代价是**上游漂移会让观测/异步补丁打不上**，
 而且失效方式不总是明显的 —— 补丁能打上但语义变了，比补丁直接失败更难查。
@@ -7,10 +12,12 @@
 可执行版本锁位于 [upstream.lock.json](upstream.lock.json)。下载脚本和预检共同读取它，
 本文解释版本来源、访问条件和验证范围。新安装使用公开 gem5 基线；历史私有 fork 单独保留记录。
 
-当前默认契约更新于 **2026-09-05**：CPU、Vortex 和 CoralNPU 的 memory-side 请求在 gem5
-中的同一个 interconnect 观察点写成 HETTrace v2；gem5 只负责功能真值，不从外部存储模型
-接收时序反馈。离线工具用 `convert --preset memsim` 把统一 AXI4 trace 投影为请求流，外部
-`mem_sim` 的 `hbm_sim` 是存储控制器/DRAM 时序真值。
+**离线 open-loop 契约**（更新于 **2026-09-05**）：CPU、Vortex 和 CoralNPU 的 memory-side
+请求在 gem5 中的同一个 interconnect 观察点写成 HETTrace v2；该流中 gem5 只负责功能真值，
+不从外部存储模型接收时序反馈。离线工具用 `convert --preset memsim` 把统一 AXI4 trace
+投影为请求流，外部 `mem_sim` 的 `hbm_sim` 是存储控制器/DRAM 时序真值。
+**统一在线流不使用这条文件交接契约**：`mem_sim` 以 `integration/online.h` 的 C ABI 在仿真
+进程内被调用，completion 沿原链路返回。
 
 项目侧旧的在线 Ramulator、AXI/UCIe bridge 和 Python 内置 `memsim` 已退出默认架构。这里仍
 钉住的 `third_party/ramulator` **只属于 Vortex SimX 自身的构建与运行时依赖**，不可删除，

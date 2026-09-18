@@ -1,5 +1,9 @@
 # 从四棵外部源码到可复现实验
 
+> 本页描述独立、离线的 open-loop 复现流。当前主仓库的在线统一流请使用根目录
+> `env/bootstrap_xpu.sh`、`env/build_xpu.sh`、`env/run_memsim.sh` 与 `env/run_xpu.sh`；它使用
+> `build/AXI`、1 fs 时间基准和 `mem_sim` 在线 C ABI，不使用本页的 `build/X86`/`hbm_sim` 产物。
+
 按本页顺序执行。命令假定 Ubuntu 24.04 x86-64、Bash，且已经进入本项目根目录；文件系统操作
 都在运行 Codex 的服务器上完成。固定版本来自 [upstream.lock.json](../upstream.lock.json)，
 源码许可和远端访问条件见 [UPSTREAM.md](../UPSTREAM.md)。
@@ -32,12 +36,12 @@ export HET_JOBS=8
 使用新目录复现、保护已有设备树时，在 source **之前**设置：
 
 ```bash
-export HET_DEPS_ROOT="$PWD/build/dependencies"
-export GEM5_HOME="$HET_DEPS_ROOT/gem5"
-export VORTEX_HOME="$HET_DEPS_ROOT/vortex"
-export VORTEX_BUILD="$HET_DEPS_ROOT/vxbuild"
-export CORALNPU_HOME="$HET_DEPS_ROOT/coralnpu"
-export MEMSIM_HOME="$HET_DEPS_ROOT/mem_sim"
+deps_root="$PWD/build/dependencies"
+export GEM5_HOME="$deps_root/gem5"
+export VORTEX_HOME="$deps_root/vortex"
+export VORTEX_BUILD="$deps_root/vxbuild"
+export CORALNPU_HOME="$deps_root/coralnpu"
+export MEMSIM_HOME="$deps_root/mem_sim"
 export MEMSIM_BUILD="$MEMSIM_HOME/build"
 export MEMSIM_BIN="$MEMSIM_BUILD/hbm_sim"
 source scripts/native_env.sh
@@ -107,7 +111,7 @@ Git 下载禁止弹出交互登录，失败会给出明确的离线/权限提示
 checkout、reset 或覆盖；相同版本的项目补丁可保留。缺 submodule 的已有 Vortex 树需要按下一节
 补齐后重试。`check` 仅核对源版本（快照还检查清单文件是否存在），不证明文件内容或编译产物正确。
 
-期望出现 `ok ... revision ...` 和 `ok memsim snapshot ... (160 files)`。源码包声明的 commit
+期望出现 `ok ... revision ...` 和 `ok memsim snapshot ...`。源码包声明的 commit
 不符时不导入，不创建目标树；只使用可信来源的包。仅获取某一棵可加 `--only gem5|vortex|coralnpu|memsim`。
 
 ## 3. 四棵源码的显式 Git/导入命令
@@ -205,8 +209,10 @@ cd "$HET_PROJECT_ROOT"
 make install
 ```
 
-输出应依次为 `[1/4] Vortex 项目增量`、`[2/4] Vortex gem5 SimObject`、
-`[3/4] 统一 gem5 增量`、`[4/4] CoralNPU 项目增量`。它只安装源码，不编译四棵外部树。
+按 Vortex → gem5 → CoralNPU 顺序串行执行三个安装器。实际输出是各安装器的中文进度，
+没有 `[n/4]` 编号，例如 `Vortex SimX 在线访存补丁已准备好；…`、`安装 gem5 侧源码到 …`、
+`  DmaPort byte-enable: …`、`  src/… -> …`、`  hw_sim/core_mini_axi_wrapper.h: …`。
+它只安装源码，不编译四棵外部树。
 项目 patch 的维护、重复安装和撤销语义见[集成说明](04-integration.md)。
 
 ## 5. 构建顺序、命令与成功产物

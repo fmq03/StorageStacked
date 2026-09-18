@@ -44,7 +44,9 @@ struct FileHeader {
     char     magic[8];             // "HETTRC\0\1"
     uint32_t version;              // kFormatVersion
     uint32_t record_size;          // sizeof(Record) == 56
-    uint64_t ticks_per_second;     // gem5 时间基准，1e12
+    // 实际 gem5 时间基准；当前统一在线流为 1e15（1fs），旧离线流可为 1e12（1ps）。
+    // addrmap.h 的 1e12 仅是生成时的 ps 标称值，写入文件前会按运行时频率缩放。
+    uint64_t ticks_per_second;
     uint64_t clock_period_ticks;   // 本源一个时钟周期折算的 tick 数
     uint16_t src_id;               // 见 addrmap.h SrcId
     uint8_t  level;                // 见 addrmap.h TapLevel

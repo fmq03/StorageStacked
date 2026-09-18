@@ -192,6 +192,19 @@ check "T14 Failed link state reported"        "[[ \$(metric ${CSV} link_state) =
 check "T14 traffic stopped incomplete"        "[[ \$(metric ${CSV} delivered_flits) -lt 100 ]]"
 check "T14 no false integrity error"          "[[ \$(metric ${CSV} integrity_errors) -eq 0 ]]"
 
+# ---------------------------------------------------- T15: AoU Format6 path
+# The public aou256 mode carries a fixed 250B PLP in the shared physical 256B
+# mapping. Keep this system-level test separate from the unit golden vectors.
+CSV="${OUT}/t15.csv"
+"${BIN}" --format aou256 --flits 300 --sigma 0 --jitter 0 --isi1 0 --isi2 0 --skew 0 \
+  --csv "${CSV}" > "${OUT}/t15.log" 2>&1
+rc=$?
+check "T15 AoU Format6: exit 0"               "[[ ${rc} -eq 0 ]]"
+check "T15 AoU Format6 delivered all"         "[[ \$(metric ${CSV} delivered_flits) -eq 300 ]]"
+check "T15 AoU Format6 250B payload in 256B"  "[[ \$(metric ${CSV} payload_bytes) -eq 250 && \$(metric ${CSV} flit_bytes) -eq 256 ]]"
+check "T15 AoU Format6 sequence wrap clean"   "[[ \$(metric ${CSV} seq_fail_count) -eq 0 ]]"
+check "T15 AoU Format6 zero integrity errors" "[[ \$(metric ${CSV} crc_fail_count) -eq 0 && \$(metric ${CSV} integrity_errors) -eq 0 ]]"
+
 echo
 echo "=============================="
 echo "PASS=${PASS} FAIL=${FAIL}"

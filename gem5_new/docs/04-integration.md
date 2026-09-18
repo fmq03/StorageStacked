@@ -2,9 +2,10 @@
 
 # 上游源码集成
 
-本项目在四棵外部树旁工作：gem5、Vortex、CoralNPU 和 GuXing25 `mem_sim`。固定 commit 见
-[UPSTREAM.md](../UPSTREAM.md)。前三棵提供功能执行和 trace 产生端；`mem_sim/hbm_sim` 是独立、
-只读消费 trace 的存储时序端，项目不会给它打在线回调补丁。
+离线维护文档曾将 gem5、Vortex、CoralNPU 和 GuXing25 `mem_sim` 视为四棵独立上游树，固定
+commit 见 [UPSTREAM.md](../UPSTREAM.md)。统一系统中前三者仍为外部树；`mem_sim` 已是主仓库
+普通源码目录。它既可构建离线 trace 消费器 `hbm_sim`，也提供在线 C ABI
+`integration/online.h` 与 `libstoragestacked_memsim.so`，由 `MemSimBackend` 在仿真进程内调用。
 
 从零获取四棵源码、公开 gem5 SHA 修正与 mem_sim 离线包导入见
 [构建运行详解](08-build-run.md)。新增设备的完整步骤见[XPU 接入流程](11-xpu-integration.md)。
@@ -16,7 +17,7 @@
 | gem5 | `GEM5_HOME` | 安装 CoralNPU 设备、`HetAxiMonitor`、功能内存和异构配置；给 `DmaPort` 增加 byte-enable |
 | Vortex | `VORTEX_HOME` | 安装 trace/异步请求 ABI 与多 outstanding/WSTRB 补丁 |
 | CoralNPU | `CORALNPU_HOME` | 安装 gem5 动态库、原生 AXI 回调 seam 和测试内核 |
-| mem_sim | `MEMSIM_HOME` | 固定上游源码，直接构建 `hbm_sim`；无项目内在线后端 |
+| mem_sim | `MEMSIM_HOME` | 离线构建 `hbm_sim`；统一在线流构建 `build-unified/libstoragestacked_memsim.so`，由 `MemSimBackend` 经 C ABI 调用 |
 
 Vortex 的 `third_party/ramulator` 是 SimX 既有依赖，构建 Vortex 时仍必须存在。它与外部
 `MEMSIM_HOME` 是两个不同角色，不能用其中一个替代另一个。
@@ -32,16 +33,23 @@ source scripts/native_env.sh
 然后安装增量：
 
 ```bash
-# Vortex 树先打补丁，再把补丁后的 gem5 SimObject 安装进 gem5
+# Vortex 树先打补丁（simx_online.patch 只改外部 SimX 与 ABI 内部）
 VORTEX_HOME="$VORTEX_HOME" ./vortexint/install.sh
-GEM5_HOME="$GEM5_HOME" "$VORTEX_HOME/sim/simx/gem5/install.sh"
+
+# 不要执行 `sim/simx/gem5/install.sh`（Vortex 树内脚本）：它装的是 Vortex 树里的旧
+# 设备副本 vortex_gpgpu_dev.cc（274 行），会覆盖 gem5int/src/dev/vortex 的真值源
+# （649 行）。gem5 侧设备源码只由 gem5int/install.sh 或 install_devices.sh 安装。
 
 # 项目自己的 gem5 与 CoralNPU 内容
 GEM5_HOME="$GEM5_HOME" ./gem5int/install.sh
 CORALNPU_HOME="$CORALNPU_HOME" ./coralnpuint/install.sh
 ```
 
-重复安装是幂等的；三个项目安装器都支持 `--revert`。`mem_sim` 不需要安装脚本：
+离线安装器 `gem5int/install.sh`、`vortexint/install.sh` 和 `coralnpuint/install.sh` 支持
+`--revert`。统一流使用的 `gem5int/install_devices.sh` 也支持 `--revert`，但它会删除
+`dev/coralnpu`、`dev/vortex`、`mem/unified_timing` 三个项目独占目录并反向撤销
+`dma_byte_enable` 补丁；撤销后需要在线链路时，重新运行 `env/build.sh` 或
+`install_devices.sh`。`mem_sim` 不需要安装脚本：
 
 ```bash
 cmake -S "$MEMSIM_HOME" -B "$MEMSIM_BUILD" -DCMAKE_BUILD_TYPE=Release
@@ -54,11 +62,14 @@ cmake --build "$MEMSIM_BUILD" -j"$(nproc)"
 
 - `src/hettrace/`：透明 request/response monitor 及其 SimObject 构建声明；
 - `src/dev/coralnpu/`：CoralNPU SimObject；
+- `src/dev/vortex/`：VortexGPGPU SimObject；
 - `src/mem/unified_timing/`：稀疏功能 responder；
 - `configs/het/`：独立与异构配置。
 
-唯一修改上游既有源码的 gem5 补丁是 `patches/dma_byte_enable.patch`，用于把真实 WSTRB 作为
-byte-enable 送过 timing request，避免设备侧额外 RMW。主配置的唯一正式 trace 点是
+离线安装流修改上游 gem5 的设备层补丁是 `patches/dma_byte_enable.patch`，用于把真实 WSTRB
+作为 byte-enable 送过 timing request，避免设备侧额外 RMW。统一流还会由
+`gem5_axi/scripts/patch_gem5.py` 修改 `gem5_to_tlm.cc` 与 `vcd.cc`，分别保持 masked write
+和整数字段 VCD 的正确性。主配置的唯一正式 trace 点是
 `system.axi_monitor`；per-device tap 在该配置中关闭，只保留给 standalone 诊断。
 
 atomic fast-forward 有一个容易踩中的时间语义：`sendAtomic()` 返回服务 delay，但不会在 monitor
@@ -67,13 +78,17 @@ tick 到达或仿真退出时再依次写出；AW/AR/W 仍使用真实 `curTick(
 伪装成零延迟，也不会先写入未来响应、随后让下一笔当前请求造成时间戳回退。
 `run_vortex_shared.sh` 同时检查 `non_monotonic=0` 和多数 host 事务具有非零响应延迟。
 
-复制 SimObject `.py` 或 C++ 后必须重新构建，生成的 params 头才会同步：
+复制 SimObject `.py` 或 C++ 后必须重新构建，生成的 params 头才会同步。离线流使用：
 
 ```bash
 cd "$GEM5_HOME"
 .venv/bin/scons build/X86/gem5.opt -j"$(nproc)"
 test -f build/X86/params/HetAxiMonitor.hh
 ```
+
+统一在线流从主仓库根目录执行 `bash env/build.sh`，产物为
+`gem5/build/AXI/gem5.opt` 和 `gem5/build/AXI/params/HetAxiMonitor.hh`；不要混用
+`.venv/bin/scons build/X86` 的离线构建目录。
 
 ## Vortex 与 CoralNPU 补丁栈
 
@@ -95,7 +110,8 @@ CoralNPU 共享库显式链接 `libatomic`，并用 `-Wl,-z,defs` 在链接阶�
 
 1. 对照 [UPSTREAM.md](../UPSTREAM.md) 核对目标 commit；
 2. 检查目标树是否已有用户修改，不要覆盖；
-3. 查看 `.pre-hettrace`、`.pre-timing-feedback` 等备份，只作为 diff 参考；
+3. 查看 `.pre-hettrace`、`.pre-timing-feedback` 等备份，只作为离线安装流的 diff 参考；
+   统一流的 `install_devices.sh` 不创建这些备份，但它会镜像项目独占设备目录并删除陈旧文件；
 4. 将必要接口移植到新上游，重新生成最小增量补丁；
 5. 验证安装、重复安装、`--revert`、重新安装和完整三源回归。
 

@@ -13,10 +13,11 @@ make validate    # 全部执行并生成 results/LINK_VALIDATION_REPORT.md
 
 ## 2. 单元验证
 
-`src/ucie_unit_tests.cpp` 当前包含 22 项确定性断言：
+`src/ucie_unit_tests.cpp` 当前包含 28 项确定性断言：
 
 - CRC-16/CCITT-FALSE 标准字符串黄金值 `0x29B1`；
 - Standard256/Compact68 字段长度、Header、CRC 覆盖和固定 bit 翻转；
+- AoU Format6 的 250B PLP/256B physical frame、严格长度、scatter/gather、两段 CRC16 黄金值、第二组 CRC 损坏检测与序号回绕；
 - 线上 8-bit 序号 `254,255,0,1` 回绕；
 - PAM4 Gray 编码、判决门限及 NRZ 零门限；
 - 固定 byte 向量的 lane striping/de-striping；
@@ -27,7 +28,7 @@ make validate    # 全部执行并生成 results/LINK_VALIDATION_REPORT.md
 
 ## 3. 系统回归
 
-`scripts/run_tests.sh` 当前包含 82 项断言：
+`scripts/run_tests.sh` 当前包含 87 项断言：
 
 | 场景 | 重点检查 |
 | --- | --- |
@@ -45,6 +46,7 @@ make validate    # 全部执行并生成 results/LINK_VALIDATION_REPORT.md
 | T12 | deskew 超限、重传恢复、完整性 |
 | T13 | 48 GT/s、1536 Gbps 原始容量、双向满负载、利用率≥90% |
 | T14 | watchdog 到期、非完整返回码、`Failed` 状态及无伪完整性错误 |
+| T15 | AoU Format6 端到端 250B Payload、256B 物理帧、序号回绕与完整性 |
 
 ## 4. 参数扫描
 

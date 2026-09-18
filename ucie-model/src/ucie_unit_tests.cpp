@@ -71,6 +71,38 @@ int sc_main(int, char**) {
     check(!check_flit(standard, standard_flit).crc_ok,
           "Standard CRC detects a fixed payload bit flip");
 
+    Config aou;
+    aou.flit_format = FlitFormat::AouFormat6;
+    std::vector<std::uint8_t> aou_payload(aou.payload_bytes());
+    for (std::size_t i = 0; i < aou_payload.size(); ++i) {
+        aou_payload[i] = static_cast<std::uint8_t>(i);
+    }
+    check(aou.payload_bytes() == 250U && aou.flit_bytes() == 256U,
+          "AoU Format6 uses a 250B payload in a 256B physical flit");
+    check_throws([&] {
+        build_flit(aou, 0U, std::vector<std::uint8_t>(249U), false);
+    }, "AoU Format6 rejects a payload shorter than 250B");
+    const std::vector<std::uint8_t> aou_flit =
+        build_flit(aou, 0x1FFU, aou_payload, true);
+    aou_format6::Frame aou_physical{};
+    std::copy(aou_flit.begin(), aou_flit.end(), aou_physical.begin());
+    const auto aou_payload_roundtrip = aou_format6::gather(aou_physical);
+    check(std::equal(aou_payload.begin(), aou_payload.end(),
+                     aou_payload_roundtrip.begin()),
+          "AoU Format6 scatter/gather restores every payload byte");
+    check(aou_flit[126] == 0x41U && aou_flit[127] == 0x5DU &&
+              aou_flit[254] == 0xB0U && aou_flit[255] == 0x24U &&
+              check_flit(aou, aou_flit).crc_ok,
+          "AoU Format6 writes both CRC16 slots with independent golden values");
+    check(check_flit(aou, aou_flit).seq8 == 0xFFU &&
+              check_flit(aou, aou_flit).replay_flag &&
+              check_flit(aou, build_flit(aou, 256U, aou_payload, false)).seq8 == 0U,
+          "AoU Format6 preserves replay and wraps the 8-bit sequence");
+    std::vector<std::uint8_t> aou_second_half_corrupt = aou_flit;
+    aou_second_half_corrupt[130] ^= 0x01U;
+    check(!check_flit(aou, aou_second_half_corrupt).crc_ok,
+          "AoU Format6 second CRC group detects a payload bit flip");
+
     Config compact;
     compact.flit_format = FlitFormat::Compact68;
     std::vector<std::uint8_t> compact_payload(compact.payload_bytes(), 0xA5U);

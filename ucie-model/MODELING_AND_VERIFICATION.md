@@ -23,8 +23,8 @@
 截至本文日期，`scripts/run_tests.sh` 已重新执行并得到：
 
 ```text
-UNIT_PASS=22 UNIT_FAIL=0
-PASS=82 FAIL=0
+UNIT_PASS=28 UNIT_FAIL=0
+PASS=87 FAIL=0
 ```
 
 这个结果证明主要软件路径能够按当前模型定义工作，但不等于已经证明模型与真实芯片的
@@ -234,8 +234,9 @@ Standard 256B 分两组计算：
 
 Compact 68B 对 bytes `[0..65]` 计算一个 CRC。RX 重新计算并与 Flit 尾部字段比较。
 
-单元测试已加入独立 CRC-16/CCITT-FALSE 黄金值 `123456789 -> 0x29B1`，并对两种 Flit
-执行固定 bit 翻转检测；系统回归再验证随机错误能够触发 NAK/replay。该证据验证当前行为
+单元测试已加入独立 CRC-16/CCITT-FALSE 黄金值 `123456789 -> 0x29B1`，并对 Standard、
+Compact 与 AoU Format6 执行固定 bit 翻转检测；AoU 还覆盖共享 scatter/gather 和两段 CRC
+黄金值。系统回归再验证随机错误能够触发 NAK/replay。该证据验证当前行为
 模型的算法和覆盖路径，但仍不等同于正式 UCIe 合规签核。
 
 ### 4.5 TX D2D Adapter
@@ -934,10 +935,11 @@ $$
 make test
 ```
 
-### 7.2 22 项单元断言与 82 项系统断言
+### 7.2 28 项单元断言与 87 项系统断言
 
-`src/ucie_unit_tests.cpp` 提供 CRC 标准黄金值、两种 Flit、PAM4/NRZ、lane 映射、序号回绕、
-CDR 门限/重锁、deskew 和配置边界等 22 项确定性断言。SystemC 系统回归包含：
+`src/ucie_unit_tests.cpp` 提供 CRC 标准黄金值、Standard/Compact/AoU Format6、PAM4/NRZ、
+lane 映射、序号回绕、CDR 门限/重锁、deskew 和配置边界等 28 项确定性断言。SystemC
+系统回归包含：
 
 | 测试            | 激励                              | 关键断言                                                  | 覆盖功能                          |
 | --------------- | --------------------------------- | --------------------------------------------------------- | --------------------------------- |
@@ -955,14 +957,15 @@ CDR 门限/重锁、deskew 和配置边界等 22 项确定性断言。SystemC �
 | T12 deskew       | 1 lane、0/1 UI skew、0 UI 容限      | deskew fail 和 replay>0；全部交付                         | deskew 异常与恢复                 |
 | T13 48 GT/s      | 16 lane PAM4、双向满载             | 容量1536 Gbit/s；利用率≥90%；双向各1000 Flit              | 48 GT/s 与双向吞吐                |
 | T14 Watchdog     | `max_time_ui=10`                   | 返回不完整状态；watchdog=1；link_state=Failed             | 超时与失败状态                    |
+| T15 AoU Format6  | 300 Flit，关闭损伤                  | 250B Payload/256B Flit；序号回绕；0 CRC/integrity error   | 共享 Format6 端到端路径           |
 
 ### 7.3 当前实测回归结果
 
-2026-08-25 重新执行结果：
+2026-09-18 重新执行结果：
 
 ```text
-UNIT_PASS=22 UNIT_FAIL=0
-PASS=82 FAIL=0
+UNIT_PASS=28 UNIT_FAIL=0
+PASS=87 FAIL=0
 ```
 
 部分关键结果：
@@ -974,6 +977,7 @@ PASS=82 FAIL=0
 | T4 sigma=0.20 | 聚合 SER 约 4.79e-5、209 NAK、506 replay，最终 2000/2000 响应正确交付 |
 | T10 外部 Payload | 3/3 请求及响应交付，导出的 transaction ID、VC 和 Payload 与输入完全一致 |
 | T7 小缓存     | 最大占用严格为4，缓存满事件1059，最终1000/1000正确交付       |
+| T15 AoU Format6 | 300/300 请求与响应交付，250B Payload/256B 物理帧，0 CRC/integrity error |
 
 ### 7.4 参数扫描
 
@@ -1143,7 +1147,7 @@ GEM5/AXI Trace
 ### 10.1 编译
 
 ```bash
-cd /home/hy258/ucie/ucie_systemc
+cd /path/to/StorageStacked/ucie-model
 make
 ```
 
@@ -1252,9 +1256,10 @@ ucie_systemc/
 - 用 SystemC 时间轴表达串行化、管线、反馈、训练和重锁延迟；
 - 用功能回归和参数扫描观察正确性与性能趋势。
 
-现有22项单元断言和82项系统断言覆盖独立CRC/PAM4/NRZ/lane黄金向量、CDR、deskew、
-精确延迟、背压、重传和24/32/48 GT/s双向传输，能证明链路模型在低噪声条件下的
-payload利用率约92.18%。36点扫描进一步覆盖速率、lane、噪声、jitter和多个随机seed。
+现有28项单元断言和87项系统断言覆盖独立 CRC/PAM4/NRZ/lane 黄金向量、AoU Format6、
+CDR、deskew、精确延迟、背压、重传和24/32/48 GT/s双向传输，能证明链路模型在低噪声
+条件下 Standard payload 利用率约92.18%、AoU Format6 约97.66%。36点扫描进一步覆盖
+速率、lane、噪声、jitter和多个随机seed。
 尚需外部补充的主要是统计理论对照和真实物理通道校准。
 
 因此，这个模型目前适合作为独立 UCIe 链路的功能、可靠性、性能和参数敏感性验证组件；

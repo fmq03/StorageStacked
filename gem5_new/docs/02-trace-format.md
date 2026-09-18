@@ -30,11 +30,14 @@ coralnpu.hettrace.meta.json
 | 字段 | 含义 |
 |---|---|
 | `version` / `record_size` | 当前固定为 2 / 56 |
-| `ticks_per_second` | 全局时间基准，gem5 为 `10^12` |
+| `ticks_per_second` | 文件记录的实际全局时间基准；当前统一在线流为 `10^15`（1 fs），旧离线流可为 `10^12`（1 ps） |
 | `clock_period_ticks` | 该源一个周期对应多少全局 tick |
 | `src_id`, `name` | 来源身份 |
 | `level` | 观察层级；主配置统一为 `interconnect`（数值 3） |
 | `axi_data_bytes`, `axi_addr_bits` | AXI 总线契约 |
+
+`addrmap.json` 中的 ps 常量只是生成基准。`HetAxiMonitor` 会按 gem5 的实际
+`sim_clock::Frequency` 缩放周期；消费者必须读取文件头，不能把 `10^12` 写死。
 
 记录字段：
 

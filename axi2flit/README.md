@@ -51,7 +51,7 @@ make full-link-negative
 make full-link-wave
 ```
 
-链路模型默认位于 `reference/ucie-model`，安装方法见[接入说明](systemc/integration/README.md)。更换位置可执行：
+链路模型默认位于仓库同级的 `../ucie-model`，安装方法见[接入说明](systemc/integration/README.md)。更换位置可执行：
 
 ```bash
 make UCIE_DIR=/work/models/ucie-model full-link-all

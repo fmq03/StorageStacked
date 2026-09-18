@@ -4,6 +4,11 @@ date: "2026-09-08"
 lang: zh-CN
 ---
 
+> 本手册记录**离线 open-loop** 工作流（`build/X86`、外部 `hbm_sim`、`make install`）。统一
+> 在线流（CPU/GPU/NPU → AXI256 → AXI2Flit → UCIe → 进程内 mem_sim C ABI，`build/AXI`、
+> 1 fs）见[环境说明](../env/README.md)与[集成说明](04-integration.md)。两者产物与预检口径
+> 不同，不要混用。
+
 # 1. 项目概览
 
 本手册对应 2026-09-08 文档与可复现性更新。仓库只保存项目增量、测试、workload 与文档；
@@ -178,8 +183,10 @@ VORTEX_HOME="$VORTEX_HOME" VORTEX_BUILD="$VORTEX_BUILD" \
 make preflight
 ```
 
-预检成功应显示 `READY`，并找到 `build/X86/params/HetAxiMonitor.hh`、两套设备库、Vortex runtime/
-kernel 和外部 `hbm_sim`。
+预检会按仓库布局自动选择 profile：统一布局报 `build/AXI/gem5.opt` 与在线
+`libstoragestacked_memsim.so`，离线布局报 `build/X86/params/HetAxiMonitor.hh` 与外部
+`hbm_sim`；可用 `HET_PREFLIGHT_PROFILE=offline|unified` 强制。两侧都应显示 `READY`，并找到
+两套设备库与 Vortex runtime/kernel。
 
 # 4. 运行验收
 

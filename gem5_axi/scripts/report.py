@@ -80,7 +80,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:7px;text-
 <h1>gem5 → TLM → AXI 五通道 → SystemC RAM</h1>
 <p>同一进程；全局 1 fs/tick。结果来自实际 gem5 运行和独立 CSV 校验。</p>
 <div class="card"><b>全部回归通过</b><p id="summary"></p>
-<p class="small">范围：普通非一致性读写、有限 outstanding、双向背压、数据/字节使能、突发拆分与错误返回。尚未连接 AXI2Flit / UCIe / mem_sim。</p></div>
+<p class="small">本页面仅汇总 SystemC RAM 回归：普通非一致性读写、有限 outstanding、双向背压、数据/字节使能、突发拆分与错误返回。完整 AXI2Flit/UCIe/在线 mem_sim 验收见 env/run_memsim.sh。</p></div>
 <label>场景 <select id="case"></select></label><button id="relative">按事务耗时显示</button>
 <div class="card" id="stats"></div><div class="card"><b>事务时间线</b>
 <p class="small">黄色：BEGIN_REQ 到准入；蓝色：准入到最后 B/R 握手；紫色：完成到 END_RESP。悬停查看具体时间；初始位置表示全局模拟时刻。</p>

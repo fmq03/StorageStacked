@@ -58,6 +58,9 @@ manifest = {
     "scons": command(str(prefix / "bin/scons"), "--version"),
     "packages": [{k: p[k] for k in ("name", "version", "build", "url", "md5")} for p in packages],
     "memsim_library_sha256": sha(Path(os.environ["MEMSIM_BUILD"]) / "libstoragestacked_memsim.so"),
+    # binary_sha256 is a provenance record only. gem5 compiles __DATE__/__TIME__
+    # into src/base/date.cc, so any relink changes it; never compare it for
+    # reproducibility. Use simulation results and the per-layer checks instead.
     "binary": str(binary), "binary_sha256": sha(binary), "ldd": linked,
     "gem5_build_config": (root / "gem5/build/AXI/gem5.build/config").read_text(),
     "systemc": "gem5 native; no external libsystemc", "ticks_per_second": 10**15,

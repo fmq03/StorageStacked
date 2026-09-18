@@ -48,8 +48,9 @@ CoralNPU AXI 地址为 32 位，只把 `[0x80000000, 0xc0000000)` 判为 DDR，�
 系统没有 CPU cache 与设备 DMA 的一致性协议，去缓存属性是功能正确性的必要条件。
 
 `UnifiedTimingMemory` 保存共享字节并返回 gem5 timing response，使程序能够执行；其
-`--mem-latency`、`--mem-bandwidth` 不是最终 DRAM 性能真值。统一 memory-side monitor 在地址
-解码前观察所有功能请求，再把固定 trace 交给外部 `hbm_sim`。
+`--mem-latency`、`--mem-bandwidth` 不是最终 DRAM 性能真值。离线流的 memory-side monitor
+在地址解码前观察请求并导出 trace 给 `hbm_sim`；统一在线流则由 `MemSimBackend` 经 C ABI
+把 AoU 存储请求提交给同一份 `mem_sim` 行为模型。
 
 ## Trace 窗口与时钟
 
@@ -57,10 +58,13 @@ CoralNPU AXI 地址为 32 位，只把 `[0x80000000, 0xc0000000)` 判为 DDR，�
 未重新生成地址表，记录可能被过滤或标为 `unmapped`。分析前检查 meta 中的 `filtered`、
 `unmapped` 和区域分布。
 
-| 源 | 频率 | gem5 tick/周期 |
-|---|---:|---:|
-| host | 2 GHz | 500 |
-| Vortex | 1 GHz | 1000 |
-| CoralNPU | 500 MHz | 2000 |
+| 源 | 频率 | addrmap 标称值（1 ps） | 统一运行值（1 fs） |
+|---|---:|---:|---:|
+| host | 2 GHz | 500 | 500000 |
+| Vortex | 1 GHz | 1000 | 1000000 |
+| CoralNPU | 500 MHz | 2000 | 2000000 |
 
-gem5 全局 tick 为 1 ps。修改源时钟时必须同步 `addrmap.json`、gem5 clock domain 和回归预期。
+`addrmap.json` 的时钟常量以 1 ps 为生成基准；`HetAxiMonitor` 按
+`sim_clock::Frequency` 在运行时缩放。当前统一在线构建将 gem5 全局 tick 设为 1 fs，实际
+`ticks_per_second` 与 `clock_period_ticks` 以 trace 文件头为准。修改源时钟时必须同步
+`addrmap.json`、gem5 clock domain 和回归预期。

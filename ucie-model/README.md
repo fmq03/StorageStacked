@@ -109,15 +109,16 @@ transaction_id,vc,payload_hex
 | --- | --- | ---: | ---: |
 | Standard 256B | 2B Header + 236B Payload + 4B DLLP + 10B Reserved + 4B CRC | 236B | 92.19% |
 | Compact 68B | 2B Header + 64B Payload + 2B CRC | 64B | 94.12% |
+| AoU Format6 | 2B FH + 250B PLP 的共享 scatter/gather 映射 + 两组 CRC-16 | 250B | 97.66% |
 
-Header 第 0 字节保存序号低 8 位，第 1 字节 bit 0 为 replay 标志。Standard 256B 使用两组 CRC-16/CCITT，Compact 68B 使用一组 CRC-16。
+Header 第 0 字节保存序号低 8 位，第 1 字节 bit 0 为 replay 标志。Standard 256B 和 AoU Format6 使用两组 CRC-16/CCITT，Compact 68B 使用一组 CRC-16。AoU 的 payload 必须恰为 250B，物理字节映射由共享的 `protocol/include/aou_format6.h` 定义。
 
 ## 5. 编译、运行与测试
 
 依赖 g++/C++17 和 SystemC 2.3.4：
 
 ```bash
-cd /home/hy258/ucie/ucie_systemc
+cd /path/to/StorageStacked/ucie-model
 make
 make run
 make unit-test
@@ -148,7 +149,7 @@ make validate
 ./build/ucie_sc_sim --help
 ```
 
-当前包含 22 项确定性单元断言和 82 项 SystemC 系统断言，覆盖 CRC/PAM4/NRZ/lane 黄金向量、内部与外部 Payload、双向 PHY、序号回绕、重传、CDR、deskew、watchdog、24/32/48 GT/s、两种 Flit、背压、精确延迟、P50/P95/P99、确定性和端到端完整性。完整矩阵见 [`TEST_PLAN.md`](TEST_PLAN.md)。
+当前包含 28 项确定性单元断言和 87 项 SystemC 系统断言，覆盖 CRC/PAM4/NRZ/lane 黄金向量、Standard/Compact/AoU Format6、内部与外部 Payload、双向 PHY、序号回绕、重传、CDR、deskew、watchdog、24/32/48 GT/s、背压、精确延迟、P50/P95/P99、确定性和端到端完整性。完整矩阵见 [`TEST_PLAN.md`](TEST_PLAN.md)。
 
 ## 6. 主要输出指标
 

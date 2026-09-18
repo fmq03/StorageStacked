@@ -6,7 +6,7 @@ bash "$HET_PROJECT_ROOT/vortexint/install.sh"
 bash "$HET_PROJECT_ROOT/coralnpuint/install.sh"
 mkdir -p "$VORTEX_BUILD"
 cd "$VORTEX_BUILD"
-"$VORTEX_HOME/configure" --xlen=32 --tooldir="$SS_DEPS_ROOT/xpu-toolchains"
+"$VORTEX_HOME/configure" --xlen=32 --tooldir="$SS_DEPS_ROOT/xpu-toolchains" --osversion=ubuntu/focal
 # CMake otherwise clones these sources during the build. Use the same pinned
 # source cache for both network and packaged installations.
 cmake_sources=(yaml-cpp spdlog argparse)

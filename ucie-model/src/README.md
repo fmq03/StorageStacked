@@ -61,6 +61,7 @@ flit_efficiency = payload_bytes / flit_bytes
 - Header byte 1 bit 0：replay 标志；
 - Standard256：236B Payload，两组 CRC-16/CCITT；
 - Compact68：64B Payload，一组 CRC-16/CCITT。
+- AoU Format6：严格 250B PLP，经共享 `aou_format6.h` scatter/gather 映射为 256B 物理帧，两组 CRC-16 位于固定槽位。
 
 调用者提供的 Payload 不得超过当前格式容量。外部短 Payload 会先补零到固定容量，再传给 `build_flit()`。
 

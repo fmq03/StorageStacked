@@ -18,6 +18,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parent.parent
 LOCK = json.loads((ROOT / "upstream.lock.json").read_text())
 RECEIPT = ".het-upstream.json"
+PROFILE_ENV = "HET_PREFLIGHT_PROFILE"
 
 
 def paths():
@@ -28,6 +29,36 @@ def paths():
         "coralnpu": Path(os.environ.get("CORALNPU_HOME", workspace / "coralnpu")).resolve(),
         "memsim": Path(os.environ.get("MEMSIM_HOME", workspace / "mem_sim")).resolve(),
     }
+
+
+def detect_profile(requested="auto"):
+    """unified = monorepo layout: env/ exists and mem_sim keeps no own .git."""
+    if requested in ("offline", "unified"):
+        return requested
+    requested = os.environ.get(PROFILE_ENV, "auto").strip().lower()
+    if requested in ("offline", "unified"):
+        return requested
+    workspace = ROOT.parent
+    if (workspace / "env/activate.sh").is_file() and not (workspace / "mem_sim/.git").exists():
+        return "unified"
+    return "offline"
+
+
+def check_memsim_monorepo(path):
+    """Unified layout: mem_sim is an ordinary directory of the main repository.
+
+    Its version is identified by the main-repository commit, not by
+    upstream.lock.json, which only serves the offline source-package flow.
+    """
+    workspace = ROOT.parent.resolve()
+    if (path / ".git").exists():
+        raise ValueError("unified 布局下 mem_sim 不应保留独立 .git: %s" % path)
+    if Path(git(workspace, "rev-parse", "--show-toplevel")).resolve() != workspace:
+        raise ValueError("unified 布局要求 mem_sim 位于主仓库内: %s" % workspace)
+    for required in ("CMakeLists.txt", "integration/online.h", "integration/online.cpp"):
+        if not (path / required).is_file():
+            raise ValueError("mem_sim 缺少在线接口文件: %s" % required)
+    print("ok memsim monorepo source %s" % path)
 
 
 def git(path, *args, network=False):
@@ -54,7 +85,10 @@ def revision(path):
     return git(path, "rev-parse", "HEAD")
 
 
-def check(name, path):
+def check(name, path, profile="offline"):
+    if name == "memsim" and profile == "unified":
+        check_memsim_monorepo(path)
+        return
     pin = LOCK[name]
     if name == "memsim" and (path / RECEIPT).is_file():
         receipt = json.loads((path / RECEIPT).read_text())
@@ -174,6 +208,9 @@ def package_memsim(source, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("fetch", "check", "package-memsim"))
+    parser.add_argument("--profile", choices=("auto", "offline", "unified"),
+                        default="auto",
+                        help="布局 profile；auto 时按 monorepo 布局自动判定")
     parser.add_argument("--only", choices=tuple(LOCK))
     parser.add_argument("--memsim-archive", type=Path)
     parser.add_argument("--memsim-url", help="已授权的镜像/本地 Git 路径，不要嵌入 token")
@@ -184,13 +221,16 @@ def main():
     if args.action == "package-memsim":
         package_memsim(trees["memsim"], args.output)
         return 0
+    profile = detect_profile(args.profile)
+    if args.action == "check":
+        print("profile: %s" % profile)
     failures = 0
     for name in ([args.only] if args.only else LOCK):
         try:
             if args.action == "fetch":
                 fetch(name, trees[name], args)
             else:
-                check(name, trees[name])
+                check(name, trees[name], profile)
         except (ValueError, OSError) as error:
             print("FAIL %s: %s" % (name, error), file=sys.stderr)
             failures += 1
