@@ -6,6 +6,7 @@ destination=${1:-"$SS_ROOT/results/xpu-$(date -u +%Y%m%dT%H%M%SZ)"}
 [[ ! -e "$destination" ]] || { echo "结果目录已存在：$destination" >&2; exit 1; }
 mkdir -p "$destination"
 destination=$(cd "$destination" && pwd)
+bridge_impl=${BRIDGE_IMPL:-cpp}
 "$AXI_PYTHON" "$SS_ROOT/env/check_sources.py"
 "$AXI_PYTHON" "$SS_ROOT/env/record.py" "$destination/environment"
 "$AXI_PYTHON" "$SS_ROOT/env/record_xpu.py" "$destination/environment"
@@ -21,7 +22,8 @@ run_case() {
     mkdir -p "$dir"
     echo "运行 $name"
     # Acceptance runs need no debugger; stray connections can stop simulation.
-    "$AXI_GEM5_BIN" --listener-mode=off -d "$dir" "$AXI_PROJECT_DIR/configs/run_xpu.py" "$@" > "$dir/run.log" 2>&1
+    "$AXI_GEM5_BIN" --listener-mode=off -d "$dir" "$AXI_PROJECT_DIR/configs/run_xpu.py" \
+        --bridge-impl "$bridge_impl" "$@" > "$dir/run.log" 2>&1
     echo "$name 仿真结束，开始数据与链路校验"
     for checker in check check_aou inspect_link check_memsim trace_view memsim_view; do
         "$AXI_PYTHON" "$AXI_PROJECT_DIR/scripts/$checker.py" "$dir" >> "$dir/verification.log" 2>&1

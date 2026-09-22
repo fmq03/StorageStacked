@@ -21,6 +21,7 @@ p.add_argument('--npu-library',default='')
 p.add_argument('--npu-kernel',default='')
 p.add_argument('--num-cpus',type=int,default=4)
 p.add_argument('--memsim-scale',type=int,default=1)
+p.add_argument('--bridge-impl',choices=['cpp','rtl'],default='cpp')
 p.add_argument('--max-ticks',type=int,default=20_000_000_000_000)
 p.add_argument('--replay',action='store_true')
 a=p.parse_args()
@@ -48,7 +49,7 @@ ranges=[AddrRange(front.SHARED_BUFFER[0],size=front.SHARED_BUFFER[1]),
         AddrRange(front.NPU_WORK[0],size=front.NPU_WORK[1])]
 if a.vortex_library:ranges.append(AddrRange(front.VORTEX_BAR[0],size=front.VORTEX_BAR[1]))
 size=0x170000000 if a.vortex_library else 0x30000000
-system.axi=AxiDemo(backend='aou',memory_backend='memsim',base=0x90000000,size=size,
+system.axi=AxiDemo(backend='aou',bridge_impl=a.bridge_impl,memory_backend='memsim',base=0x90000000,size=size,
     memsim_channels=8 if a.vortex_library else 2,memsim_scale=a.memsim_scale,
     memsim_queue=4,memsim_slots=8,outstanding=16,planes=2,stalls=True,replay=a.replay,
     trace_dir=str(out))

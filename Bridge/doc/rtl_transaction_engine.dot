@@ -1,0 +1,67 @@
+digraph Engine {
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.3, ranksep=0.5,
+         fontname="DejaVu Sans", fontsize=18, label="bridge_transaction_engine | Orchestrator and split submodules", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#f5f7fa", color="#64748b", fontname="DejaVu Sans", fontsize=11, margin="0.12,0.10"];
+  edge [fontname="DejaVu Sans", fontsize=9, color="#334155", arrowsize=0.7];
+  req [label="req_*\nReadReq / WriteReq"];
+  wd [label="wdata_*\nWriteData / WriteDataFull"];
+  mcq [label="mc_req_*\nvalid / ready", fillcolor="#ffffff"];
+  mcr [label="mc_rsp_*\ntag + status + compact data", fillcolor="#ffffff"];
+  out [label="rsp_msg_*\nTo credit gate + FDI packer", fillcolor="#ffffff"];
+  encode [label="bridge_response_gen | separate module\nParent fields + ordered data -> AoU message\nStatus, RLAST and byte-order encoding", fillcolor="#f3eafb"];
+  subgraph cluster_engine {
+    label="bridge_transaction_engine orchestration boundary"; color="#334155";
+    alloc [label="Free-parent selection\nSize / alignment / 4KB checks\nreq_ready: free slot + order capacity"];
+    reqfifo [label="bridge_req_buffer\nPer-RP Request FIFO\nbridge_fifo instances", fillcolor="#e2f4ef"];
+    parent [label="parent_* table | 8 entries\nvalid, write, synthetic, RP, ID, user\naddr, len, size, qos, status\nissue / done / wdata / emit counters", fillcolor="#e8effc"];
+    wo [label="write_order | per-RP 8 slot indices\nHead selects each RP write-data owner", fillcolor="#e2f4ef"];
+    ro [label="response_order | per-RP 8 slot indices\nPreserves ordering within each RP", fillcolor="#f3eafb"];
+    fifo [label="bridge_req_buffer\nPer-RP WData FIFO\n256-bit data + 32-bit mask", fillcolor="#e2f4ef"];
+    pair [label="bridge_scheduler WData selection\nFIFO head + write_order head\nRound-robin across RPs"];
+    wbuf [label="parent_wbuf_* | 8 entries\nOne compact 32B chunk + mask\nAccumulates adjacent narrow beats", fillcolor="#e2f4ef"];
+    sched [label="bridge_scheduler\nRound-robin over parent slots\nRead: unissued beat\nWrite: unissued beat + valid wbuf", fillcolor="#e8effc"];
+    convert [label="bridge_read_fsm + bridge_write_fsm\n32B split and address progression\nWrite lane/mask aggregation"];
+    issue [label="issue_out_* | 1-entry register\nwrite, addr, bytes, data, mask, tag, qos\nAlso parent / beat / lane metadata\nHeld while MC ready = 0", fillcolor="#e8effc"];
+    tag [label="next_tag | 32-bit counter\nIncrement on MC request handshake"];
+    child [label="bridge_outstanding | 8 entries\nvalid, tag, parent, start beat\nbeat count + bytes", fillcolor="#fff3d6"];
+    match [label="bridge_outstanding tag lookup\nmc_rsp_ready = live tag match\nUnknown tag -> protocol_error"];
+    scatter [label="bridge_reorder_buffer\nCompact bytes -> AXI beat lanes\nSet per-beat done bits"];
+    rob [label="bridge_reorder_buffer storage\n8 x 256 x 256-bit data\n2048 done bits", fillcolor="#f3eafb"];
+    gen [label="bridge_scheduler response selection\nRP order + completion + credit\nCross-RP round robin", fillcolor="#f3eafb"];
+    retire [label="On rsp_msg handshake\nRead: advance emit counter\nLast read / write: retire parent\nAdvance response_order head"];
+    reqfifo -> alloc;
+    alloc -> parent;
+    alloc -> wo [label="write only"];
+    alloc -> ro [label="all requests"];
+    wo -> pair [style=dashed, label="parent slot"];
+    fifo -> pair [label="FIFO head"];
+    pair -> wbuf;
+    parent -> sched;
+    wbuf -> sched [style=dashed, label="eligible"];
+    sched -> convert [label="selected parent / beat"];
+    wbuf -> convert [label="data / mask"];
+    convert -> issue;
+    tag -> issue [label="tag"];
+    child -> sched [style=dashed, label="free child / inflight capacity", constraint=false];
+    issue -> child [label="mc_req handshake\nsave association"];
+    issue -> parent [style=dashed, label="advance issue beat", constraint=false];
+    issue -> wbuf [style=dashed, label="consume write beat", constraint=false];
+    child -> match [label="tag association"];
+    match -> scatter;
+    scatter -> rob [label="read data + done"];
+    scatter -> parent [style=dashed, label="done / status", constraint=false];
+    scatter -> child [style=dashed, label="free entry", constraint=false];
+    parent -> gen [label="metadata / write completion"];
+    ro -> gen [style=dashed, label="head parent"];
+    rob -> gen [label="ordered read beat"];
+    gen -> retire [style=dashed, label="rsp_fire"];
+    retire -> parent [style=dashed, label="update / free slot", constraint=false];
+    retire -> ro [style=dashed, label="pop on final response", constraint=false];
+  }
+  req -> reqfifo;
+  wd -> fifo;
+  issue -> mcq [color="#2563eb", penwidth=1.5];
+  mcr -> match [color="#2563eb", penwidth=1.5];
+  gen -> encode;
+  encode -> out;
+}

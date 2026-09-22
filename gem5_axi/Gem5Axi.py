@@ -12,6 +12,7 @@ class AxiDemo(SystemC_ScModule):
     cxx_exports = [PyBindMethod('finish')]
     tlm = TlmTargetSocket(64, 'Nonblocking transaction input')
     backend = Param.String('ram', 'ram or aou full UCIe path')
+    bridge_impl = Param.String('cpp', 'storage target implementation: cpp or rtl')
     planes = Param.Unsigned(1, 'AoU resource planes (1..4)')
     replay = Param.Bool(False, 'Inject reproducible 2% physical flit errors')
     memory_backend = Param.String('simple', 'simple or memsim after UCIe')

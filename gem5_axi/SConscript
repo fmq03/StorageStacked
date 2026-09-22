@@ -9,12 +9,14 @@ Source('packet_tester.cc')
 
 # Compile protocol sources against gem5's own SystemC implementation.
 import os
+import glob
 project_root = os.path.dirname(Dir('.').srcnode().abspath)
 env.Append(CPPPATH=[os.path.join(project_root, 'gem5_new/libhettrace/include')])
 aou_root = os.path.join(project_root, 'axi2flit/systemc')
 ucie_root = os.path.join(project_root, 'ucie-model/src')
 env.Append(CPPPATH=[os.path.join(project_root, 'protocol/include'), aou_root + '/include', aou_root + '/integration', ucie_root])
 Source('aou_backend.cc')
+Source('rtl_aou_target.cc')
 Source('aou_axi2flit.cc')
 Source('aou_flit_packer.cc')
 Source('aou_flit_unpacker.cc')
@@ -23,3 +25,15 @@ memsim_root = os.path.join(project_root, 'mem_sim')
 env.Append(CPPPATH=[memsim_root + '/integration'])
 env.Append(LIBPATH=[memsim_root + '/build-unified'], LIBS=['storagestacked_memsim'])
 env.Append(RPATH=[memsim_root + '/build-unified'])
+
+# The RTL is translated ahead of SCons by env/build.sh.  Compile the generated
+# plain C++ with gem5's compiler to keep one C++ ABI and one SystemC kernel.
+rtl_model = os.path.join(project_root, 'Bridge/build/rtl_model')
+verilator_root = os.environ.get('VERILATOR_ROOT', '/usr/share/verilator')
+env.Append(CPPPATH=[rtl_model, os.path.join(verilator_root, 'include')])
+for rtl_source in sorted(glob.glob(os.path.join(
+        rtl_model, 'Vstorage_bridge_top*.cpp'))):
+    if not rtl_source.endswith('__ALL.cpp'):
+        Source(File(rtl_source))
+Source(File(os.path.join(verilator_root, 'include', 'verilated.cpp')))
+Source(File(os.path.join(verilator_root, 'include', 'verilated_threads.cpp')))

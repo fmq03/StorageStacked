@@ -14,6 +14,7 @@ parser.add_argument("--binary")
 parser.add_argument("--het-trace", action="store_true",
                     help="Observe target packets using gem5_new HetAxiMonitor")
 parser.add_argument("--backend", choices=["ram", "aou"], default="ram")
+parser.add_argument("--bridge-impl", choices=["cpp", "rtl"], default="cpp")
 parser.add_argument("--memory-backend", choices=["simple", "memsim"], default="simple")
 parser.add_argument("--memsim-channels", type=int, default=2)
 parser.add_argument("--memsim-scale", type=int, default=1)
@@ -50,7 +51,8 @@ system.mem_ranges = [host_range, target_range]
 system.host_mem = SimpleMemory(range=host_range, latency="10ns")
 system.axi = AxiDemo(
     base=base, size=8192, period=args.period, outstanding=args.slots,
-    backend=args.backend, planes=args.planes, replay=args.replay,
+    backend=args.backend, bridge_impl=args.bridge_impl, planes=args.planes,
+    replay=args.replay,
     memory_backend=args.memory_backend, memsim_channels=args.memsim_channels,
     memsim_scale=args.memsim_scale, memsim_queue=args.memsim_queue,
     memsim_slots=args.memsim_slots, memsim_response_hold=args.memsim_response_hold,

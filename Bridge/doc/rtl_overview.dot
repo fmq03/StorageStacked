@@ -1,0 +1,69 @@
+digraph BridgeRTL {
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.3, ranksep=0.55,
+         fontname="DejaVu Sans", fontsize=18, label="Bridge RTL | Current implementation | 256-bit data, per-RP control", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#f5f7fa", color="#64748b", fontname="DejaVu Sans", fontsize=11, margin="0.14,0.10"];
+  edge [fontname="DejaVu Sans", fontsize=9, color="#334155", arrowsize=0.7];
+  rx [label="UCIe-side RX transactor\nfdi_rx_plp[1999:0]\nvalid / ready", fillcolor="#ffffff"];
+  tx [label="UCIe-side TX transactor\nfdi_tx_plp[1999:0]\nvalid / ready", fillcolor="#ffffff"];
+  mcq [label="MC request transactor\nwrite, addr[63:0], bytes[5:0]\ndata[255:0], byte_mask[31:0]\ntag[31:0], qos[3:0]\nvalid / ready", fillcolor="#ffffff"];
+  mcr [label="MC response transactor\ntag[31:0], status[2:0]\ndata[255:0]\nvalid / ready", fillcolor="#ffffff"];
+  subgraph cluster_top {
+    label="storage_bridge_top"; labeljust=l; color="#334155"; style=rounded;
+    subgraph cluster_rx {
+      label="storage_bridge_rx"; labeljust=l; color="#0f766e";
+      unpack [label="fdi_rx_unpack\n10B header + 240B payload\n48 x 5B granule scan\n150B message / carry buffer", fillcolor="#e2f4ef"];
+      decode [label="aou_msg_decode\nCombinational field decode\nReq / WData / Misc dispatch\nWire byte-order conversion", fillcolor="#e2f4ef"];
+      unpack -> decode [label="msg valid / ready\n1200-bit message buffer"];
+    }
+    reqbuf [label="bridge_req_buffer\nPer-RP 4-entry Request FIFO\nPer-RP 16-entry WData FIFO\nbridge_fifo instances", fillcolor="#e2f4ef"];
+    sched [label="bridge_scheduler\nRequest / issue / WData / response\nround-robin selection", fillcolor="#e8effc"];
+    rfsm [label="bridge_read_fsm\nRead address progression\n32B boundary split", fillcolor="#e8effc"];
+    wfsm [label="bridge_write_fsm\nWrite split + lane/mask\nNarrow-beat aggregation", fillcolor="#e8effc"];
+    outstanding [label="bridge_outstanding\n8 child tags + metadata\nAllocation / completion lookup", fillcolor="#fff3d6"];
+    reorder [label="bridge_reorder_buffer\n64 KiB read data + done bitmap\nCompact response scatter", fillcolor="#f3eafb"];
+    engine [label="bridge_transaction_engine\n\n8 parent request slots\nPer-RP write/response order\nparent counters + 32B write buffers\n1-entry MC request register\nSubmodule orchestration", fillcolor="#e8effc"];
+    rspgen [label="bridge_response_gen\nSelected parent -> ReadData / WriteResp\nByte order + status + RLAST", fillcolor="#f3eafb"];
+    credits [label="bridge_credit_mgr\n\nPer-RP pending WREQ / RREQ / WDATA\nInitial grants: 12 / 12 / 64 granules\nPer-RP RDATA / WRESP availability\nHeader + Misc credit decode", fillcolor="#fff3d6"];
+    gate [label="Response credit gate\nmsg_valid = rsp_valid AND credit_ok\nengine_ready = packer_ready AND credit_ok", fillcolor="#fff3d6"];
+    pack [label="fdi_tx_packer\n250B PLP builder + output register\nMulti-message aggregation + spill\nPiggyback or credit-only frame", fillcolor="#f3eafb"];
+    assertions [label="bridge_assertions\nReady/valid stability\nCapacity + MC shape + unique tags", fillcolor="#eef2f7"];
+    errors [label="Error aggregation\nRX / unsupported / engine / credit / RP\nprotocol_error + code[7:0]", fillcolor="#fdecee"];
+    decode -> reqbuf [label="Req / WData valid-ready\nmetadata + data + mask"];
+    reqbuf -> engine [label="selected RP queue heads"];
+    engine -> sched [label="parent/order state + RR"];
+    reqbuf -> sched [label="per-RP counts"];
+    sched -> engine [label="four selected candidates"];
+    engine -> rfsm [label="selected read parent"];
+    engine -> wfsm [label="selected write parent + WData"];
+    rfsm -> engine [label="read MC chunk"];
+    wfsm -> engine [label="write MC chunk + merged data"];
+    engine -> outstanding [label="MC request handshake"];
+    outstanding -> engine [label="completion parent/beat/bytes"];
+    outstanding -> reorder [label="matched completion metadata"];
+    reorder -> engine [label="ordered read data + done"];
+    unpack -> credits [style=dashed, color="#b7791f", label="header_credit[15:0]\nvalid pulse"];
+    decode -> credits [style=dashed, color="#b7791f", label="Misc CrdtGrant"];
+    engine -> credits [style=dashed, color="#b7791f", label="MC-admitted req / paired WData\ncredit release by RP"];
+    engine -> rspgen [label="selected parent metadata\nordered read beat"];
+    rspgen -> gate [label="ReadData / WriteResp\nmsg_data + granules"];
+    credits -> gate [style=dashed, color="#b7791f", label="rsp_credit_ok"];
+    gate -> credits [style=dashed, color="#b7791f", label="rsp_fire: consume credit", constraint=false];
+    gate -> pack [label="message valid / ready"];
+    credits -> pack [style=dashed, color="#b7791f", label="grant_field[15:0]\ngrant valid / ready"];
+    unpack -> errors [style=dotted, color="#bd4646", constraint=false];
+    decode -> errors [style=dotted, color="#bd4646", constraint=false];
+    engine -> errors [style=dotted, color="#bd4646", constraint=false];
+    credits -> errors [style=dotted, color="#bd4646", constraint=false];
+    engine -> assertions [style=dotted, color="#64748b", label="observed state/interfaces", constraint=false];
+    reqbuf -> assertions [style=dotted, color="#64748b", constraint=false];
+    outstanding -> assertions [style=dotted, color="#64748b", constraint=false];
+    rspgen -> assertions [style=dotted, color="#64748b", constraint=false];
+  }
+  rx -> unpack [label="250B PLP"];
+  engine -> mcq [label="mc_req_*", color="#2563eb", penwidth=1.5];
+  mcr -> outstanding [label="tag lookup", color="#2563eb", penwidth=1.5, constraint=false];
+  mcr -> reorder [label="read data", color="#2563eb", penwidth=1.5, constraint=false];
+  pack -> tx [label="250B PLP"];
+  {rank=same; mcq; mcr;}
+  note [shape=note, label="Solid: data / transaction path\nDashed gold: credit / admission control\nDotted red: error indication\nclk / rst_n shared; link_active gates RX / TX / grants\nTransactors are outside the RTL boundary", fillcolor="#ffffff"];
+}

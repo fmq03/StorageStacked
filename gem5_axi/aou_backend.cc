@@ -2,6 +2,7 @@
 #include "axi2flit.h"
 #include "ucie_link.h"
 #include "aou_target.h"
+#include "rtl_aou_target.hh"
 #include "simple_burst_memory.h"
 #include "memsim_backend.hh"
 #include "sim/core.hh"
@@ -34,7 +35,8 @@ struct AouBackend::Fabric : sc_module {
     Axi2Flit bridge;
     UcieAouAdapter adapter;
     UcieLink link;
-    AouTarget target;
+    std::unique_ptr<AouTarget> target;
+    std::unique_ptr<RtlAouTarget> rtl_target;
     std::unique_ptr<SimpleBurstMemory> simple;
     std::unique_ptr<MemSimBackend> memory;
     struct Cursor { uint64_t addr; unsigned size, left; };
@@ -58,7 +60,6 @@ struct AouBackend::Fabric : sc_module {
       : sc_module(n), owner(o), cfg(config(p.replay)), planes(p.planes),
         bridge("bridge", planes), adapter("adapter", cfg),
         link("link", cfg, &stats, sc_time(cfg.ui_fs(), SC_FS)),
-        target("target", cfg, planes),
         log(p.trace_dir + "/aou_events.csv") {
         g_aou_verbose = false;
         flit_log.open(p.trace_dir + "/ucie_flits.csv");
@@ -88,9 +89,18 @@ struct AouBackend::Fabric : sc_module {
         adapter.fifo_tx(soc_tx); adapter.fifo_rx(soc_rx);
         link.soc_tx_in(soc_tx); link.soc_rx_out(soc_rx);
         link.mem_rx_out(mem_rx); link.mem_tx_in(mem_tx); link.link_state(state);
-        target.clk(o.clk); target.rst_n(o.resetn);
-        target.link_rx(mem_rx); target.link_tx(mem_tx);
-        target.mem_req(requests); target.mem_rsp(responses);
+        if (p.bridge_impl == "cpp") {
+            target = std::make_unique<AouTarget>("target", cfg, planes);
+            target->clk(o.clk); target->rst_n(o.resetn);
+            target->link_rx(mem_rx); target->link_tx(mem_tx);
+            target->mem_req(requests); target->mem_rsp(responses);
+        } else if (p.bridge_impl == "rtl") {
+            rtl_target = std::make_unique<RtlAouTarget>("rtl_target", planes);
+            rtl_target->clk(o.clk); rtl_target->rst_n(o.resetn);
+            rtl_target->link_state(state);
+            rtl_target->link_rx(mem_rx); rtl_target->link_tx(mem_tx);
+            rtl_target->mem_req(requests); rtl_target->mem_rsp(responses);
+        } else throw std::invalid_argument("unknown bridge implementation");
         if (p.memory_backend == "memsim") {
             memory = std::make_unique<MemSimBackend>("memory", p.base, p.size,
                 p.memsim_slots, p.memsim_channels, p.memsim_scale,
@@ -269,12 +279,19 @@ void AouBackend::finish(const std::string& dir) {
     sc_assert(s.bridge.order_violations()==0);
     if (s.memory) s.memory->finish();
     std::ofstream f(dir+"/aou_summary.json");
+    const uint64_t target_reads = s.target ? s.target->reads : s.rtl_target->reads;
+    const uint64_t target_writes = s.target ? s.target->writes : s.rtl_target->writes;
+    const uint64_t target_read_beats = s.target ? s.target->read_beats : s.rtl_target->read_beats;
+    const uint64_t target_write_beats = s.target ? s.target->write_beats : s.rtl_target->write_beats;
+    const bool target_idle = s.target ? s.target->idle() : s.rtl_target->idle();
     f << "{\"width\":256,\"planes\":" << s.planes
+      << ",\"bridge_impl\":\"" << (s.target ? "cpp" : "rtl") << "\""
       << ",\"memory_completed\":" << (s.memory ? s.memory->completed : s.simple->completed)
       << ",\"memory_errors\":" << (s.memory ? s.memory->error_responses : s.simple->error_responses)
-      << ",\"target_reads\":" << s.target.reads << ",\"target_writes\":" << s.target.writes
-      << ",\"target_read_beats\":" << s.target.read_beats
-      << ",\"target_write_beats\":" << s.target.write_beats
+      << ",\"target_reads\":" << target_reads << ",\"target_writes\":" << target_writes
+      << ",\"target_read_beats\":" << target_read_beats
+      << ",\"target_write_beats\":" << target_write_beats
+      << ",\"target_idle\":" << (target_idle ? "true" : "false")
       << ",\"tx_flits\":" << s.tx_count << ",\"rx_flits\":" << s.rx_count
       << ",\"forward_replays\":" << s.stats.forward.tx_replay_flits
       << ",\"reverse_replays\":" << s.stats.reverse.tx_replay_flits

@@ -148,8 +148,8 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory results
 然后用浏览器打开：
 
 - CPU：http://localhost:8000/acceptance-memsim/cpu/memsim_view.html
-- 三源：http://localhost:8000/acceptance-xpu/three/memsim_view.html
-- AXI/Flit：http://localhost:8000/acceptance-xpu/three/trace_view.html
+- 三源：http://localhost:8000/acceptance-xpu-r2/three/memsim_view.html
+- AXI/Flit：http://localhost:8000/acceptance-xpu-r2/three/trace_view.html
 
 使用其他结果目录名时相应修改URL；结束服务按Ctrl+C。如果8000端口已占用，可改用8001。
 直接双击HTML在部分环境可用，但Windows浏览器通过WSL文件路径打开时可能无法加载JS分块；
