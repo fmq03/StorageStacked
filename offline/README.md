@@ -83,7 +83,7 @@ python3 offline/verify-split.py offline/dist/zhongxing-storagestacked-offline-20
 
 构建阶段同样关闭网络；从当前工作区复制源码、工具和可复用缓存，在镜像内重新编译 AXI、
 Vortex、CoralNPU 和六种 RTL 配置。历史运行结果、Git 元数据和临时 Bazel server/sandbox 不打包。
-Vortex 工具环境限制在子进程内，NPU 构建使用与容器运行时一致的独立环境；完成后关闭 Bazel 并清除临时服务、worker 和 sandbox 状态。
+Vortex 工具环境限制在子进程内，NPU 构建使用与容器运行时一致的独立环境；构建容器退出后，`finalize-image.sh` 在新容器中清除临时服务、worker 和 sandbox 状态。
 `SOURCE_VERSIONS.json` 记录工作区提交、未提交改动与各子项目版本，不能用旧结果证明新镜像通过。
 
 `validate.sh` 用新镜像执行 `check` 和一次 `test`；`export.sh` 保存归档，移除交付标签后通过用户

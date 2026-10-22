@@ -55,11 +55,5 @@ for itcm,dtcm in ((8,32),(512,512),(1024,1024)):
         config['npu'].update(itcm_kib=itcm,dtcm_kib=dtcm,fetch_l0_enabled=l0)
         build_simulator(config)
 PY
-  (
-    cd "$root/coralnpu_StorageStacked/coralnpu"
-    "$SS_DEPS_ROOT/xpu-tools/bin/bazel" --output_user_root="$SS_DEPS_ROOT/bazel" shutdown
-  )
-  find "$SS_DEPS_ROOT/bazel" -mindepth 2 -maxdepth 2 \
-    -type d \( -name server -o -name bazel-workers -o -name sandbox \) -exec rm -rf {} +
 )
 mkdir -p /results

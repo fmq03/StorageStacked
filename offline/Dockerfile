@@ -8,6 +8,7 @@ ADD --chown=0:0 workspace.tar ${WORKSPACE_ROOT}/
 COPY entrypoint.py /opt/storagestacked/entrypoint.py
 COPY docker-compat-entrypoint.py /opt/storagestacked/docker-compat-entrypoint.py
 COPY fix-native-cache.sh /opt/storagestacked/fix-native-cache.sh
+COPY clean-runtime-state.sh /opt/storagestacked/clean-runtime-state.sh
 COPY prepare.sh /opt/storagestacked/prepare.sh
 COPY system-tools/ /opt/storagestacked/system-tools/
 RUN bash /opt/storagestacked/prepare.sh

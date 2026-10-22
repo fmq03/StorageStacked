@@ -36,7 +36,7 @@ workspace_commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD
 workspace_changes=subprocess.check_output(['git','-C',str(root),'status','--porcelain'],text=True).splitlines()
 Path(sys.argv[2]).write_text(json.dumps({'created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'workspace_root':str(root),'repository':'https://github.com/fmq03/StorageStacked','workspace_commit':workspace_commit,'workspace_changes':workspace_changes,'projects':projects},ensure_ascii=False,indent=2)+'\n')
 PY
-cp "$root/offline/Dockerfile" "$root/offline/entrypoint.py" "$root/offline/docker-compat-entrypoint.py" "$root/offline/prepare.sh" "$root/offline/fix-native-cache.sh" "$context/"
+cp "$root/offline/Dockerfile" "$root/offline/entrypoint.py" "$root/offline/docker-compat-entrypoint.py" "$root/offline/prepare.sh" "$root/offline/fix-native-cache.sh" "$root/offline/clean-runtime-state.sh" "$context/"
 mkdir -p "$context/system-tools"
 cp "$root"/offline/system-tools/*.deb "$context/system-tools/"
 # One archive avoids the legacy builder's quadratic per-file COPY lookup.
@@ -44,4 +44,5 @@ tar --owner=0 --group=0 -C "$context/workspace" -cf "$context/workspace.tar.part
 mv "$context/workspace.tar.part" "$context/workspace.tar"
 printf 'workspace/\n*.part\n' > "$context/.dockerignore"
 docker build --pull=false --network=none --build-arg "BASE_IMAGE=$base" --build-arg "WORKSPACE_ROOT=$root" -t "$image" "$context"
+bash "$root/offline/finalize-image.sh" "$image"
 printf '镜像完成：%s\n' "$image"
