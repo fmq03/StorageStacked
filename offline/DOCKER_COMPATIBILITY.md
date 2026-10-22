@@ -5,6 +5,9 @@
 返回 `ENOSYS`，使 glibc 回退到 `clone`。没有使用 `--privileged`，
 也没有默认关闭 seccomp。镜像仍使用 `--pull=never --network=none`。
 
+当前 `offline-20261022` 镜像沿用此兼容机制。L0、TCM 和当前项目更新需要下载新镜像；
+仅替换启动补丁不会更新旧镜像中的源码、RTL 或设备库。
+
 ## 客户怎样使用
 
 新下载：使用发布仓库最新版 `download.sh`，它会下载最新启动补丁，
@@ -12,14 +15,14 @@
 手动下载全部分块时，还须把 Release 中的 `run.sh`、`docker-compat-entrypoint.py`、
 `run-seccomp-check.sh`、`DOCKER_COMPATIBILITY.md` 与 `extract.sh` 放在同一目录。
 
-已经解包：从 [发布仓库](https://github.com/hy2581/zhongxing-storagestacked-offline)
-或 [Release](https://github.com/hy2581/zhongxing-storagestacked-offline/releases/tag/offline-20261009-burst)
+已经解包：从 [当前源码仓库](https://github.com/fmq03/StorageStacked/tree/project-update-20261022) 的 `offline/`
+或 [当前 Release](https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022)
 取得这四个补丁文件，覆盖离线包目录中的对应文件。无需重新下载镜像。
 例如在发布仓库目录内执行（目标按实际解压位置替换）：
 
 ```bash
-cp run.sh docker-compat-entrypoint.py run-seccomp-check.sh DOCKER_COMPATIBILITY.md downloads/zhongxing-storagestacked-offline-20261009-burst/
-cd downloads/zhongxing-storagestacked-offline-20261009-burst
+cp offline/run.sh offline/docker-compat-entrypoint.py offline/run-seccomp-check.sh offline/DOCKER_COMPATIBILITY.md downloads/zhongxing-storagestacked-offline-20261022/
+cd downloads/zhongxing-storagestacked-offline-20261022
 sudo bash run.sh vortex smoke
 ```
 
@@ -37,7 +40,7 @@ sudo bash run.sh
 使用容器内 `shell` 时也继承这项过滤器和 `no_new_privs`，无法通过后续
 setuid 程序获取新的权限；镜像已有的 root 身份与编译、仿真不受影响。
 
-## 原因与验证范围
+## 原因与历史验证范围
 
 客户原始错误：
 
@@ -71,6 +74,8 @@ clang++: fatal error: unable to execute command: posix_spawn failed: Operation n
 本次补丁沿用已导入镜像，没有重新导入归档，也没有重跑 `test` 全回归。
 客户此前关闭 seccomp 后已进入 `[2/3]`；客户完整验收报告及正式补丁的客户实测尚未提供。
 原 412 个分块和 2026-10-09 镜像快照保留；本次更新发布的启动脚本、制作入口和文档。
+
+当前版本的新镜像验收见新交付包中的 `VALIDATION.json`；上面的 10 月 10 日记录只说明历史版本的兼容修复范围。
 
 ## 查看源码和文档
 

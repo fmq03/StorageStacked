@@ -18,6 +18,6 @@ for p in result_root.glob('*/summary.json'):
         assert s['passed'] is True,p
         summaries.append({'path':str(p.relative_to(here)),'command':s['command'],'cases':s['cases']})
 assert len(summaries)==1
-(validation/'acceptance.json').write_text(json.dumps({'passed':True,'network':'none','pull':'never','host_mounts':['results only'],'runs':summaries},ensure_ascii=False,indent=2)+'\n')
+(validation/'acceptance.json').write_text(json.dumps({'passed':True,'network':'none','pull':'never','host_mounts':['results (read-write)','compatibility helper (read-only)'],'runs':summaries},ensure_ascii=False,indent=2)+'\n')
 print('PASS：工具检查及一次完整回归；导出脚本另行验证归档首次导入与默认入口。')
 PY

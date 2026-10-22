@@ -78,6 +78,7 @@ bash offline/build.sh
 bash offline/validate.sh
 bash offline/export.sh
 bash offline/split-release.sh
+python3 offline/verify-split.py offline/dist/zhongxing-storagestacked-offline-20261022-25MB --output offline/results/split-restored-20261022
 ```
 
 构建阶段同样关闭网络；从当前工作区复制源码、工具和可复用缓存，在镜像内重新编译 AXI、

@@ -38,7 +38,7 @@ metadata={'format':'ordered split tar','part_bytes':25000000,'parts':len(parts),
 (destination/'PACKAGE.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')
 (destination/'README.md').write_text(f'''# 三项目离线 Docker 分块包
 
-本包包含当前三项目的 Linux amd64 完整 Docker 镜像、运行入口、源码、工具链、模型与验收文档。CoralNPU 支持 RVV、L0 开关与三种 TCM 预设，Vortex 的默认 LLM 使用 8 个 SIMT 线程。
+本包包含当前三项目的 Linux amd64 完整 Docker 镜像、运行入口、源码、工具链、模型与验收文档。CoralNPU 支持 RVV、L0 开关与三种 TCM 预设，Vortex 的 LLM 使用配置指定的 SIMT 线程与 warp 数。
 
 推荐克隆发布仓库后执行 `bash download.sh`，自动下载分块并解包：
 

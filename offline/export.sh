@@ -80,6 +80,8 @@ for device in ('vortex','coralnpu'):
     llm=json.loads(llm_paths[0].read_text())
     assert llm['passed'] is True
     execution[device]=llm['execution']
+    if device=='vortex':
+        vortex_config=json.loads((llm_paths[0].parent/'input.json').read_text())['gpu']
 assert execution['coralnpu']['core']=='RvvCoreMiniAxi'
 assert execution['coralnpu']['linear']=='RVV FP32'
 assert execution['coralnpu']['rvv_linear_calls']==42
@@ -98,8 +100,8 @@ assert coral_burst['write_bursts']+coral_burst['read_bursts']==coral_run['source
 customer_coral=json.loads((summaries[0].parent/acceptance['cases']['coralnpu/llm']['summary']).read_text())
 assert customer_coral['passed'] is True
 assert customer_coral['axi_burst']==coral_burst
-assert execution['vortex']['threads']==execution['vortex']['active_threads']==8
-assert execution['vortex']['warps']==2 and execution['vortex']['linear_calls']==42
+assert execution['vortex']['threads']==execution['vortex']['active_threads']==vortex_config['threads']
+assert execution['vortex']['warps']==vortex_config['warps'] and execution['vortex']['linear_calls']==42
 rtl=json.loads((test_path.parent/regression['cases']['coralnpu']['rtl_summary']).read_text())
 expected={f'i{i}-d{d}-l0{int(l0)}-{project}'
           for i,d in ((8,32),(512,512),(1024,1024))
