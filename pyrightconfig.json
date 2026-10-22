@@ -1,0 +1,55 @@
+{
+  "extraPaths": [
+    "vortex_StorageStacked/third_party/gem5/src/python",
+    "vortex_StorageStacked/third_party/gem5/src",
+    "vortex_StorageStacked/third_party/gem5/configs",
+    "vortex_StorageStacked",
+    "axi_StorageStacked/scripts"
+  ],
+  "stubPath": ".vscode/gem5-python-stubs",
+  "exclude": [
+    "**/.git/**",
+    "**/.cache/**",
+    "**/build/**",
+    "**/result/**",
+    "**/results/**",
+    "offline/dist/**",
+    "offline/.build/**",
+    "**/__pycache__/**",
+    "**/bazel-*/**",
+    "axi_StorageStacked/validation/**",
+    "vortex_StorageStacked/validation/**",
+    "coralnpu_StorageStacked/validation/**",
+    "coralnpu_StorageStacked/coralnpu/validation/**",
+    "offline/validation/**"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "vortex_StorageStacked",
+      "extraPaths": [
+        "vortex_StorageStacked/third_party/gem5/runtime",
+        "vortex_StorageStacked/third_party/gem5/src/python",
+        "vortex_StorageStacked/third_party/gem5/src",
+        "vortex_StorageStacked/third_party/gem5/configs",
+        "vortex_StorageStacked",
+        "axi_StorageStacked/scripts"
+      ]
+    },
+    {
+      "root": "coralnpu_StorageStacked",
+      "extraPaths": [
+        "coralnpu_StorageStacked/coralnpu/runtime",
+        "axi_StorageStacked/scripts"
+      ]
+    },
+    {
+      "root": "axi_StorageStacked",
+      "extraPaths": [
+        "axi_StorageStacked/scripts"
+      ]
+    },
+    {
+      "root": "."
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "clangd.path": "/home/hy258/hy/zhongxing/.vscode/clangd_router.py",
+  "clangd.arguments": [
+    "--background-index",
+    "--header-insertion=never",
+    "-j=4"
+  ],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+  "files.associations": {
+    "*.hh": "cpp",
+    "*.vi": "verilogheader",
+    "*.svp": "systemverilog",
+    "*.svh": "systemverilogheader",
+    "SConscript": "python",
+    "SConstruct": "python"
+  },
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/coralnpu/runtime",
+    "${workspaceFolder}/../axi_StorageStacked/scripts",
+    "${workspaceFolder}/.."
+  ],
+  "python.analysis.stubPath": "../.vscode/gem5-python-stubs",
+  "python.analysis.exclude": [
+    "**/.cache/**",
+    "**/result/**",
+    "**/build/**",
+    "**/bazel-*/**"
+  ],
+  "python.analysis.diagnosticMode": "openFilesOnly",
+  "python.analysis.typeCheckingMode": "basic",
+  "bashIde.globPattern": "user/**/*.sh",
+  "bashIde.backgroundAnalysisIgnore": [
+    "**/result/**",
+    "**/.cache/**",
+    "**/node_modules/**",
+    "**/.git/**"
+  ],
+  "bashIde.shellcheckPath": "",
+  "files.watcherExclude": {
+    "**/.cache/**": true,
+    "**/result/**": true,
+    "**/build/**": true,
+    "**/bazel-*/**": true
+  }
+}

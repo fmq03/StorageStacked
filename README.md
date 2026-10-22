@@ -1,40 +1,55 @@
-# StorageStacked
+# AXI 存储、Vortex 与 CoralNPU
 
-CPU / Vortex GPU / CoralNPU → 原生AXI256 → AXI2Flit → UCIe → 在线mem_sim的统一系统。
+本工作区包含三个独立源码项目，共用同级 AXI 存储源码。
 
-| 普通源码目录 | 职责 |
-|---|---|
-| gem5_new | 三源设备、观察器、工作负载及外部依赖适配 |
-| gem5_axi | gem5原生TLM、AXI256 Master、在线内存桥及验证 |
-| axi2flit | AXI与Flit转换 |
-| ucie-model | UCIe链路、重放与观察接口 |
-| mem_sim | 内存控制器与DRAM行为模型 |
-| protocol/include | 两端共享的AoU帧格式 |
+本仓库以一个源码树保存当前工作区的三个项目及公共文档，不使用子模块。
+工具链、构建缓存、离线镜像和运行结果不入库；文档中的本地结果链接在执行对应验收后生成。
 
-外部子模块仍为gem5、coralnpu、vortex-gpu/vortex（含Vortex递归依赖）。
-内部五个目录已通过保留完整历史的导入合并成为主仓库源码，不再各自维护Git仓库。
+| 项目 | 职责 | 文档 |
+|---|---|---|
+| axi_StorageStacked | AXI256 → AXI2Flit → UCIe → 在线内存 | [使用说明](axi_StorageStacked/README.md) · [接口](axi_StorageStacked/INTERFACE.md) |
+| vortex_StorageStacked | gem5 主机 + Vortex SimX，TLM → AXI | [使用说明](vortex_StorageStacked/README.md) · [用户文档](vortex_StorageStacked/docs/README.md) |
+| coralnpu_StorageStacked | CoralNPU RVV RTL，原生异步接口 → AXI | [使用说明](coralnpu_StorageStacked/README.md) · [用户文档](coralnpu_StorageStacked/docs/README.md) |
+
+两个计算项目独立编译公共存储源码，各自拥有内存状态。gem5 使用自身的 SystemC，CoralNPU 和 AXI 独立程序使用独立 SystemC；同一进程只加载一套内核。
+
+## 构建与运行
+
+在本目录执行：
 
 ```bash
-git clone --recurse-submodules https://github.com/fmq03/StorageStacked.git
-cd StorageStacked
-bash env/bootstrap_xpu.sh
-bash env/build_xpu.sh
-bash env/run_memsim.sh results/acceptance-memsim
-bash env/run_xpu.sh results/acceptance-xpu
+./axi_StorageStacked/run.sh setup
+./axi_StorageStacked/run.sh build
+./vortex_StorageStacked/build.sh --storage ../axi_StorageStacked --jobs 12
+./coralnpu_StorageStacked/build.sh --storage ../axi_StorageStacked --jobs 12
+./accept.sh
 ```
 
-新机器先按[主机条件](docs/setup.md#1-主机条件)安装基础工具。bootstrap_xpu/build_xpu
-包含CPU基础环境与构建；GCC、Python等版本由锁文件指定，无需手动选择编译器。
-仅验证CPU时可以使用env/bootstrap.sh、env/build.sh、env/run_memsim.sh。
+`accept.sh` 运行 AXI 完整验收，并构建、验收两个计算平台。每次生成新的结果目录；以各项目 `summary.json` 的 `passed: true` 为准。验收包含计算结果、AXI/VCD、Flit、在线内存和错误拒绝检查，详细范围见各项目文档。
 
-首次安装、依赖包恢复和无依赖包配置见[配置与交接指引](docs/setup.md)。
-环境版本与操作见[env/README.md](env/README.md)，分支协作、历史追溯、源码归属见
-[开发说明](docs/development.md)。外部版本在env/sources.lock.json，内部导入来源在
-[env/internal_imports.json](env/internal_imports.json)。
+单独运行示例：
 
-交接验收见[验收记录](docs/handoff-validation.md)：
-完整构建、19项原生测试、7组在线内存、4组GPU/NPU、旧链路/RAM兼容，以及新目录恢复构建和闭环验证通过。
-旧AXI256与monorepo报告继续保留；HTML交接请复制整个用例目录。
-结果/构建产物和integrate_doc本地交接资料不入库。原/mnt/d/storagestacked保留。
-运行结果不随Git克隆分发，需要在本机运行生成。HTML查看方式见配置指引；推荐通过本机HTTP服务打开。
-主仓库：https://github.com/fmq03/StorageStacked 。新提交说明使用中文。
+```bash
+./axi_StorageStacked/run.sh run --input axi_StorageStacked/examples/roundtrip.json
+./vortex_StorageStacked/user/run.sh smoke
+./vortex_StorageStacked/user/run.sh llm
+./coralnpu_StorageStacked/user/run.sh smoke
+./coralnpu_StorageStacked/user/run.sh llm
+```
+
+默认 SMOKE 为 `41 → 42`，TinyLLM 为 `"red " → "blu"`。用户配置在两个计算项目各自的 `user/<项目>/config.json`；运行结果在 `user/<项目>/result/`，平台回归汇总位置由入口打印。AXI 独立结果在 `axi_StorageStacked/results/`。
+
+## VS Code
+
+打开 [zhongxing.code-workspace](zhongxing.code-workspace)，或直接打开当前 `zhongxing` 目录。跳转、索引刷新及验证方法见 [.vscode/README.md](.vscode/README.md)。
+
+## 其他资料
+
+- 逐文件中文讲解：[Vortex 集成](markdown/vortex_StorageStacked/integration/README.md)、[CoralNPU 集成](markdown/coralnpu_StorageStacked/integration/README.md)。
+- [Docker 离线使用](offline/README.md)与[兼容说明](offline/DOCKER_COMPATIBILITY.md)。保留的离线包位于 `offline/dist/zhongxing-storagestacked-offline-20261009-burst/`，对应旧冻结版本；当前源码验收使用上面的本地入口。
+- 验证方法和执行结果集中保存在 [CoralNPU 验证说明](coralnpu_StorageStacked/docs/08-验证说明.md)、[Vortex 验证说明](vortex_StorageStacked/docs/07-验证说明.md) 和 [AXI 输出与验证说明](axi_StorageStacked/docs/OUTPUTS.md)。
+
+旧运行目录、重复离线包、Docker 临时构建上下文和历史发布记录已移出工作区，归档位于同级 `zhongxing-cleanup-archive-20261020-154702/`；其中 `manifest.json` 列出原相对路径，可按需恢复。编译工具链、正在使用的构建缓存和未提交源码修改保留。
+
+2026-10-22 又将三个项目的历史验证结果目录移出项目树，内容整理为上述文档。
+原始记录备份位于同级 `zhongxing-validation-archive-20261022-101904/`，其中 manifest.json 记录原路径与文件大小。

@@ -1,0 +1,17 @@
+Import('*')
+import os
+import runpy
+storage_root = os.path.dirname(Dir('.').srcnode().abspath)
+link_defines = runpy.run_path(os.path.join(storage_root, 'storage_axi/link_options.py'))['definitions']()
+env.Append(CPPPATH=[Dir('#/src/systemc/ext'),
+    os.path.join(storage_root, 'storage_axi'),
+    os.path.join(storage_root, 'protocol/include'),
+    os.path.join(storage_root, 'axi2flit/systemc/include'),
+    os.path.join(storage_root, 'axi2flit/systemc/integration'),
+    os.path.join(storage_root, 'ucie-model/src'),
+    os.path.join(storage_root, 'mem_sim/integration')])
+for source in ('aou_backend.cc', 'memsim_backend.cc', 'axi_monitor.cc', 'aou_axi2flit.cc',
+               'aou_flit_packer.cc', 'aou_flit_unpacker.cc'):
+    Source(source, append={'CPPDEFINES': link_defines})
+memory_build = os.environ['MEMSIM_BUILD']
+env.Append(LIBPATH=[memory_build], LIBS=['storagestacked_memsim'], RPATH=[memory_build])

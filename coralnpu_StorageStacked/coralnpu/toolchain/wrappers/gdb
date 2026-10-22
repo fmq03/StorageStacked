@@ -1,0 +1,57 @@
+#!/bin/bash --norc
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+PROG=$(basename "$0")
+DRIVER_DIR=$(dirname "$0")
+
+# Locate the riscv toolchain repo. When invoked from a bazel test's runfiles
+# tree, the toolchain lives at runfiles/+hw_deps+toolchain_coralnpu_v2/. When
+# invoked from execroot during a build action it's at external/<canonical>/.
+# The wrapper file itself is at <root>/toolchain/wrappers/gdb (or a symlink
+# into _main/toolchain/wrappers/gdb under runfiles), so search siblings.
+_find_toolchain_bin() {
+    local d="$1"
+    while [[ "$d" != "/" && "$d" != "" ]]; do
+        local match
+        match=$(ls -d "${d}/external/"*toolchain_coralnpu_v2 2>/dev/null | head -1)
+        if [[ -z "${match}" ]]; then
+            match=$(ls -d "${d}/"*toolchain_coralnpu_v2 2>/dev/null | head -1)
+        fi
+        if [[ -n "${match}" ]]; then
+            if [[ -x "${match}/bin/riscv64-unknown-elf-gdb" ]]; then
+                echo "${match}/bin/riscv64-unknown-elf-gdb"
+                return
+            elif [[ -x "${match}/bin/riscv32-unknown-elf-gdb" ]]; then
+                echo "${match}/bin/riscv32-unknown-elf-gdb"
+                return
+            fi
+        fi
+        d=$(dirname "$d")
+    done
+}
+
+GDB=$(_find_toolchain_bin "${DRIVER_DIR}")
+if [[ -z "${GDB}" ]]; then
+    echo "$0: cannot locate riscv64-unknown-elf-gdb or riscv32-unknown-elf-gdb under any external/*toolchain_coralnpu_v2" 1>&2
+    exit 1
+fi
+
+LIBMPFR_PATH=$(ldconfig -p | grep 'mpfr.so$' | awk '{print $4}')
+WORKDIR=$(mktemp -d)
+trap "rm -rf ${WORKDIR}" EXIT
+[[ -n "${LIBMPFR_PATH}" ]] && ln -sf "${LIBMPFR_PATH}" "${WORKDIR}/libmpfr.so.4"
+
+export LD_LIBRARY_PATH="${WORKDIR}:${LD_LIBRARY_PATH}"
+exec "${GDB}" "$@"

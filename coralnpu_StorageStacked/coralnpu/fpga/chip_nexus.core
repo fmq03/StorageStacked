@@ -1,0 +1,139 @@
+CAPI=2:
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: "com.google.coralnpu:fpga:chip_nexus:0.1"
+description: "Nexus-specific top-level for CoralNPU."
+
+filesets:
+  files_rtl:
+    depend:
+      - com.google.coralnpu:fpga:coralnpu_soc
+      - pulp-platform:riscv-dbg:0.1
+      - xilinx:virtual:ddr4_0
+    files:
+      - rtl/chip_nexus.sv
+      - rtl/clkgen_wrapper.sv
+      - rtl/clkgen_xilultrascaleplus.sv
+    file_type: systemVerilogSource
+
+  files_constraints:
+    files:
+      - pins_nexus.xdc
+    file_type: xdc
+
+  files_tcl:
+    files:
+      - vivado_setup_hooks.tcl: { file_type: tclSource }
+      - vivado_hook_write_bitstream_post.tcl: { file_type: user, copyto: vivado_hook_write_bitstream_post.tcl }
+      - check_pin_assignments.tcl: { file_type: user, copyto: check_pin_assignments.tcl }
+      - vivado_pre_opt_hooks.tcl: { file_type: user, copyto: vivado_pre_opt_hooks.tcl }
+      - pblock_u_isp.tcl: { file_type: user, copyto: pblock_u_isp.tcl }
+      - pblock_u_ddr.tcl: { file_type: user, copyto: pblock_u_ddr.tcl }
+
+
+parameters:
+  ClockFrequencyMhz:
+    datatype: int
+    description: "Target clock frequency in MHz."
+    default: 50
+    paramtype: vlogparam
+  IspClockFrequencyMhz:
+    datatype: int
+    description: "ISP clock frequency in MHz."
+    default: 10
+    paramtype: vlogparam
+  SpimClockFrequencyMhz:
+    datatype: int
+    description: "SPIM clock frequency in MHz."
+    default: 100
+    paramtype: vlogparam
+  MemInitFile:
+    datatype: str
+    description: Path to ROM
+    default: ""
+    paramtype: vlogparam
+  BootAddr:
+    datatype: int
+    description: "PC reset value. 0 for ITCM, 0x10000000 for ROM boot."
+    default: 0
+    paramtype: vlogparam
+  EnableAutoboot:
+    datatype: int
+    description: "Enable autonomous boot release"
+    default: 0
+    paramtype: vlogparam
+  ItcmSizeKBytes:
+    datatype: int
+    description: "ITCM size in KBytes"
+    default: 8
+    paramtype: vlogparam
+  DtcmSizeKBytes:
+    datatype: int
+    description: "DTCM size in KBytes"
+    default: 32
+    paramtype: vlogparam
+  USE_GENERIC:
+    datatype: bool
+    description: "Use generic primitives"
+    default: false
+    paramtype: vlogdefine
+  FPGA_XILINX:
+    datatype: bool
+    description: "Use Xilinx FPGA primitives"
+    default: false
+    paramtype: vlogdefine
+  TB_SUPPORT:
+    datatype: bool
+    description: "Enable TB support in RVV"
+    default: true
+    paramtype: vlogdefine
+  VLEN_128:
+    datatype: bool
+    description: "Set RVV VLEN to 128"
+    default: true
+    paramtype: vlogdefine
+  ZVE32F_ON:
+    datatype: bool
+    description: "Enable ZVE32F RVV profile"
+    default: true
+    paramtype: vlogdefine
+
+targets:
+  default: &default_target
+    filesets:
+      - files_rtl
+      - files_constraints
+      - files_tcl
+  synth:
+    <<: *default_target
+    toplevel: chip_nexus
+    default_tool: vivado
+    parameters:
+      - ClockFrequencyMhz
+      - IspClockFrequencyMhz
+      - SpimClockFrequencyMhz
+      - MemInitFile
+      - BootAddr
+      - EnableAutoboot
+      - ItcmSizeKBytes
+      - DtcmSizeKBytes
+      - USE_GENERIC=true
+      - FPGA_XILINX=true
+      - TB_SUPPORT=true
+      - VLEN_128=true
+      - ZVE32F_ON=true
+    tools:
+      vivado:
+        part: "xcvu13p-fhga2104-2-e"
+

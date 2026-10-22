@@ -1,0 +1,35 @@
+From 460d394880ca2bcc96f4d82d187ba9961607301e Mon Sep 17 00:00:00 2001
+From: Stefan Hall <stefanhall@google.com>
+Date: Wed, 18 Mar 2026 15:41:15 -0700
+Subject: [PATCH] Remove ternary operator from pkg causing dc crash
+
+---
+ src/fpnew_pkg.sv | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/fpnew_pkg.sv b/src/fpnew_pkg.sv
+index 0167305..08c1c0d 100644
+--- a/src/fpnew_pkg.sv
++++ b/src/fpnew_pkg.sv
+@@ -409,8 +409,16 @@ package fpnew_pkg;
+     // Returns the maximum number of lanes in the FPU according to width, format config and vectors
+   function automatic int unsigned num_divsqrt_lanes(int unsigned width, fmt_logic_t cfg, logic vec, divsqrt_unit_t DivSqrtSel);
+     automatic fmt_logic_t cfg_tmp;
+-    cfg_tmp = (DivSqrtSel == THMULTI) ? cfg & 5'b11101 : cfg;
+-    return vec ? width / min_fp_width(cfg_tmp) : 1; // if no vectors, only one lane
++    if (DivSqrtSel == THMULTI) begin
++      cfg_tmp = cfg & 5'b11101;
++    end else begin
++      cfg_tmp = cfg;
++    end
++    if (vec) begin
++      return width / min_fp_width(cfg_tmp);
++    end else begin
++      return 1;
++    end
+   endfunction
+ 
+   // Returns a mask of active FP formats that are present in lane lane_no of a multiformat slice
+-- 
+2.45.0.118.g7fe29c98d7-goog
+

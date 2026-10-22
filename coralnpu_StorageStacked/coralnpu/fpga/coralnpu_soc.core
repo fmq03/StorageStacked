@@ -1,0 +1,135 @@
+CAPI=2:
+name: "com.google.coralnpu:fpga:coralnpu_soc:0.2"
+description: "The CoralNPU SoC for FPGA."
+
+filesets:
+  rtl:
+    depend:
+      - coralnpuv2:virtual:coralnpu_chisel_subsystem
+      - com.google.coralnpu:fpga:coralnpu_soc_pkg:0.1
+      - com.google.coralnpu:fpga:racl_pkg:0.1
+      - lowrisc:ip:uart:0.1
+      - lowrisc:prim:rom_adv
+      - lowrisc:prim_generic:rom
+      - lowrisc:tlul:adapter_sram
+      - coralnpuv2:ip:coralnpu_tlul:0.1
+      - coralnpuv2:ip:i2c_master:0.1
+      - vsi:ip:ispyocto:0.1
+      - google:ip:tlul2ahblite:0.1
+    files:
+      - rtl/coralnpu_soc.sv
+      - rtl/clk_table.sv
+      - rtl/autoboot.sv
+    file_type: systemVerilogSource
+
+  sim_src:
+    depend:
+      - lowrisc:dv_verilator:memutil_verilator
+      - lowrisc:dv_verilator:simutil_verilator
+    files:
+      - main.cc
+    file_type: cppSource
+
+mapping:
+  "lowrisc:virtual_constants:top_racl_pkg": "com.google.coralnpu:fpga:racl_pkg:0.1"
+
+parameters:
+  ClockFrequencyMhz:
+    datatype: int
+    description: "Target clock frequency in MHz."
+    default: 50
+    paramtype: vlogparam
+  IspClockFrequencyMhz:
+    datatype: int
+    description: "ISP clock frequency in MHz."
+    default: 10
+    paramtype: vlogparam
+  SpimClockFrequencyMhz:
+    datatype: int
+    description: "SPIM clock frequency in MHz."
+    default: 100
+    paramtype: vlogparam
+  MemInitFile:
+    datatype: str
+    description: Path to ROM
+    default: ""
+    paramtype: vlogparam
+  EnableAutoboot:
+    datatype: int
+    description: "Enable autonomous boot release"
+    default: 0
+    paramtype: vlogparam
+  USE_GENERIC:
+    datatype: bool
+    description: "Use generic primitives"
+    default: false
+    paramtype: vlogdefine
+  FPGA_XILINX:
+    datatype: bool
+    description: "Use Xilinx FPGA primitives"
+    default: false
+    paramtype: vlogdefine
+  TB_SUPPORT:
+    datatype: bool
+    description: "Enable TB support in RVV"
+    default: true
+    paramtype: vlogdefine
+  VLEN_128:
+    datatype: bool
+    description: "Set RVV VLEN to 128"
+    default: true
+    paramtype: vlogdefine
+  ZVE32F_ON:
+    datatype: bool
+    description: "Enable ZVE32F RVV profile"
+    default: true
+    paramtype: vlogdefine
+
+targets:
+  default: &default
+    filesets:
+      - rtl
+
+  sim:
+    <<: *default
+    filesets:
+      - rtl
+      - sim_src
+    default_tool: verilator
+    description: "Simulation target for the CoralNPU SoC"
+    parameters:
+      - ClockFrequencyMhz
+      - IspClockFrequencyMhz
+      - SpimClockFrequencyMhz
+      - MemInitFile
+    tools:
+      verilator:
+        mode: cc
+        verilator_options:
+          - '--trace'
+          - '--trace-fst'
+          - '-CFLAGS "-DTOPLEVEL_NAME=coralnpu_soc -Wall -DVM_TRACE_FMT_FST"'
+          - '-LDFLAGS "-lelf"'
+          - '-Wall'
+          - '-Wno-fatal'
+
+  synth:
+    <<: *default
+    default_tool: vivado
+    filesets:
+      - rtl
+    parameters:
+      - ClockFrequencyMhz
+      - IspClockFrequencyMhz
+      - SpimClockFrequencyMhz
+      - MemInitFile
+      - USE_GENERIC=true
+      - FPGA_XILINX=true
+      - TB_SUPPORT=true
+      - VLEN_128=true
+      - ZVE32F_ON=true
+    tools:
+      vivado:
+        part: "xcvu13p-fhga2104-2-e"
+        STEPS.SYNTH_DESIGN.TCL.PRE:
+          - vivado_pre_synth.tcl

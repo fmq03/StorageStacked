@@ -1,0 +1,79 @@
+{
+  "program": {
+    "type": "custom",
+    "defines": {},
+    "expect": [
+      {
+        "address": "0x90000ff0",
+        "value": 270573888
+      },
+      {
+        "address": "0x90000ff4",
+        "value": 2803970468
+      },
+      {
+        "address": "0x90000ff8",
+        "value": 313143874
+      },
+      {
+        "address": "0x90000ffc",
+        "value": 321105219
+      },
+      {
+        "address": "0x90001000",
+        "value": 3005494448
+      },
+      {
+        "address": "0x90001004",
+        "value": 364262725
+      },
+      {
+        "address": "0x90001008",
+        "value": 371636550
+      },
+      {
+        "address": "0x9000100c",
+        "value": 3207018428
+      },
+      {
+        "address": "0x90000fec",
+        "value": 1985229328
+      },
+      {
+        "address": "0x90010010",
+        "value": 3105587434
+      }
+    ]
+  },
+  "npu": {
+    "clock_mhz": 500,
+    "fetch_l0_enabled": false,
+    "itcm_kib": 8,
+    "dtcm_kib": 32
+  },
+  "axi": {
+    "period_ns": 2,
+    "outstanding": 16,
+    "planes": 2,
+    "stalls": true,
+    "replay": false,
+    "burst_beats": 4
+  },
+  "ucie": {
+    "lanes": 16,
+    "rate_gtps": 24,
+    "bits_per_symbol": 1,
+    "tat_ns": 40
+  },
+  "memsim": {
+    "channels": 2,
+    "scale": 1,
+    "queue": 4,
+    "slots": 8,
+    "response_hold": 0,
+    "standard": "hbm4"
+  },
+  "simulation": {
+    "max_ticks": 20000000000000
+  }
+}

@@ -1,0 +1,19 @@
+CAPI=2:
+name: "com.google.coralnpu:fpga:display_dpi:0.1"
+description: "DPI-based Display Model"
+filesets:
+  rtl_files:
+    files:
+      - display_dpi.sv
+    file_type: systemVerilogSource
+
+  dpi_files:
+    files:
+      - display_dpi.cc
+    file_type: cppSource
+
+targets:
+  default:
+    filesets:
+      - rtl_files
+      - dpi_files

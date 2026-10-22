@@ -1,0 +1,30 @@
+{
+  "extraPaths": [
+    "third_party/gem5/runtime",
+    "../axi_StorageStacked/scripts",
+    "..",
+    "third_party/gem5/src/python",
+    "third_party/gem5/src",
+    "third_party/gem5/configs"
+  ],
+  "stubPath": "../.vscode/gem5-python-stubs",
+  "exclude": [
+    "**/.cache/**",
+    "**/result/**",
+    "**/build/**",
+    "**/bazel-*/**"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "third_party/gem5/runtime",
+        "../axi_StorageStacked/scripts",
+        "..",
+        "third_party/gem5/src/python",
+        "third_party/gem5/src",
+        "third_party/gem5/configs"
+      ]
+    }
+  ]
+}

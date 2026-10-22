@@ -1,0 +1,5 @@
+# Enable all checks by default
+enable=all
+
+# Enforce a specific shell
+shell=bash

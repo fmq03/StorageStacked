@@ -1,0 +1,142 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This WORKSPACE file is used as a template to override the default empty/generated
+# WORKSPACE file inside the fetched @coralnpu_mpact external cache folder hermetically.
+#
+# By injecting this file dynamically via the 'workspace_file' parameter in
+# rules/repos.bzl, we allow Bazel to fetch and compile `@coralnpu_mpact`'s own
+# transitive dependencies standalone inside the cache folder, without polluting
+# kelvin's repos.bzl.
+#
+# For more details on why this override exists and how we plan to remove it
+# when transitioning to Bzlmod, see the README.md in this directory.
+
+# Setup bazel repository.
+workspace(name = "coralnpu_sim")
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
+
+# Align bazel_skylib version to 1.9.0
+http_archive(
+    name = "bazel_skylib",
+    sha256 = "3b5b49006181f5f8ff626ef8ddceaa95e9bb8ad294f7b5d7b11ea9f7ddaf8c59",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+    ],
+)
+
+load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
+
+bazel_skylib_workspace()
+
+# Define bazel_features
+http_archive(
+    name = "bazel_features",
+    sha256 = "07bd2b18764cdee1e0d6ff42c9c0a6111ffcbd0c17f0de38e7f44f1519d1c0cd",
+    strip_prefix = "bazel_features-1.32.0",
+    url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.32.0/bazel_features-v1.32.0.tar.gz",
+)
+
+load("@bazel_features//:deps.bzl", "bazel_features_deps")
+
+bazel_features_deps()
+
+# Upgraded rules_cc to 0.2.22 which natively handles trailing compiler warnings
+# during linker detection, making the old rules_cc_linker_detection.patch obsolete.
+http_archive(
+    name = "rules_cc",
+    sha256 = "81c10a95a5c22d838276ee90d712635d6042419fdfca5ef88328226b6321e53b",
+    strip_prefix = "rules_cc-0.2.22",
+    url = "https://github.com/bazelbuild/rules_cc/releases/download/0.2.22/rules_cc-0.2.22.tar.gz",
+)
+
+load("@rules_cc//cc:extensions.bzl", cc_compatibility_proxy_repo = "compatibility_proxy_repo")
+
+cc_compatibility_proxy_repo()
+
+http_archive(
+    name = "rules_java",
+    sha256 = "bbe7d94360cc9ed4607ec5fd94995fd1ec41e84257020b6f09e64055281ecb12",
+    urls = ["https://github.com/bazelbuild/rules_java/releases/download/8.14.0/rules_java-8.14.0.tar.gz"],
+)
+
+http_archive(
+    name = "com_google_protobuf",
+    integrity = "sha256-EKDVjzmhqQnpXgDougtbHcZNApl/dBFRlTorNln254w=",
+    strip_prefix = "protobuf-29.0",
+    urls = ["https://github.com/protocolbuffers/protobuf/releases/download/v29.0/protobuf-29.0.tar.gz"],
+)
+
+http_archive(
+    name = "rules_license",
+    sha256 = "26d4021f6898e23b82ef953078389dd49ac2b5618ac564ade4ef87cced147b38",
+    urls = ["https://github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz"],
+)
+
+# MPACT-RiscV repo.
+# Note: Loads exception trap patches from @coralnpu_hw, requiring
+# --override_repository=coralnpu_hw=... when building standalone.
+http_archive(
+    name = "com_google_mpact-riscv",
+    patch_args = ["-p1"],
+    patches = ["@coralnpu_hw//third_party/patches:mpact_riscv_vstart_trap.patch"],
+    sha256 = "38faef26745f34a82de0daf3b65a207c8d2ecf825f37484a4a27132512583574",
+    strip_prefix = "mpact-riscv-cb68bd4a2cb80dea24d9760dc6397b5854ea41bd",
+    url = "https://github.com/google/mpact-riscv/archive/cb68bd4a2cb80dea24d9760dc6397b5854ea41bd.tar.gz",
+)
+
+# Download only the single svdpi.h file.
+http_file(
+    name = "svdpi_h_file",
+    downloaded_file_path = "svdpi.h",
+    sha256 = "2528c8e529b66dd8e795c8a0fee326166cc51f7dee8fc6a0c6c930534fc780a6",
+    urls = ["https://raw.githubusercontent.com/verilator/verilator/v5.028/include/vltstd/svdpi.h"],
+)
+
+load("@com_google_mpact-riscv//:repos.bzl", "mpact_riscv_repos")
+
+mpact_riscv_repos()
+
+load("@com_google_mpact-riscv//:dep_repos.bzl", "mpact_riscv_dep_repos")
+
+mpact_riscv_dep_repos()
+
+load("@com_google_mpact-riscv//:deps.bzl", "mpact_riscv_deps")
+
+mpact_riscv_deps()
+
+http_archive(
+    name = "rules_python",
+    sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
+    strip_prefix = "rules_python-0.26.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.26.0/rules_python-0.26.0.tar.gz",
+)
+
+load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
+
+py_repositories()
+
+python_register_toolchains(
+    name = "python3",
+    python_version = "3.11",
+)
+
+http_file(
+    name = "cc_static_library_external",
+    downloaded_file_path = "cc_static_libarary.bzl",
+    sha256 = "1287ce9f7e5fe31ad1b5937781531e4ab3f4656edabf650cca9ca720ceb31806",
+    urls = ["https://raw.githubusercontent.com/project-oak/oak/fcceea755f0274d3a0eb7c0461b30af3dc28e40a/cc/build_defs.bzl"],
+)

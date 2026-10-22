@@ -1,0 +1,134 @@
+# Disable bzlmod and enable workspace while we migrate
+common --noenable_bzlmod --enable_workspace
+
+# Bazel 8 default-flipped --incompatible_disallow_empty_glob. Several BUILD
+# files (notably third_party/* with mixed .v/.sv source trees) rely on the
+# legacy permissive behavior. Restore it for now; clean up per-glob in a
+# follow-up.
+common --noincompatible_disallow_empty_glob
+
+build --action_env=BAZEL_CXXOPTS="-std=c++17"
+build --action_env=CC="clang"
+build --cxxopt='-std=c++17'
+build --conlyopt='-std=gnu11'
+
+# Disable the low signal-to-noise ratio warnings
+build --copt=-Wno-unused-function
+
+# Disable tool build warnings. The tools are fetched/generated from OSS repos
+build --host_copt=-Wno-unused-variable
+build --host_copt=-Wno-unused-value
+build --host_copt=-Wno-uninitialized
+build --host_copt=-Wno-sign-compare
+build --host_copt=-O3
+
+# Disable Java obsolete options and bad path warnings
+build --javacopt="-nowarn"
+build --host_javacopt="-nowarn"
+
+
+# This lets us generate key/value pairs for the workspace which can be used to
+# generate the version information.
+
+build --workspace_status_command=utils/get_workspace_status.sh
+
+build --experimental_cc_shared_library
+build --java_runtime_version=remotejdk_11
+run --java_runtime_version=remotejdk_11
+test --java_runtime_version=remotejdk_11
+
+build --repo_env BAZEL_JVM_FETCH_SOURCES=false
+run --repo_env BAZEL_JVM_FETCH_SOURCES=false
+test --repo_env BAZEL_JVM_FETCH_SOURCES=false
+
+# Skip VCS by default as most workstations will not have licenses.
+build --build_tag_filters="-vcs,-synthesis,-power"
+build --action_env=VCS_HOME
+build --host_action_env=VCS_HOME
+build --action_env=VC_STATIC_HOME
+build --host_action_env=VC_STATIC_HOME
+build --action_env=VERDI_HOME
+build --host_action_env=VERDI_HOME
+build --action_env=LM_LICENSE_FILE
+build --host_action_env=LM_LICENSE_FILE
+build --action_env=LICENSE_SERVER_VCSSIM
+build --host_action_env=LICENSE_SERVER_VCSSIM
+build --action_env=XILINXD_LICENSE_FILE
+build --host_action_env=XILINXD_LICENSE_FILE
+test --build_tag_filters="-vcs,-synthesis,-power"
+test --test_tag_filters="-vcs,-synthesis,-power"
+test --action_env=VCS_HOME
+test --host_action_env=VCS_HOME
+test --action_env=VC_STATIC_HOME
+test --host_action_env=VC_STATIC_HOME
+test --action_env=VERDI_HOME
+test --host_action_env=VERDI_HOME
+test --action_env=LM_LICENSE_FILE
+test --host_action_env=LM_LICENSE_FILE
+test --action_env=LICENSE_SERVER_VCSSIM
+test --host_action_env=LICENSE_SERVER_VCSSIM
+test --action_env=XILINXD_LICENSE_FILE
+test --host_action_env=XILINXD_LICENSE_FILE
+run --action_env=VCS_HOME
+run --host_action_env=VCS_HOME
+run --action_env=VC_STATIC_HOME
+run --host_action_env=VC_STATIC_HOME
+run --action_env=VERDI_HOME
+run --host_action_env=VERDI_HOME
+run --action_env=LM_LICENSE_FILE
+run --host_action_env=LM_LICENSE_FILE
+run --action_env=LICENSE_SERVER_VCSSIM
+run --host_action_env=LICENSE_SERVER_VCSSIM
+run --action_env=XILINXD_LICENSE_FILE
+run --host_action_env=XILINXD_LICENSE_FILE
+
+
+# Add config to enable VCS targets.
+build:vcs --build_tag_filters="vcs"
+test:vcs --build_tag_filters="vcs"
+test:vcs --test_tag_filters="vcs"
+run:vcs --build_tag_filters="vcs"
+run:vcs --test_tag_filters="vcs"
+
+# Add config to enable synthesis targets.
+build:synthesis --build_tag_filters="synthesis"
+test:synthesis --build_tag_filters="synthesis"
+test:synthesis --test_tag_filters="synthesis"
+run:synthesis --build_tag_filters="synthesis"
+run:synthesis --test_tag_filters="synthesis"
+
+# Add config to enable power targets.
+build:power --build_tag_filters="power"
+test:power --build_tag_filters="power"
+test:power --test_tag_filters="power"
+run:power --build_tag_filters="power"
+run:power --test_tag_filters="power"
+
+# Set preprocessor defines for tflite-micro.
+build --copt=-DTF_LITE_USE_GLOBAL_CMATH_FUNCTIONS
+build --copt=-DTF_LITE_USE_GLOBAL_MIN
+build --copt=-DTF_LITE_USE_GLOBAL_MAX
+build --copt=-DTF_LITE_MCU_DEBUG_LOG
+build:opt --copt=-DTF_LITE_STRIP_ERROR_STRINGS
+
+
+# Selecting coralnpu platform with custom toolchain.
+build:coralnpu_v2 --platforms=//platforms:coralnpu_v2
+
+build --incompatible_enable_cc_toolchain_resolution
+build --use_top_level_targets_for_symlinks=false
+
+# Use GNU BFD linker (compatible with GCC 15 .sframe)
+build --host_linkopt=-fuse-ld=bfd
+build --linkopt=-fuse-ld=bfd
+
+# Disable LLD-specific "start-lib" optimization (incompatible with BFD)
+build --host_features=-supports_start_end_lib
+build --features=-supports_start_end_lib
+
+# Only show warnings/errors from our own code
+build --output_filter="^//(?!(third_party)(/|:|$))"
+
+
+# Import user config, if it exists (gitignored).
+try-import %workspace%/.bazelrc.user

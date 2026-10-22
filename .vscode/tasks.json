@@ -1,0 +1,142 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "验收：全部项目",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "./accept.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "运行：AXI SMOKE",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "./axi_StorageStacked/run.sh",
+        "smoke"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "运行：Vortex SMOKE",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "./vortex_StorageStacked/user/run.sh",
+        "smoke"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "运行：Vortex TinyLLM",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "./vortex_StorageStacked/user/run.sh",
+        "llm"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "运行：CoralNPU SMOKE",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "./coralnpu_StorageStacked/user/run.sh",
+        "smoke"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "运行：CoralNPU TinyLLM",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "./coralnpu_StorageStacked/user/run.sh",
+        "llm"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "索引：刷新全部代码跳转",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        ".vscode/refresh_navigation.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "索引：验证 C++ / Python 跳转",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        ".vscode/verify_navigation.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "索引：验证 RTL / Chisel 跳转",
+      "type": "process",
+      "command": "node",
+      "args": [
+        ".vscode/verify_hdl_navigation.cjs"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "索引：刷新 user 和 integration",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        ".vscode/refresh_user_navigation.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "索引：逐文件验证 user 和 integration 跳转",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        ".vscode/verify_user_navigation.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

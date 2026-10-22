@@ -1,0 +1,20 @@
+# 导入上层 SCons 构建脚本导出的环境与 gem5 构建辅助函数。
+Import('*')
+# 引入环境变量读取和路径拼接工具。
+import os
+# 引入按路径执行 Python 脚本的工具，以取得共享链路编译宏。
+import runpy
+# 从 STORAGE_STACK_ROOT 环境变量定位共享 storage_axi 源码目录。
+storage = os.path.join(os.environ['STORAGE_STACK_ROOT'], 'storage_axi')
+# 为当前构建环境追加 gem5 内置 SystemC 和共享 AXI 头文件目录。
+env.Append(CPPPATH=[Dir('#/src/systemc/ext'), storage,
+                   # 继续追加 AXI 到 Flit 转换模块的 SystemC 头文件目录。
+                   os.path.join(storage, '../axi2flit/systemc/include')])
+# 执行共享 link_options.py，并调用 definitions() 生成链路宏列表。
+link_defines = runpy.run_path(os.path.join(storage, 'link_options.py'))['definitions']()
+# 注册 StorageBridge SimObject，生成对应的参数与绑定代码。
+SimObject('StorageBridge.py', sim_objects=['StorageBridge'])
+# 将 TLM 到 AXI 主端实现加入 gem5 构建。
+Source('axi_master.cc')
+# 将存储桥实现加入构建，并只为此源文件追加链路编译宏。
+Source('storage.cc', append={'CPPDEFINES': link_defines})

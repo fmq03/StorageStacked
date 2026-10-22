@@ -1,0 +1,18 @@
+[style]
+# Use PEP 8 as the foundation
+based_on_style = pep8
+
+# Standard 4-space indent for general Python
+indent_width = 4
+
+# Place a blank line before a 'def' or 'class' even at the start of a block
+blank_line_before_nested_class_or_def = True
+
+# Better readability for lists and dictionaries
+split_before_expression_after_opening_paren = True
+split_before_first_argument = True
+split_complex_comprehension = True
+
+# Keep logic groups together
+dedent_closing_brackets = True
+coalesce_brackets = True

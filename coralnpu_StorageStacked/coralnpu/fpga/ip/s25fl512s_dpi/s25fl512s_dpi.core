@@ -1,0 +1,19 @@
+CAPI=2:
+name: "com.google.coralnpu:fpga:s25fl512s_dpi:0.1"
+description: "DPI-based S25FL512S NOR Flash Model"
+filesets:
+  rtl_files:
+    files:
+      - s25fl512s_dpi.sv
+    file_type: systemVerilogSource
+
+  dpi_files:
+    files:
+      - s25fl512s_dpi.cc
+    file_type: cppSource
+
+targets:
+  default:
+    filesets:
+      - rtl_files
+      - dpi_files

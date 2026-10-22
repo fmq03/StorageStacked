@@ -1,41 +1,25 @@
-# Reference delivery stays on disk and is distributed separately when needed.
-/zhongxing-full-environment-20260831/
-
-# 本地交接资料单独保留。
-/integrate_doc/
-
-# Workspace build, dependency, result and handoff-package directories.
-/build/
-/build-*/
-/results/
-/outputs/
-/dist/
-/toolchains/
-/vortex-gpu/vxbuild/
-/vortex-gpu/build*/
-
-# Local environments and editor state; component rules live inside each directory.
-.venv/
-venv/
-.env
-.env.*
-!.env.example
-.cache/
-.vscode/
-.idea/
-__pycache__/
+# Preserve nested repositories locally; publish their source files as one tree.
+**/.git/
+**/.cache/
+**/__pycache__/
+**/node_modules/
 *.py[cod]
-*.swp
-*.swo
-*~
-.DS_Store
 
-# Root-level simulation/tool output.
-/*.vcd
-/*.fst
-/*.fsdb
-/*.log
-/verdiLog/
-/vfastLog/
-/novas.conf
-/novas.rc
+/axi_StorageStacked/build/
+/axi_StorageStacked/results/
+/axi_StorageStacked/.deps/
+/axi_StorageStacked/validation/
+/vortex_StorageStacked/third_party/gem5/build/
+/vortex_StorageStacked/user/*/result/
+/vortex_StorageStacked/validation/
+/coralnpu_StorageStacked/user/*/result/
+/coralnpu_StorageStacked/validation/
+/coralnpu_StorageStacked/coralnpu/validation/
+/coralnpu_StorageStacked/coralnpu/bazel-*
+/coralnpu_StorageStacked/coralnpu/hdl/chisel/.tags
+
+/.vscode/editor_dependencies.json
+/offline/.build/
+/offline/dist/
+/offline/results/
+/offline/validation/

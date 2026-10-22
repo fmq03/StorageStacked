@@ -1,0 +1,11 @@
+{
+  "project": {
+    "version": "1.0.0",
+    "origin": "Extracted common AXI256 -> AXI2Flit -> UCIe -> online mem_sim from both driver working trees"
+  },
+  "systemc": {
+    "url": "https://github.com/accellera-official/systemc",
+    "commit": "2.3.1",
+    "origin": "Accellera standalone source bundled in the existing local snapshot; independently compiled with QuickThreads"
+  }
+}

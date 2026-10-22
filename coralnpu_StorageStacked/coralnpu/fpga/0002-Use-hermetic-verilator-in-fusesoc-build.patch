@@ -1,0 +1,224 @@
+From 9b1451cd9383e8acb145dfe4811f84a1a6fd1336 Mon Sep 17 00:00:00 2001
+From: Alex Van Damme <Alex Van Damme>
+Date: Mon, 2 Mar 2026 00:57:47 +0000
+Subject: [PATCH] Use hermetic verilator in fusesoc_build
+
+When a hermetic verilator binary is provided via the _verilator attr,
+use it instead of the system verilator from BIN_PATHS. Set VERILATOR_ROOT
+so verilator can find its include files and support libraries.
+
+A wrapper script named 'verilator' is generated that exec's the real
+verilator_bin binary, so FuseSoC can find it by its expected command name.
+Similarly, a 'python3' wrapper ensures FuseSoC scripts use the hermetic
+Python interpreter.
+
+For sim targets, a merged VERILATOR_ROOT directory is created at runtime
+that symlinks both source include files (verilated.h) and generated files
+(verilated.mk) so verilator can find everything in a single tree.
+
+Use the hermetic CC toolchain for VERILATOR_CXX and VERILATOR_AR instead
+of hardcoded system compiler paths.
+
+Also resolve relative PATH, VERILATOR, and VERILATOR_ROOT entries to
+absolute paths in fusesoc_build.py so that tools remain findable after
+FuseSoC changes the working directory.
+---
+ rules/fusesoc.bzl     | 146 ++++++++++++++++++++++++++++++++++++------
+ util/fusesoc_build.py |  15 ++++-
+ 2 files changed, 142 insertions(+), 19 deletions(-)
+
+diff --git a/rules/fusesoc.bzl b/rules/fusesoc.bzl
+index 17e8d74..ff23c34 100755
+--- a/rules/fusesoc.bzl
++++ b/rules/fusesoc.bzl
+@@ -82,25 +82,125 @@ def _fusesoc_build_impl(ctx):
+     args.add_all(ctx.attr.systems)
+     args.add_all(flags)
+ 
+-    ctx.actions.run(
+-        mnemonic = "FuseSoC",
+-        outputs = outputs,
+-        inputs = ctx.files.srcs + ctx.files.cores + ctx.files._fusesoc + [
+-            cfg_file,
+-        ],
+-        arguments = [args],
+-        executable = ctx.executable._fusesoc,
+-        use_default_shell_env = False,
+-        env = dicts.add(
+-            # Verilator build doesn't need nonhermetic environment variables
+-            ENV if ctx.attr.target == "synth" else {},
+-            {
+-                "HOME": home_dir,
+-                # Obtain the non-hermetic binary path and append Bazel's default PATH.
+-                "PATH": BIN_PATHS["vivado" if ctx.attr.target == "synth" else "verilator"] + ":/bin:/usr/bin:/usr/local/bin",
+-            },
+-        ),
++    # Determine PATH and extra inputs/env for sim vs synth targets.
++    extra_inputs = depset()
++    extra_env = {}
++    if ctx.attr.target == "sim" and ctx.attr._verilator:
++        verilator_bin = ctx.executable._verilator
++        # Include the verilator binary and all its runfiles (data deps like
++        # include/verilated.h, include/verilated_std.sv, etc.).
++        extra_inputs = depset(
++            ctx.files._verilator,
++            transitive = [ctx.attr._verilator[DefaultInfo].default_runfiles.files],
++        )
++
++        # Create a wrapper script named "verilator" that exec's the real
++        # verilator_bin. FuseSoC and its check_tool_requirements script
++        # expect to find "verilator" on PATH. The wrapper resolves its own
++        # absolute directory so it works regardless of the caller's cwd.
++        verilator_wrapper = ctx.actions.declare_file(build_dir + "/.verilator-bin/verilator")
++        ctx.actions.write(
++            output = verilator_wrapper,
++            content = '#!/bin/sh\nexec "$(cd "$(dirname "$0")" && pwd)/{}" "$@"\n'.format(
++                ("../" * (verilator_wrapper.dirname.count("/") + 1)) + verilator_bin.path,
++            ),
++            is_executable = True,
++        )
++        extra_inputs = depset([verilator_wrapper], transitive = [extra_inputs])
++
++        # VERILATOR_ROOT must point to a directory containing both source files
++        # (include/verilated.h) and generated files (include/verilated.mk).
++        # Source files are at external/verilator/ and generated files at
++        # bazel-out/.../bin/external/verilator/. We build a merged tree at
++        # runtime using a setup script.
++        verilator_src_root = ctx.attr._verilator.label.workspace_root
++        verilator_gen_root = verilator_bin.dirname
++        merged_root = build_dir + "/.verilator-root"
++
++        # Override VERILATOR so edalize's Makefile uses our wrapper.
++        extra_env["VERILATOR"] = verilator_wrapper.path
++        # Use the hermetic CC toolchain for compiling verilated C++ code.
++        cc_toolchain = ctx.toolchains["@bazel_tools//tools/cpp:toolchain_type"].cc
++        extra_env["VERILATOR_CXX"] = cc_toolchain.compiler_executable
++        extra_env["VERILATOR_AR"] = cc_toolchain.ar_executable
++        # Create python and python3 wrappers so FuseSoC scripts and
++        # check_tool_requirements find the hermetic interpreter.
++        python_bin = ctx.file._python
++        python_wrappers = []
++        for name in ("python", "python3"):
++            wrapper = ctx.actions.declare_file(build_dir + "/.verilator-bin/" + name)
++            ctx.actions.write(
++                output = wrapper,
++                content = '#!/bin/sh\nexec "$(cd "$(dirname "$0")" && pwd)/{}" "$@"\n'.format(
++                    ("../" * (wrapper.dirname.count("/") + 1)) + python_bin.path,
++                ),
++                is_executable = True,
++            )
++            python_wrappers.append(wrapper)
++        extra_env["VERILATOR_PYTHON3"] = python_wrappers[1].path
++        extra_inputs = depset(
++            [python_bin] + python_wrappers,
++            transitive = [extra_inputs, cc_toolchain.all_files, ctx.attr._python_files.files],
++        )
++        path = verilator_wrapper.dirname + ":/bin:/usr/bin:/usr/local/bin"
++    elif ctx.attr.target == "synth":
++        path = BIN_PATHS["vivado"] + ":/bin:/usr/bin:/usr/local/bin"
++    else:
++        path = BIN_PATHS["verilator"] + ":/bin:/usr/bin:/usr/local/bin"
++
++    env = dicts.add(
++        # Verilator build doesn't need nonhermetic environment variables
++        ENV if ctx.attr.target == "synth" else {},
++        extra_env,
++        {
++            "HOME": home_dir,
++            "PATH": path,
++        },
+     )
++
++    if ctx.attr.target == "sim" and ctx.attr._verilator:
++        # Use run_shell to create a merged VERILATOR_ROOT before invoking FuseSoC.
++        # The merged root symlinks source and generated include files so verilator
++        # can find everything (verilated.h from source, verilated.mk from genrule).
++        setup_cmd = " ".join([
++            "VERILATOR_ROOT=$(pwd)/{merged_root}".format(merged_root = merged_root),
++            "&&", "mkdir", "-p", "$VERILATOR_ROOT/include", "$VERILATOR_ROOT/bin",
++            "&&", "cp", "-as", "$(pwd)/{src}/include/.".format(src = verilator_src_root), "$VERILATOR_ROOT/include/",
++            "&&", "cp", "-asf", "$(pwd)/{gen}/include/.".format(gen = verilator_gen_root), "$VERILATOR_ROOT/include/",
++            "&&", "cp", "-as", "$(pwd)/{src}/bin/.".format(src = verilator_src_root), "$VERILATOR_ROOT/bin/",
++            "&&", "export", "VERILATOR_ROOT",
++            "&&", "export", "VERILATOR=$(pwd)/{wrapper}".format(wrapper = verilator_wrapper.path),
++            "&&", "export", "VERILATOR_PYTHON3=$(pwd)/{wrapper}".format(wrapper = python_wrappers[1].path),
++            "&&", "export", "PATH=$(pwd)/{wrapper_dir}:$PATH".format(wrapper_dir = verilator_wrapper.dirname),
++            "&&",
++        ])
++        ctx.actions.run_shell(
++            mnemonic = "FuseSoC",
++            outputs = outputs,
++            inputs = depset(
++                ctx.files.srcs + ctx.files.cores + ctx.files._fusesoc + [cfg_file],
++                transitive = [extra_inputs],
++            ),
++            command = setup_cmd + ctx.executable._fusesoc.path + ' "$@"',
++            arguments = [args],
++            use_default_shell_env = False,
++            env = env,
++            tools = [ctx.executable._fusesoc],
++        )
++    else:
++        ctx.actions.run(
++            mnemonic = "FuseSoC",
++            outputs = outputs,
++            inputs = depset(
++                ctx.files.srcs + ctx.files.cores + ctx.files._fusesoc + [cfg_file],
++                transitive = [extra_inputs],
++            ),
++            arguments = [args],
++            executable = ctx.executable._fusesoc,
++            use_default_shell_env = False,
++            env = env,
++        )
+     return [
+         DefaultInfo(
+             files = depset(outputs),
+@@ -136,5 +233,18 @@ fusesoc_build = rule(
+             executable = True,
+             cfg = "exec",
+         ),
++        "_verilator": attr.label(
++            default = "@verilator//:verilator_bin",
++            executable = True,
++            cfg = "exec",
++        ),
++        "_python": attr.label(
++            default = "@python311_x86_64-unknown-linux-gnu//:python",
++            allow_single_file = True,
++        ),
++        "_python_files": attr.label(
++            default = "@python311_x86_64-unknown-linux-gnu//:files",
++        ),
+     },
++    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
+ )
+diff --git a/util/fusesoc_build.py b/util/fusesoc_build.py
+index 8c7c3ac..8b6c15c 100755
+--- a/util/fusesoc_build.py
++++ b/util/fusesoc_build.py
+@@ -18,7 +18,20 @@ if __name__ == "__main__":
+     if path_env is not None:
+         path_env = ":" + path_env
+     path_env = os.path.dirname(sys.executable) + path_env
+-    os.environ["PATH"] = path_env
++
++
++    # Resolve relative PATH entries to absolute paths so that tools remain
++    # findable after FuseSoC changes the working directory.
++    path_entries = path_env.split(":")
++    path_entries = [os.path.abspath(p) if p and not os.path.isabs(p) else p
++                    for p in path_entries]
++    os.environ["PATH"] = ":".join(path_entries)
++
++    # Resolve relative VERILATOR and VERILATOR_ROOT paths to absolute.
++    for var in ("VERILATOR", "VERILATOR_ROOT"):
++        val = os.environ.get(var)
++        if val and not os.path.isabs(val):
++            os.environ[var] = os.path.abspath(val)
+ 
+     # Start fusesoc
+     rc = main()
+-- 
+2.39.5
+

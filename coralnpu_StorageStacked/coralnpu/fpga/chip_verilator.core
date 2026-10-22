@@ -1,0 +1,115 @@
+CAPI=2:
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: "com.google.coralnpu:fpga:chip_verilator:0.1"
+description: "Verilator-specific top-level for CoralNPU."
+
+filesets:
+  files_rtl:
+    depend:
+      - com.google.coralnpu:fpga:coralnpu_soc:0.2
+      - coralnpuv2:ip:coralnpu_tlul:0.1
+      - lowrisc:dv_dpi_c:uartdpi:0.1
+      - lowrisc:dv_dpi_sv:uartdpi:0.1
+      - lowrisc:dv_dpi_c:jtagdpi:0.1
+      - lowrisc:dv_dpi_sv:jtagdpi:0.1
+      - com.google.coralnpu:fpga:spi_dpi_master:0.1
+      - com.google.coralnpu:fpga:display_dpi:0.1
+      - com.google.coralnpu:fpga:gpio_dpi:0.1
+      - coralnpuv2:ip:hm01b0_model:0.1
+      - com.google.coralnpu:fpga:s25fl512s_dpi:0.1
+      - com.google.coralnpu:hdl:sram_backdoor:0.1
+    files:
+      - rtl/chip_verilator.sv
+    file_type: systemVerilogSource
+  sim_src:
+    depend:
+      - lowrisc:dv_verilator:memutil_verilator
+      - lowrisc:dv_verilator:simutil_verilator
+    files:
+      - main.cc
+    file_type: cppSource
+
+parameters:
+  ClockFrequencyMhz:
+    datatype: int
+    description: "Target clock frequency in MHz."
+    default: 50
+    paramtype: vlogparam
+  IspClockFrequencyMhz:
+    datatype: int
+    description: "ISP clock frequency in MHz."
+    default: 10
+    paramtype: vlogparam
+  SpimClockFrequencyMhz:
+    datatype: int
+    description: "SPIM clock frequency in MHz."
+    default: 50
+    paramtype: vlogparam
+  MemInitFile:
+    datatype: str
+    description: Path to ROM
+    default: ""
+    paramtype: vlogparam
+  BootAddr:
+    datatype: int
+    description: "PC reset value. 0 for ITCM, 0x10000000 for ROM boot."
+    default: 0
+    paramtype: vlogparam
+  EnableAutoboot:
+    datatype: int
+    description: "Enable autonomous boot release"
+    default: 0
+    paramtype: vlogparam
+  ItcmSizeKBytes:
+    datatype: int
+    description: "ITCM size in KBytes"
+    default: 8
+    paramtype: vlogparam
+  DtcmSizeKBytes:
+    datatype: int
+    description: "DTCM size in KBytes"
+    default: 32
+    paramtype: vlogparam
+
+targets:
+  default: &default_target
+    filesets:
+      - files_rtl
+  sim:
+    <<: *default_target
+    filesets:
+      - files_rtl
+      - sim_src
+    toplevel: chip_verilator
+    default_tool: verilator
+    parameters:
+      - ClockFrequencyMhz
+      - IspClockFrequencyMhz
+      - SpimClockFrequencyMhz
+      - MemInitFile
+      - BootAddr
+      - EnableAutoboot
+      - ItcmSizeKBytes
+      - DtcmSizeKBytes
+    tools:
+      verilator:
+        mode: cc
+        verilator_options:
+          - '--trace'
+          - '--trace-fst'
+          - '-CFLAGS "-DTOPLEVEL_NAME=chip_verilator -Wall -DVM_TRACE_FMT_FST"'
+          - '-LDFLAGS "-lelf -lutil"'
+          - '-Wall'
+          - '-Wno-fatal'

@@ -1,0 +1,57 @@
+# alu tests
+alu_vaddsub_test
+alu_vwaddsub_test
+alu_vext_test
+alu_vadcsbc_test
+alu_vmadcsbc_test
+alu_bitlogic_test
+alu_shift_test
+alu_vcomp_test
+alu_vminmax_test
+alu_vmul_test
+alu_vdiv_test
+alu_vwmul_test
+alu_vmac_test
+alu_vwmac_test
+alu_vmerge_vmvv_test
+alu_vsaddsub_test
+alu_vaaddsub_test
+alu_vsmul_test
+alu_vssrlsra_test
+alu_vnclip_test
+alu_mask_logic_test
+alu_vcpop_vfirst_test
+alu_vmunary0_test
+
+# pmt tests
+alu_vmvnr_test
+alu_vmv_test 
+alu_slide_test
+alu_gather_test
+alu_vcompress_test
+
+# rdt tests
+alu_vred_test
+alu_vwred_test
+
+# lsu tests
+lsu_unit_stride_test
+lsu_const_stride_test
+lsu_indexed_test
+lsu_unit_stride_seg_test
+lsu_const_stride_seg_test
+lsu_indexed_seg_test
+lsu_unit_stride_mask_test
+lsu_whole_reg_test
+lsu_fof_test
+
+# trap direct tests
+lsu_unit_stride_test_trap_en
+lsu_const_stride_test_trap_en
+lsu_indexed_test_trap_en
+lsu_unit_stride_seg_test_trap_en
+lsu_const_stride_seg_test_trap_en
+lsu_indexed_seg_test_trap_en
+lsu_unit_stride_mask_test_trap_en
+lsu_whole_reg_test_trap_en
+lsu_fof_test_trap_en

@@ -1,0 +1,236 @@
+diff -urN a/src/fpnew_cast_multi.sv b/src/fpnew_cast_multi.sv
+--- a/src/fpnew_cast_multi.sv	2026-06-30 18:04:03.394536410 +0000
++++ b/src/fpnew_cast_multi.sv	2026-07-13 21:33:00.466520584 +0000
+@@ -24,10 +24,9 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH = fpnew_pkg::maximum(fpnew_pkg::max_fp_width(FpFmtConfig),
+-                                                     fpnew_pkg::max_int_width(IntFmtConfig)),
+-  localparam int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH = fpnew_pkg::maximum(fpnew_pkg::max_fp_width(FpFmtConfig), fpnew_pkg::max_int_width(IntFmtConfig)),
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input  logic                   clk_i,
+   input  logic                   rst_ni,
+diff -urN a/src/fpnew_classifier.sv b/src/fpnew_classifier.sv
+--- a/src/fpnew_classifier.sv	2025-10-20 22:42:20.000000000 +0000
++++ b/src/fpnew_classifier.sv	2026-07-13 21:33:00.465723764 +0000
+@@ -17,15 +17,15 @@
+   parameter fpnew_pkg::fp_format_e   FpFormat = fpnew_pkg::fp_format_e'(0),
+   parameter int unsigned             NumOperands = 1,
+   // Do not change
+-  localparam int unsigned WIDTH = fpnew_pkg::fp_width(FpFormat)
++  parameter int unsigned WIDTH = fpnew_pkg::fp_width(FpFormat)
+ ) (
+   input  logic                [NumOperands-1:0][WIDTH-1:0] operands_i,
+   input  logic                [NumOperands-1:0]            is_boxed_i,
+   output fpnew_pkg::fp_info_t [NumOperands-1:0]            info_o
+ );
+ 
+-  localparam int unsigned EXP_BITS = fpnew_pkg::exp_bits(FpFormat);
+-  localparam int unsigned MAN_BITS = fpnew_pkg::man_bits(FpFormat);
++  parameter int unsigned EXP_BITS = fpnew_pkg::exp_bits(FpFormat);
++  parameter int unsigned MAN_BITS = fpnew_pkg::man_bits(FpFormat);
+ 
+   // Type definition
+   typedef struct packed {
+diff -urN a/src/fpnew_divsqrt_multi.sv b/src/fpnew_divsqrt_multi.sv
+--- a/src/fpnew_divsqrt_multi.sv	2026-06-30 18:04:03.414405541 +0000
++++ b/src/fpnew_divsqrt_multi.sv	2026-07-13 21:33:00.465517674 +0000
+@@ -23,9 +23,9 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH       = fpnew_pkg::max_fp_width(FpFmtConfig),
+-  localparam int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH       = fpnew_pkg::max_fp_width(FpFmtConfig),
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input  logic                        clk_i,
+   input  logic                        rst_ni,
+diff -urN a/src/fpnew_divsqrt_th_32.sv b/src/fpnew_divsqrt_th_32.sv
+--- a/src/fpnew_divsqrt_th_32.sv	2026-06-30 18:04:03.408269440 +0000
++++ b/src/fpnew_divsqrt_th_32.sv	2026-07-13 21:33:00.465142554 +0000
+@@ -26,9 +26,9 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH       = 32,
+-  localparam int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH       = 32,
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input  logic                        clk_i,
+   input  logic                        rst_ni,
+diff -urN a/src/fpnew_divsqrt_th_64_multi.sv b/src/fpnew_divsqrt_th_64_multi.sv
+--- a/src/fpnew_divsqrt_th_64_multi.sv	2026-06-30 18:04:03.415520330 +0000
++++ b/src/fpnew_divsqrt_th_64_multi.sv	2026-07-13 21:33:00.464720284 +0000
+@@ -25,9 +25,9 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH       = fpnew_pkg::max_fp_width(FpFmtConfig),
+-  localparam int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH       = fpnew_pkg::max_fp_width(FpFmtConfig),
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input  logic                        clk_i,
+   input  logic                        rst_ni,
+diff -urN a/src/fpnew_fma_multi.sv b/src/fpnew_fma_multi.sv
+--- a/src/fpnew_fma_multi.sv	2026-06-30 18:04:03.402381670 +0000
++++ b/src/fpnew_fma_multi.sv	2026-07-13 21:33:00.467339825 +0000
+@@ -22,9 +22,9 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH       = fpnew_pkg::max_fp_width(FpFmtConfig),
+-  localparam int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH       = fpnew_pkg::max_fp_width(FpFmtConfig),
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input  logic                        clk_i,
+   input  logic                        rst_ni,
+diff -urN a/src/fpnew_fma.sv b/src/fpnew_fma.sv
+--- a/src/fpnew_fma.sv	2026-06-30 18:04:03.400299140 +0000
++++ b/src/fpnew_fma.sv	2026-07-13 21:33:00.467999145 +0000
+@@ -22,8 +22,8 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH = fpnew_pkg::fp_width(FpFormat),
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH = fpnew_pkg::fp_width(FpFormat),
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input logic                      clk_i,
+   input logic                      rst_ni,
+@@ -61,8 +61,8 @@
+   // ----------
+   // Constants
+   // ----------
+-  localparam int unsigned EXP_BITS = fpnew_pkg::exp_bits(FpFormat);
+-  localparam int unsigned MAN_BITS = fpnew_pkg::man_bits(FpFormat);
++  parameter int unsigned EXP_BITS = fpnew_pkg::exp_bits(FpFormat);
++  parameter int unsigned MAN_BITS = fpnew_pkg::man_bits(FpFormat);
+   localparam int unsigned BIAS     = fpnew_pkg::bias(FpFormat);
+   // Precision bits 'p' include the implicit bit
+   localparam int unsigned PRECISION_BITS = MAN_BITS + 1;
+diff -urN a/src/fpnew_noncomp.sv b/src/fpnew_noncomp.sv
+--- a/src/fpnew_noncomp.sv	2026-06-30 18:04:03.403970760 +0000
++++ b/src/fpnew_noncomp.sv	2026-07-13 21:33:00.464281393 +0000
+@@ -22,8 +22,8 @@
+   parameter type                     TagType     = logic,
+   parameter type                     AuxType     = logic,
+   // Do not change
+-  localparam int unsigned WIDTH = fpnew_pkg::fp_width(FpFormat),
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned WIDTH = fpnew_pkg::fp_width(FpFormat),
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input logic                  clk_i,
+   input logic                  rst_ni,
+@@ -63,8 +63,8 @@
+   // ----------
+   // Constants
+   // ----------
+-  localparam int unsigned EXP_BITS = fpnew_pkg::exp_bits(FpFormat);
+-  localparam int unsigned MAN_BITS = fpnew_pkg::man_bits(FpFormat);
++  parameter int unsigned EXP_BITS = fpnew_pkg::exp_bits(FpFormat);
++  parameter int unsigned MAN_BITS = fpnew_pkg::man_bits(FpFormat);
+   // Pipelines
+   localparam NUM_INP_REGS = (PipeConfig == fpnew_pkg::BEFORE || PipeConfig == fpnew_pkg::INSIDE)
+                             ? NumPipeRegs
+diff -urN a/src/fpnew_opgroup_block.sv b/src/fpnew_opgroup_block.sv
+--- a/src/fpnew_opgroup_block.sv	2025-10-20 22:42:20.000000000 +0000
++++ b/src/fpnew_opgroup_block.sv	2026-07-13 21:33:00.463349873 +0000
+@@ -27,10 +27,10 @@
+   parameter type                        TagType       = logic,
+   parameter int unsigned                TrueSIMDClass = 0,
+   // Do not change
+-  localparam int unsigned NUM_FORMATS  = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned NUM_OPERANDS = fpnew_pkg::num_operands(OpGroup),
+-  localparam int unsigned NUM_LANES    = fpnew_pkg::max_num_lanes(Width, FpFmtMask, EnableVectors),
+-  localparam type         MaskType     = logic [NUM_LANES-1:0]
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned NUM_OPERANDS = fpnew_pkg::num_operands(OpGroup),
++  parameter int unsigned NUM_LANES    = fpnew_pkg::max_num_lanes(Width, FpFmtMask, EnableVectors),
++  parameter type         MaskType     = logic [NUM_LANES-1:0]
+ ) (
+   input logic                                     clk_i,
+   input logic                                     rst_ni,
+diff -urN a/src/fpnew_opgroup_fmt_slice.sv b/src/fpnew_opgroup_fmt_slice.sv
+--- a/src/fpnew_opgroup_fmt_slice.sv	2025-10-20 22:42:20.000000000 +0000
++++ b/src/fpnew_opgroup_fmt_slice.sv	2026-07-13 21:33:00.463067873 +0000
+@@ -25,10 +25,10 @@
+   parameter type                     TagType       = logic,
+   parameter int unsigned             TrueSIMDClass = 0,
+   // Do not change
+-  localparam int unsigned NUM_OPERANDS = fpnew_pkg::num_operands(OpGroup),
+-  localparam int unsigned NUM_LANES    = fpnew_pkg::num_lanes(Width, FpFormat, EnableVectors),
+-  localparam type         MaskType     = logic [NUM_LANES-1:0],
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned NUM_OPERANDS = fpnew_pkg::num_operands(OpGroup),
++  parameter int unsigned NUM_LANES    = fpnew_pkg::num_lanes(Width, FpFormat, EnableVectors),
++  parameter type         MaskType     = logic [NUM_LANES-1:0],
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input logic                               clk_i,
+   input logic                               rst_ni,
+diff -urN a/src/fpnew_opgroup_multifmt_slice.sv b/src/fpnew_opgroup_multifmt_slice.sv
+--- a/src/fpnew_opgroup_multifmt_slice.sv	2026-06-30 18:04:03.405354280 +0000
++++ b/src/fpnew_opgroup_multifmt_slice.sv	2026-07-13 21:33:00.463895213 +0000
+@@ -28,11 +28,11 @@
+   parameter logic                     ExtRegEna     = 1'b0,
+   parameter type                      TagType       = logic,
+   // Do not change
+-  localparam int unsigned NUM_OPERANDS = fpnew_pkg::num_operands(OpGroup),
+-  localparam int unsigned NUM_FORMATS  = fpnew_pkg::NUM_FP_FORMATS,
+-  localparam int unsigned NUM_SIMD_LANES = fpnew_pkg::max_num_lanes(Width, FpFmtConfig, EnableVectors),
+-  localparam type         MaskType     = logic [NUM_SIMD_LANES-1:0],
+-  localparam int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
++  parameter int unsigned NUM_OPERANDS = fpnew_pkg::num_operands(OpGroup),
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS,
++  parameter int unsigned NUM_SIMD_LANES = fpnew_pkg::max_num_lanes(Width, FpFmtConfig, EnableVectors),
++  parameter type         MaskType     = logic [NUM_SIMD_LANES-1:0],
++  parameter int unsigned ExtRegEnaWidth = NumPipeRegs == 0 ? 1 : NumPipeRegs
+ ) (
+   input logic                                     clk_i,
+   input logic                                     rst_ni,
+diff -urN a/src/fpnew_top.sv b/src/fpnew_top.sv
+--- a/src/fpnew_top.sv	2025-10-20 22:42:20.000000000 +0000
++++ b/src/fpnew_top.sv	2026-07-13 21:33:00.462351423 +0000
+@@ -23,10 +23,10 @@
+   parameter int unsigned                    TrueSIMDClass  = 0,
+   parameter int unsigned                    EnableSIMDMask = 0,
+   // Do not change
+-  localparam int unsigned NumLanes     = fpnew_pkg::max_num_lanes(Features.Width, Features.FpFmtMask, Features.EnableVectors),
+-  localparam type         MaskType     = logic [NumLanes-1:0],
+-  localparam int unsigned WIDTH        = Features.Width,
+-  localparam int unsigned NUM_OPERANDS = 3
++  parameter int unsigned NumLanes     = fpnew_pkg::max_num_lanes(Features.Width, Features.FpFmtMask, Features.EnableVectors),
++  parameter type         MaskType     = logic [NumLanes-1:0],
++  parameter int unsigned WIDTH        = Features.Width,
++  parameter int unsigned NUM_OPERANDS = 3
+ ) (
+   input logic                               clk_i,
+   input logic                               rst_ni,
+@@ -58,7 +58,7 @@
+ );
+ 
+   localparam int unsigned NUM_OPGROUPS = fpnew_pkg::NUM_OPGROUPS;
+-  localparam int unsigned NUM_FORMATS  = fpnew_pkg::NUM_FP_FORMATS;
++  parameter int unsigned NUM_FORMATS = fpnew_pkg::NUM_FP_FORMATS;
+ 
+   // ----------------
+   // Type Definition

@@ -1,0 +1,26 @@
+From 3222b85fcbe05e497de49a81ff792eedd6df821e Mon Sep 17 00:00:00 2001
+From: Alex Van Damme <atv@google.com>
+Date: Fri, 16 Jan 2026 02:31:24 +0000
+Subject: [PATCH 3/4] Dump GPRs on EBREAK
+
+---
+ riscv/insns/ebreak.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/riscv/insns/ebreak.h b/riscv/insns/ebreak.h
+index b12e8015..12b096e0 100644
+--- a/riscv/insns/ebreak.h
++++ b/riscv/insns/ebreak.h
+@@ -7,5 +7,9 @@ if (!STATE.debug_mode && (
+ 	throw trap_debug_mode();
+ } else {
+     // CoralNPU Deviation: EBREAK should just halt the simulation cleanly.
++    // Dump GPRs for ISG verification before exiting.
++    for (int i = 0; i < 32; i++) {
++        fprintf(stderr, "GPR[%d] = 0x%08lx\n", i, (unsigned long)STATE.XPR[i]);
++    }
+ 	exit(0);
+ }
+-- 
+2.43.7
+

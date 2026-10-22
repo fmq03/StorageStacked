@@ -1,0 +1,58 @@
+{
+  "map_addr_bits": 64,
+  "ticks_per_second": 1000000000000000,
+  "sources": [
+    {
+      "id": 0,
+      "name": "host",
+      "level": "post_llc",
+      "clock_mhz": 2000
+    },
+    {
+      "id": 1,
+      "name": "vortex",
+      "level": "post_llc",
+      "clock_mhz": 1000
+    }
+  ],
+  "regions": [
+    {
+      "name": "vortex_cp",
+      "base": "0x20000000",
+      "size": "0x00000200",
+      "kind": "mmio",
+      "accessors": [
+        "host"
+      ]
+    },
+    {
+      "name": "host_heap",
+      "base": "0x80000000",
+      "size": "0x10000000",
+      "kind": "dram",
+      "accessors": [
+        "host"
+      ]
+    },
+    {
+      "name": "vortex_bar",
+      "base": "0x100000000",
+      "size": "0x100000000",
+      "kind": "bar",
+      "accessors": [
+        "host",
+        "vortex"
+      ]
+    }
+  ],
+  "dram_window": {
+    "base": "0x80000000",
+    "size": "0x40000000"
+  },
+  "trace_windows": {
+    "regions": [
+      "vortex_bar"
+    ],
+    "note": "Active accelerator memory windows"
+  }
+}

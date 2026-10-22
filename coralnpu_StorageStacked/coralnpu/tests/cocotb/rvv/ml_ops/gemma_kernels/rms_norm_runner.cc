@@ -1,0 +1,62 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define MAX_INPUT_SIZE 16384
+#define MAX_WEIGHT_SIZE 4096
+
+extern "C" {
+float rms_input[MAX_INPUT_SIZE] __attribute__((section(".extmem")))
+__attribute__((aligned(16)));
+float rms_weight[MAX_WEIGHT_SIZE] __attribute__((section(".extmem")))
+__attribute__((aligned(16)));
+float rms_output[MAX_INPUT_SIZE] __attribute__((section(".extmem")))
+__attribute__((aligned(16)));
+
+// Parameters
+uint32_t active_seq_len __attribute__((section(".extmem")))
+__attribute__((aligned(16))) = 11;
+uint32_t active_hidden_size __attribute__((section(".extmem")))
+__attribute__((aligned(16))) = 640;
+float active_epsilon __attribute__((section(".extmem")))
+__attribute__((aligned(16))) = 1e-6f;
+
+uint32_t cycle_count __attribute__((section(".extmem")))
+__attribute__((aligned(16))) = 0;
+}
+
+extern "C" void RmsNormF(size_t seq_len, size_t hidden_size, float epsilon,
+                         const float* input, const float* weight,
+                         float* output);
+
+extern "C" int main() {
+  if ((active_seq_len * active_hidden_size) > MAX_INPUT_SIZE ||
+      active_hidden_size > MAX_WEIGHT_SIZE) {
+    return -1;
+  }
+
+  uint32_t start_cycles;
+  asm volatile("csrr %0, mcycle" : "=r"(start_cycles));
+
+  RmsNormF(active_seq_len, active_hidden_size, active_epsilon, rms_input,
+           rms_weight, rms_output);
+
+  uint32_t end_cycles;
+  asm volatile("csrr %0, mcycle" : "=r"(end_cycles));
+  cycle_count = end_cycles - start_cycles;
+
+  return 0;
+}

@@ -1,0 +1,372 @@
+#!/bin/bash
+
+# Copyright © 2019-2023
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ---------------------------------------------------------------------------
+# CI v2 local test runner. The whole suite lives in the pytest catalog
+# (ci/testcases/*.yaml); this script is the single local entry point into it:
+#
+#   --all              run the ENTIRE catalog for this build tree's XLEN.
+#   --test <selector>  run a slice — <selector> is a pytest marker expression:
+#                      a category (tensor), a driver (rtlsim), or a combo
+#                      ("tensor and simx"). Host flows are categories too, so
+#                      `--test dtm` works like any other.
+#
+# Both are thin wrappers over `pytest [-m <selector>] ci`, so a local run uses
+# the exact catalog GitHub CI fans out across matrix cells — no drift.
+#
+# The genuinely multi-step host flows that don't fit the common shape (dtm, sst,
+# gem5, cupbop) stay here as shell functions. The catalog's `via: script` cases
+# reach them through the INTERNAL `--run <flow>` backend (not a user flag);
+# users run them via `--test <flow>`, which routes through pytest to `--run`.
+# ---------------------------------------------------------------------------
+
+# exit when any command fails
+set -e
+
+# clear blackbox cache
+rm -f blackbox.*.cache
+
+# HW: add a test "VM Test" to make sure VM feature is enabled
+
+XLEN=${XLEN:=@XLEN@}
+
+XSIZE=$((XLEN / 8))
+
+echo "Vortex Regression Test: XLEN=$XLEN"
+
+# Enforce the HW/SW config layering boundary: VX_config.h is HW/sim-private
+# and must not leak into software or tests.
+# See docs/proposals/config_hw_sw_layering_proposal.md.
+"@VORTEX_HOME@/ci/check_config_boundary.sh"
+
+# Enforce the sw/ ↔ sim/+hw/ bidirectional isolation boundary.
+# See AGENTS.md §6 and docs/coding_guidelines_cpp.md §8.
+"@VORTEX_HOME@/ci/check_sw_sim_boundary.sh"
+
+
+dtm()
+{
+    echo "begin dtm tests..."
+
+    # dtm_test.py spawns sim/simx/simx directly (not via a test
+    # makefile's run-* target), so the simx binary needs an explicit
+    # pre-build. `make -C tests/kernel` builds the fibonacci.vxbin
+    # the script loads — auto-pulls sw/kernel via libvortex.a.
+    make -C sim/simx
+    make -C tests/kernel
+
+    DTM_XLEN=@XLEN@ python3 ci/dtm_test.py
+
+    echo "dtm tests done!"
+}
+
+sst()
+{
+    echo "begin sst tests..."
+
+    make -C sim/simx USE_SST=1
+    make -C tests/kernel
+
+    cp sim/simx/libvortex.so $SST_ELEMENTS_HOME/lib/sst-elements-library/   # alternatively - $ sst --add-lib-path `pwd` myConfig.py
+
+    BUILD_DIR=$(pwd)
+
+    # Hostless SST runner (ci/sst_run_hostless_app.py) parameterized
+    # by VORTEX_TEST_DIR + VORTEX_TEST_KERNEL — same shape as
+    # ci/gem5_run_hostless_app.py. SST is hostless-only today (no
+    # CPU component wired to Vortex); the ci/sst_run_app.py name
+    # slot is reserved for a future host-CPU SST integration.
+    # `sst` is also the name of this shell function — without `command`
+    # bash would resolve the call below back to ourselves and loop until
+    # the timeout. `command sst` forces external-binary lookup.
+    #
+    # Only standalone `int main()` kernels (no spawn_threads, no args
+    # struct) work in hostless SST today — the hostless runner only
+    # primes the KMU PC and ticks; there is no host CPU to stage an
+    # args buffer. vecadd / conform need a future ci/sst_run_app.py
+    # (CPU-component variant) to drive them.
+    for spec in "hello:hello.vxbin" "fibonacci:fibonacci.vxbin"; do
+        kern="${spec%%:*}"
+        vxbin="${spec#*:}"
+        echo "=== sst: $kern ==="
+        VORTEX_TEST_DIR=$BUILD_DIR/tests/kernel/$kern \
+        VORTEX_TEST_KERNEL=$vxbin \
+            command sst ci/sst_run_hostless_app.py
+    done
+
+    echo "sst tests done!"
+}
+
+# gem5 integration tests — see docs/designs/vortex_gem5_integration.md for the
+# v2 CP-first design and operator manual. Two layers:
+#
+#   1. Phase 3 standalone: kernel preloaded via the SimObject's
+#      `kernel=` Python param; runs entirely inside the gem5 event
+#      loop, no host CPU needed. Fast smoke test for the device
+#      library wiring.
+#
+#   2. Phase 5 e2e: an x86 (or aarch64) SE-mode workload drives the
+#      device via the CP regfile (cp_mmio_*) + BAR-mapped VRAM
+#      (mem_upload through identity-mapped PIN region). The
+#      dispatcher's CP submission path handles all command building;
+#      the host runtime is a thin platform shim.
+#
+# ARM matrix is opt-in via VORTEX_GEM5_ARM=1 (needs gcc-aarch64-linux-gnu
+# installed; not part of the default hosted-runner image).
+gem5()
+{
+    echo "begin gem5 tests..."
+
+    if [ -z "$GEM5_HOME" ]; then
+        GEM5_HOME=$HOME/tools/gem5
+    fi
+    if [ ! -x "$GEM5_HOME/build/X86/gem5.opt" ]; then
+        echo "error: $GEM5_HOME/build/X86/gem5.opt not found — run ci/gem5_install.sh first"
+        exit 1
+    fi
+
+    # Build prerequisites. The gem5 device library + host runtime are
+    # config/cross-arch-specific so they don't get auto-built by the
+    # tests' default `all` target. sw/kernel + sw/runtime/stub are
+    # pulled in automatically by tests/{kernel,regression}/* — no
+    # plain pre-build needed.
+    make -C sim/simx USE_GEM5=1
+    make -C sw/runtime/gem5 HOST_ARCH=x86_64
+    make -C tests/kernel/hello
+    make -C tests/regression/vecadd
+    make -C tests/regression/sgemm
+
+    BUILD_DIR=$(pwd)
+    LIB_GEM5_DEV=$BUILD_DIR/sim/simx/libvortex-gem5.so
+    HOST_RT_DIR=$BUILD_DIR/sw/runtime
+
+    # Hostless smoke — no host CPU, kernel preloaded via SimObject param.
+    # env-vars MUST precede the binary (gem5.opt would otherwise treat
+    # them as positional args).
+    echo "=== gem5 hostless: hello ==="
+    VORTEX_GEM5_DEV_LIB=$LIB_GEM5_DEV \
+    VORTEX_TEST_DIR=$BUILD_DIR/tests/kernel/hello \
+    VORTEX_TEST_KERNEL=hello.vxbin \
+        timeout 120 $GEM5_HOME/build/X86/gem5.opt \
+        ci/gem5_run_hostless_app.py
+
+    # E2E — CP-driven path through the host runtime. Generic runner
+    # (ci/gem5_run_app.py) parameterized by VORTEX_TEST_BIN +
+    # VORTEX_TEST_ARGS. Sizes fit the 120s per-test budget
+    # (feedback_test_timeout_120s):
+    #   - vecadd -n16   small vector add
+    #   - sgemm  -n4    4x4 matrix multiply
+    # Larger sizes overrun because the simulated host CPU's CP poll
+    # loop burns gem5 wall time proportional to kernel runtime.
+    # Run on local dev box for larger sizes by overriding VORTEX_TEST_ARGS.
+    for spec in "vecadd:-n16" "sgemm:-n4"; do
+        app="${spec%%:*}"
+        args="${spec#*:}"
+        echo "=== gem5 e2e: $app $args ==="
+        VORTEX_GEM5_DEV_LIB=$LIB_GEM5_DEV \
+        VORTEX_GEM5_HOST_RT_DIR=$HOST_RT_DIR \
+        VORTEX_TEST_DIR=$BUILD_DIR/tests/regression/$app \
+        VORTEX_TEST_BIN=$app \
+        VORTEX_TEST_ARGS=$args \
+            timeout 120 $GEM5_HOME/build/X86/gem5.opt \
+            ci/gem5_run_app.py
+    done
+
+    # ARM matrix (opt-in). The device library (libvortex-gem5.so) is
+    # always x86 — gem5.opt is an x86 binary regardless of which
+    # simulated ISA it models. Only the simulated host's ISA changes.
+    if [ -n "$VORTEX_GEM5_ARM" ]; then
+        if [ ! -x "$GEM5_HOME/build/ARM/gem5.opt" ]; then
+            echo "error: $GEM5_HOME/build/ARM/gem5.opt not found"
+            exit 1
+        fi
+
+        # Cross-compile the host runtime, stub, and test binaries for
+        # aarch64. All outputs land in $arch/ subdirs alongside the
+        # native x86 builds so they coexist cleanly.
+        make -C sw/runtime/stub HOST_ARCH=aarch64
+        make -C sw/runtime/gem5 HOST_ARCH=aarch64
+        make -C tests/regression/vecadd HOST_ARCH=aarch64
+        make -C tests/regression/sgemm  HOST_ARCH=aarch64
+
+        ARM_HOST_RT_DIR=$BUILD_DIR/sw/runtime/aarch64
+
+        echo "=== gem5 ARM hostless: hello ==="
+        VORTEX_GEM5_DEV_LIB=$LIB_GEM5_DEV \
+        VORTEX_TEST_DIR=$BUILD_DIR/tests/kernel/hello \
+        VORTEX_TEST_KERNEL=hello.vxbin \
+            timeout 120 $GEM5_HOME/build/ARM/gem5.opt \
+            ci/gem5_run_hostless_app.py
+
+        for spec in "vecadd:-n16" "sgemm:-n4"; do
+            app="${spec%%:*}"
+            args="${spec#*:}"
+            echo "=== gem5 ARM e2e: $app $args ==="
+            VORTEX_GEM5_DEV_LIB=$LIB_GEM5_DEV \
+            VORTEX_GEM5_HOST_RT_DIR=$ARM_HOST_RT_DIR \
+            VORTEX_TEST_DIR=$BUILD_DIR/tests/regression/$app \
+            VORTEX_TEST_BIN=$app-aarch64 \
+            VORTEX_TEST_ARGS=$args \
+            VORTEX_DRIVER=gem5-aarch64 \
+                timeout 120 $GEM5_HOME/build/ARM/gem5.opt \
+                ci/gem5_run_app.py
+        done
+    fi
+
+    echo "gem5 tests done!"
+}
+
+
+cupbop() {
+
+    echo "begin cupbop tests..."
+
+    if [ "$XLEN" == "32" ]; then
+        echo "cupbop tests skipped for 32-bit"
+        return
+    fi
+
+
+    echo "downloading cupbop binaries..."
+    CUPBOP_URL="https://www.dropbox.com/scl/fi/qxiofb0ejfxoog9m7tmae/cupbop.zip?rlkey=kcboy03c08xcn6yizd4nv8h88&st=7yuqftef&dl=1"
+
+    wget -O cupbop.zip "${CUPBOP_URL}" || curl -L -o cupbop.zip "${CUPBOP_URL}"
+    unzip -o cupbop.zip -d tests/
+    rm cupbop.zip
+
+    echo "building simx runtime..."
+    make -C sw/runtime/simx
+
+    PERF_CLASS=2
+    VORTEX_RUNTIME_DIR="sw/runtime"
+    CUPBOP_RUNTIME_DIR="tests/cupbop/runtime"
+
+    tests=("bfs" "nn")
+    tests_args=("./graph20.txt" "./filelist.txt -r 10 -lat 30 -lng 90")
+
+    for i in "${!tests[@]}"; do
+        test="${tests[$i]}"
+        args="${tests_args[$i]}"
+        echo "running test: $test"
+        (
+            cd "tests/cupbop/$test" || exit
+            chmod +x "./host_${XLEN}.out"
+            LD_LIBRARY_PATH="../../../${CUPBOP_RUNTIME_DIR}:../../../${VORTEX_RUNTIME_DIR}/simx:../../../${VORTEX_RUNTIME_DIR}:${LD_LIBRARY_PATH}" \
+            ./host_${XLEN}.out ${args}
+        )
+    done
+
+    echo "cupbop tests done!"
+}
+
+
+show_usage()
+{
+    echo "Vortex CI v2 local test runner (XLEN=$XLEN)"
+    echo "Usage: $0 [--clean] [--all] [--test <selector>] [-h|--help]"
+    echo
+    echo "  --all              run the ENTIRE catalog (every category) for this build"
+    echo "  --test <selector>  run a catalog slice; <selector> is a pytest marker"
+    echo "                     expression: a category (tensor), a driver (rtlsim), or a"
+    echo "                     combo (\"tensor and simx\", \"graphics and not rtlsim\")."
+    echo "                     Host flows are categories: --test dtm|sst|gem5|cupbop."
+    echo "  --clean            make clean && make before running"
+    # --run <flow> (dtm|sst|gem5|cupbop) is the internal backend the catalog's
+    # via:script host-flow cases call; it is not part of the user surface.
+}
+
+clean=0
+run_catalog=0      # --all / --test: drive the pytest catalog
+pytest_expr=""     # marker expression ("" = whole catalog)
+run_flow=""        # --run <flow>: internal host-flow backend
+
+while [ "$1" != "" ]; do
+    case $1 in
+        --clean )
+                clean=1
+                ;;
+        --all )
+                run_catalog=1
+                pytest_expr=""
+                ;;
+        --test )
+                shift
+                if [ -z "$1" ]; then
+                    echo "error: --test needs a selector (e.g. --test tensor)" >&2
+                    exit 1
+                fi
+                run_catalog=1
+                pytest_expr="$1"
+                ;;
+        --run )
+                shift
+                run_flow="$1"
+                ;;
+        -h | --help )
+                show_usage
+                exit
+                ;;
+        * )
+                show_usage
+                exit 1
+    esac
+    shift
+done
+
+if [ $clean -eq 1 ];
+then
+    make clean
+    make -s
+fi
+
+start=$SECONDS
+rc=0
+
+if [ -n "$run_flow" ]; then
+    # Internal backend: run one multi-step host flow. The catalog's via:script
+    # dtm/sst/gem5/cupbop cases call `--run <flow>`; users reach them through
+    # `--test <flow>` (pytest -> the case -> here).
+    case "$run_flow" in
+        dtm | sst | gem5 | cupbop )
+                "$run_flow"
+                ;;
+        * )
+                echo "error: unknown --run flow: '$run_flow'" >&2
+                exit 1
+                ;;
+    esac
+elif [ $run_catalog -eq 1 ]; then
+    # Drive the pytest catalog under this build tree. No -m = everything (--all);
+    # a marker expression = a slice (--test). Don't let `set -e` abort on a red
+    # test — capture the status and report it below.
+    set +e
+    if [ -n "$pytest_expr" ]; then
+        VX_XLEN=$XLEN python3 -m pytest ci -m "$pytest_expr" --strict-markers
+    else
+        VX_XLEN=$XLEN python3 -m pytest ci --strict-markers
+    fi
+    rc=$?
+    set -e
+else
+    show_usage
+    exit 1
+fi
+
+echo "Regression completed!"
+
+duration=$(( SECONDS - start ))
+awk -v t=$duration 'BEGIN{t=int(t*1000); printf "Elapsed Time: %d:%02d:%02d\n", t/3600000, t/60000%60, t/1000%60}'
+
+exit $rc

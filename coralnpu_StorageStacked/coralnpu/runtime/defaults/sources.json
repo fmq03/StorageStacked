@@ -1,0 +1,10 @@
+{
+  "project": {
+    "path": "StorageStacked",
+    "commit": "3be39b697bdc315ae0be08ed2162c322bcf59462"
+  },
+  "coralnpu": {
+    "url": "https://github.com/google-coral/coralnpu.git",
+    "commit": "fcb74cfe79dbd184b9c53539490994e701981f80"
+  }
+}

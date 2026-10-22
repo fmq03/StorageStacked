@@ -1,0 +1,5 @@
+/.cache/
+/sdk/staging/
+/bazel-*
+__pycache__/
+*.pyc

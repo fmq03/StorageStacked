@@ -1,0 +1,14 @@
+{
+  "project": {
+    "path": "StorageStacked",
+    "commit": "3be39b697bdc315ae0be08ed2162c322bcf59462"
+  },
+  "gem5": {
+    "url": "https://github.com/gem5/gem5.git",
+    "commit": "c8222cc67a399bfc01e8658dd14b30d5bfd634f9"
+  },
+  "vortex": {
+    "url": "https://github.com/vortexgpgpu/vortex.git",
+    "commit": "d76b7f24e658867ab57e3942d7c648c3e6af072d"
+  }
+}

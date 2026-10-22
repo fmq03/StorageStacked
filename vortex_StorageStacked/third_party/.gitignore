@@ -1,0 +1,11 @@
+.cache/
+__pycache__/
+*.pyc
+gem5/build/
+vortex/third_party/*/build/
+vortex/third_party/**/*.o
+vortex/third_party/**/*.a
+vortex/third_party/**/*.so
+vortex/hw/syn/libs/cln*/
+vortex/miscs/apptainer/boost-package.deb
+vortex/tests/opencl/spmv/Dubcova3.mtx

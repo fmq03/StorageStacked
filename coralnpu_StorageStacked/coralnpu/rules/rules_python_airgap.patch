@@ -1,0 +1,61 @@
+diff --git python/private/pypi/pip_repository.bzl python/private/pypi/pip_repository.bzl
+index 90cda77..e93ae89 100644
+--- python/private/pypi/pip_repository.bzl
++++ python/private/pypi/pip_repository.bzl
+@@ -71,6 +71,11 @@ exports_files(["requirements.bzl"])
+ """
+
+ def _pip_repository_impl(rctx):
++    extra_pip_args = list(rctx.attr.extra_pip_args)
++    if "PIP_NO_INDEX" in rctx.os.environ and rctx.os.environ["PIP_NO_INDEX"].lower() == "true":
++        extra_pip_args.append("--no-index")
++    if "PIP_FIND_LINKS" in rctx.os.environ:
++        extra_pip_args.append("--find-links=" + rctx.os.environ["PIP_FIND_LINKS"])
+     requirements_by_platform = parse_requirements(
+         rctx,
+         requirements_by_platform = requirements_files_by_platform(
+@@ -79,9 +84,9 @@ def _pip_repository_impl(rctx):
+             requirements_lock = rctx.attr.requirements_lock,
+             requirements_osx = rctx.attr.requirements_darwin,
+             requirements_windows = rctx.attr.requirements_windows,
+-            extra_pip_args = rctx.attr.extra_pip_args,
++            extra_pip_args = extra_pip_args,
+         ),
+-        extra_pip_args = rctx.attr.extra_pip_args,
++        extra_pip_args = extra_pip_args,
+         evaluate_markers = lambda rctx, requirements: evaluate_markers(
+             rctx,
+             requirements = requirements,
+@@ -347,6 +352,8 @@ See the example in rules_python/examples/pip_parse_vendored.
+ """,
+     implementation = _pip_repository_impl,
+     environ = [
++        "PIP_NO_INDEX",
++        "PIP_FIND_LINKS",
+         "RULES_PYTHON_PIP_ISOLATED",
+         REPO_DEBUG_ENV_VAR,
+     ],
+diff --git python/private/pypi/whl_library.bzl python/private/pypi/whl_library.bzl
+index 612ca2c..f6c912c 100644
+--- python/private/pypi/whl_library.bzl
++++ python/private/pypi/whl_library.bzl
+@@ -189,6 +189,10 @@ def _whl_library_impl(rctx):
+     ]
+     extra_pip_args = []
+     extra_pip_args.extend(rctx.attr.extra_pip_args)
++    if "PIP_NO_INDEX" in rctx.os.environ and rctx.os.environ["PIP_NO_INDEX"].lower() == "true":
++        extra_pip_args.append("--no-index")
++    if "PIP_FIND_LINKS" in rctx.os.environ:
++        extra_pip_args.append("--find-links=" + rctx.os.environ["PIP_FIND_LINKS"])
+
+     # Manually construct the PYTHONPATH since we cannot use the toolchain here
+     environment = _create_repository_execution_environment(rctx, python_interpreter, logger = logger)
+@@ -461,6 +465,8 @@ Download and extracts a single wheel based into a bazel repo based on the requir
+ Instantiated from pip_repository and inherits config options from there.""",
+     implementation = _whl_library_impl,
+     environ = [
++        "PIP_NO_INDEX",
++        "PIP_FIND_LINKS",
+         "RULES_PYTHON_PIP_ISOLATED",
+         REPO_DEBUG_ENV_VAR,
+     ],

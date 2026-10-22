@@ -1,0 +1,4 @@
+#!/bin/bash
+set -e
+"$(git rev-parse --show-toplevel)/utils/run_linters.sh"
+"$(git rev-parse --show-toplevel)/utils/check_macro_signatures.py"

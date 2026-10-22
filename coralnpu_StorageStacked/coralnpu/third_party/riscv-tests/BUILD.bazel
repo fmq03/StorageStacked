@@ -1,0 +1,160 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@coralnpu_hw//rules:coralnpu_v2.bzl", "collect_coralnpu_riscv_tests")
+load("@coralnpu_hw//rules:utils.bzl", "template_rule")
+load("@coralnpu_hw//third_party/riscv-tests:defs.bzl", "OUT_BINARIES_RV32UF", "OUT_BINARIES_RV32UI", "OUT_BINARIES_RV32UM", "OUT_BINARIES_RV32UZBB")
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+package(default_visibility = ["//visibility:public"])
+
+COMMON_ARGS = [
+    "RISCV_PREFIX=",
+    "RISCV_GCC_OPTS=\"-march=rv32imf_zve32x_zicsr_zifencei_zbb -mabi=ilp32 -mcmodel=medany -nostdlib\"",
+    "XLEN=32",
+]
+
+POSTFIX_SCRIPT = """
+mkdir -p ${{INSTALLDIR}}/isa
+cp isa/rv32{subset}-v-* ${{INSTALLDIR}}/isa
+cp isa/rv32{subset}-p-* ${{INSTALLDIR}}/isa
+"""
+
+exports_files(glob(["**"]))
+
+filegroup(
+    name = "all_srcs",
+    srcs = [
+        "@riscv-tests//:all_srcs",
+    ] + glob(["**"]),
+)
+
+template_rule(
+    configure_make,
+    {
+        "riscv_tests_rv32ui": {
+            "args": COMMON_ARGS + [
+                "RISCV_PREFIX_VAR=rv32ui",
+            ],
+            "out_binaries": OUT_BINARIES_RV32UI,
+            "postfix_script": POSTFIX_SCRIPT.format(subset = "ui"),
+        },
+        "riscv_tests_rv32um": {
+            "args": COMMON_ARGS + [
+                "RISCV_PREFIX_VAR=rv32um",
+            ],
+            "out_binaries": OUT_BINARIES_RV32UM,
+            "postfix_script": POSTFIX_SCRIPT.format(subset = "um"),
+        },
+        "riscv_tests_rv32uzbb": {
+            "args": COMMON_ARGS + [
+                "RISCV_PREFIX_VAR=rv32uzbb",
+            ],
+            "out_binaries": OUT_BINARIES_RV32UZBB,
+            "postfix_script": POSTFIX_SCRIPT.format(subset = "uzbb"),
+        },
+        "riscv_tests_rv32uf": {
+            "args": COMMON_ARGS + [
+                "RISCV_PREFIX_VAR=rv32uf",
+            ],
+            "out_binaries": OUT_BINARIES_RV32UF,
+            "postfix_script": POSTFIX_SCRIPT.format(subset = "uf"),
+        },
+    },
+    build_data = [
+        "//toolchain/wrappers:all",
+        "//toolchain/wrappers:gcc",
+        "//toolchain:coralnpu_v2_toolchain",
+    ],
+    data = [
+        ":all_srcs",
+        ":shadow_riscv_env",
+    ],
+    env = {
+        "PATH": "$$(dirname $(execpath //toolchain/wrappers:gcc)):$$PATH",
+        "RISCV_ENV_DIR": "$$(realpath $$(dirname $$(dirname $$(echo $(locations :shadow_riscv_env) | cut -d ' ' -f 1))))",
+    },
+    lib_source = ":all_srcs",
+    out_bin_dir = "isa",
+    targets = ["isa"],
+)
+
+genrule(
+    name = "shadow_riscv_env",
+    srcs = [
+        "env/p/riscv_test.h",
+        "env/v/entry.S",
+        "env/v/riscv_test.h",
+        "env/v/vm.c",
+        "//toolchain:coralnpu_tcm.ld",
+    ],
+    outs = [
+        "env_shadow/p/riscv_test.h",
+        "env_shadow/v/entry.S",
+        "env_shadow/v/riscv_test.h",
+        "env_shadow/v/vm.c",
+        "env_shadow/p/link.ld",
+        "env_shadow/v/link.ld",
+    ],
+    cmd = """
+        mkdir -p $(RULEDIR)/env_shadow/p
+        mkdir -p $(RULEDIR)/env_shadow/v
+        cp $(location env/p/riscv_test.h) $(RULEDIR)/env_shadow/p/
+        cp $(location env/v/entry.S) $(RULEDIR)/env_shadow/v/
+        cp $(location env/v/riscv_test.h) $(RULEDIR)/env_shadow/v/
+        cp $(location env/v/vm.c) $(RULEDIR)/env_shadow/v/
+        cp $(location //toolchain:coralnpu_tcm.ld) $(RULEDIR)/env_shadow/p/link.ld
+        cp $(location //toolchain:coralnpu_tcm.ld) $(RULEDIR)/env_shadow/v/link.ld
+    """,
+)
+
+filegroup(
+    name = "all_files",
+    srcs = [
+        ":riscv_tests_rv32uf",
+        ":riscv_tests_rv32ui",
+        ":riscv_tests_rv32um",
+        ":riscv_tests_rv32uzbb",
+    ],
+    output_group = "gen_dir",
+)
+
+ALL_BINS = [
+    "{}.elf".format(binary)
+    for binary in (
+        OUT_BINARIES_RV32UI +
+        OUT_BINARIES_RV32UM +
+        OUT_BINARIES_RV32UF +
+        OUT_BINARIES_RV32UZBB
+    )
+]
+
+genrule(
+    name = "all_isa_binaries",
+    srcs = [":all_files"],
+    outs = ALL_BINS,
+    cmd = """
+      for dir in $(SRCS); do
+        for f in $$dir/isa/*; do
+          base=$$(basename $$f)
+          extension="$${base##*.}"
+          if [[ "$${base}" != "dump" ]]; then
+              cp "$${f}" "$(@D)/$${base}.elf"
+          fi
+        done
+      done
+    """,
+)
+
+collect_coralnpu_riscv_tests(binaries = ALL_BINS)

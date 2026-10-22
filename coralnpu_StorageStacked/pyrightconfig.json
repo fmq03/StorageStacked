@@ -1,0 +1,24 @@
+{
+  "extraPaths": [
+    "coralnpu/runtime",
+    "../axi_StorageStacked/scripts",
+    ".."
+  ],
+  "stubPath": "../.vscode/gem5-python-stubs",
+  "exclude": [
+    "**/.cache/**",
+    "**/result/**",
+    "**/build/**",
+    "**/bazel-*/**"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "coralnpu/runtime",
+        "../axi_StorageStacked/scripts",
+        ".."
+      ]
+    }
+  ]
+}

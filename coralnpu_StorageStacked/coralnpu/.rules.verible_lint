@@ -1,0 +1,14 @@
+# Based on https://github.com/lowRISC/ibex/blob/master/vendor/lowrisc_ip/lint/tools/veriblelint/lowrisc-styleguide.rules.verible_lint
+
+line-length=length:100
++no-trailing-spaces
++posix-eof
+
+# we allow "classic" verilog string parameters without explicit type
+explicit-parameter-storage-type=exempt_type:string
+
+# localparam can be both ALL_CAPS and CamelCase according to lowRISC style
+parameter-name-style=localparam_style:CamelCase|ALL_CAPS
+
+# we allow nested struct definitions
+-typedef-structs-unions

@@ -1,0 +1,12 @@
+--- a/riscv/riscv32_htif_semihost.cc
++++ b/riscv/riscv32_htif_semihost.cc
+@@ -138,6 +138,9 @@
+       memory_->Load(address, db, nullptr, nullptr);
+       char* name = static_cast<char*>(db->raw_ptr());
+       return_value = openat(dirfd, name, parameter_span[4], parameter_span[5]);
++      if (return_value >= 0) {
++        fd_map_.emplace(return_value, return_value);
++      }
+       db->DecRef();
+     } break;
+     case 57:  // sys_close

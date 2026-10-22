@@ -1,0 +1,60 @@
+{
+  "config": {},
+  "transactions": [
+    {
+      "command": "write",
+      "id": 1,
+      "address": 2415919104,
+      "size": 5,
+      "data": [
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "02030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021",
+        "030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122"
+      ]
+    },
+    {
+      "command": "read",
+      "id": 2,
+      "address": 2415919104,
+      "size": 5,
+      "beats": 4
+    },
+    {
+      "command": "write",
+      "id": 1,
+      "address": 2415919132,
+      "size": 2,
+      "data": [
+        "aabbccdd"
+      ],
+      "strobe": [
+        5
+      ]
+    },
+    {
+      "command": "read",
+      "id": 1,
+      "address": 2415919104,
+      "size": 5
+    },
+    {
+      "command": "write",
+      "id": 1023,
+      "address": 2415923196,
+      "size": 2,
+      "data": [
+        "29000000"
+      ]
+    },
+    {
+      "command": "read",
+      "id": 1023,
+      "address": 2415923196,
+      "size": 2,
+      "expected": [
+        "29000000"
+      ]
+    }
+  ]
+}

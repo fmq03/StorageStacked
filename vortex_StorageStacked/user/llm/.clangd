@@ -1,0 +1,3 @@
+# Compilation context for this independent executable.
+CompileFlags:
+  CompilationDatabase: ../../../.vscode/databases/vortex-llm

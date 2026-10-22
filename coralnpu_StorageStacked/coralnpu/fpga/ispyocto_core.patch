@@ -1,0 +1,57 @@
+From b35b90a275b21047f9e4c96e0cb2e4a41d3f1363 Mon Sep 17 00:00:00 2001
+From: Stefan Hall <stefanhall@google.com>
+Date: Thu, 5 Feb 2026 15:41:30 -0800
+Subject: [PATCH] Remove lint waivers
+
+---
+ ispyocto/ispyocto.core | 26 +-------------------------
+ 1 file changed, 1 insertion(+), 25 deletions(-)
+
+diff --git a/ispyocto/ispyocto.core b/ispyocto/ispyocto.core
+index 7e35884..1690de9 100644
+--- a/ispyocto/ispyocto.core
++++ b/ispyocto/ispyocto.core
+@@ -151,29 +151,7 @@ filesets:
+       - rtl/rams/vsisp_RAM1P80W66B_SS.v
+     file_type: systemVerilogSource
+
+-  files_verilator_waiver:
+-    depend:
+-      # common waivers
+-      - lowrisc:lint:common
+-      - lowrisc:lint:comportable
+-    files:
+-      - lint/ispyocto.vlt
+-    file_type: vlt
+
+-  files_ascentlint_waiver:
+-    depend:
+-      # common waivers
+-      - lowrisc:lint:common
+-      - lowrisc:lint:comportable
+-    files:
+-      - lint/ispyocto.waiver
+-    file_type: waiver
+-
+-  files_veriblelint_waiver:
+-    depend:
+-      # common waivers
+-      - lowrisc:lint:common
+-      - lowrisc:lint:comportable
+
+ parameters:
+   SYNTHESIS:
+@@ -184,9 +162,7 @@ parameters:
+ targets:
+   default: &default_target
+     filesets:
+-      - tool_verilator   ? (files_verilator_waiver)
+-      - tool_ascentlint  ? (files_ascentlint_waiver)
+-      - tool_veriblelint ? (files_veriblelint_waiver)
++
+       - files_rtl
+     toplevel: vsisp
+
+--
+2.53.0.rc2.204.g2597b5adb4-goog
+

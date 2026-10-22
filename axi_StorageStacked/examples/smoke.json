@@ -1,0 +1,48 @@
+{
+  "config": {
+    "standard": "hbm4",
+    "response_stall_cycles": 3
+  },
+  "transactions": [
+    {
+      "command": "read", "id": 1, "address": 2415919104,
+      "size": 5, "beats": 2,
+      "expected": [
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ]
+    },
+    {
+      "command": "write", "id": 2, "address": 2415919104,
+      "size": 5, "beats": 2,
+      "data": [
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+      ]
+    },
+    {
+      "command": "read", "id": 3, "address": 2415919104,
+      "size": 5, "beats": 2,
+      "expected": [
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+      ]
+    },
+    {
+      "command": "write", "id": 4, "address": 2415919132,
+      "size": 2, "beats": 1, "data": ["aabbccdd"], "strobe": [5]
+    },
+    {
+      "command": "read", "id": 5, "address": 2415919104,
+      "size": 5, "beats": 2,
+      "expected": [
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1baa1dcc1f",
+        "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+      ]
+    },
+    {
+      "command": "read", "id": 6, "address": 2415919132,
+      "size": 2, "beats": 1, "expected": ["aa1dcc1f"]
+    }
+  ]
+}

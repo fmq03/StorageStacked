@@ -1,0 +1,91 @@
+{
+  "vortex": [
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/llvm-vortex/ubuntu/focal/llvm-vortex.tar.bz2.partaa",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/llvm-vortex/ubuntu/focal/llvm-vortex.tar.bz2.partab",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/llvm-vortex/ubuntu/focal/llvm-vortex.tar.bz2.partac",
+      "bytes": 3788398
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partaa",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partab",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partac",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partad",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partae",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partaf",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partag",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partah",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partai",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partaj",
+      "bytes": 52428800
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/riscv32-gnu-toolchain/ubuntu/focal/riscv32-gnu-toolchain.tar.bz2.partak",
+      "bytes": 11010801
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/libc32/libc32.tar.bz2",
+      "bytes": 841452
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vortexgpgpu/vortex-toolchain-prebuilt/86c525b57eecc4fc44b9a4494db02771ea779b52/libcrt32/libcrt32.tar.bz2",
+      "bytes": 74000
+    }
+  ],
+  "cmake_sources": [
+    {
+      "name": "yaml-cpp",
+      "revision": "0579ae3d976091d7d664aa9d2527e0d0cff25763",
+      "repository": "https://github.com/jbeder/yaml-cpp.git",
+      "url": "https://github.com/jbeder/yaml-cpp/archive/0579ae3d976091d7d664aa9d2527e0d0cff25763.tar.gz",
+      "bytes": 1033849
+    },
+    {
+      "name": "spdlog",
+      "revision": "ad0e89cbfb4d0c1ce4d097e134eb7be67baebb36",
+      "repository": "https://github.com/gabime/spdlog.git",
+      "url": "https://github.com/gabime/spdlog/archive/ad0e89cbfb4d0c1ce4d097e134eb7be67baebb36.tar.gz",
+      "bytes": 373188
+    },
+    {
+      "name": "argparse",
+      "revision": "997da9255618311d1fcb0135ce86022729d1f1cb",
+      "repository": "https://github.com/p-ranav/argparse.git",
+      "url": "https://github.com/p-ranav/argparse/archive/997da9255618311d1fcb0135ce86022729d1f1cb.tar.gz",
+      "bytes": 103253
+    }
+  ]
+}

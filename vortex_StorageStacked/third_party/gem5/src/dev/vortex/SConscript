@@ -1,0 +1,12 @@
+# -*- mode:python -*-
+#
+# Vortex SimObjects, installed by scripts/build.sh into gem5 src/dev/vortex.
+
+Import('*')
+
+SimObject('VortexGPGPU.py', sim_objects=['VortexGPGPU'])
+Source('vortex_gpgpu_dev.cc')
+
+# DebugFlag for VortexGPGPU traces. Enable with:
+#   gem5.opt --debug-flags=VortexGPGPU ...
+DebugFlag('VortexGPGPU')

@@ -1,0 +1,105 @@
+{
+  "clangd.path": "/home/hy258/hy/zhongxing/.vscode/clangd_router.py",
+  "clangd.arguments": [
+    "--background-index",
+    "--header-insertion=never",
+    "-j=4"
+  ],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/vortex_StorageStacked/third_party/gem5/src/python",
+    "${workspaceFolder}/vortex_StorageStacked/third_party/gem5/src",
+    "${workspaceFolder}/vortex_StorageStacked/third_party/gem5/configs",
+    "${workspaceFolder}/vortex_StorageStacked",
+    "${workspaceFolder}/axi_StorageStacked/scripts"
+  ],
+  "python.analysis.stubPath": "./.vscode/gem5-python-stubs",
+  "python.analysis.diagnosticMode": "openFilesOnly",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.exclude": [
+    "**/.git/**",
+    "**/.cache/**",
+    "**/build/**",
+    "**/result/**",
+    "**/results/**",
+    "offline/dist/**",
+    "offline/.build/**",
+    "**/__pycache__/**",
+    "**/bazel-*/**",
+    "axi_StorageStacked/validation/**",
+    "vortex_StorageStacked/validation/**",
+    "coralnpu_StorageStacked/validation/**",
+    "coralnpu_StorageStacked/coralnpu/validation/**",
+    "offline/validation/**"
+  ],
+  "python.analysis.indexing": true,
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/.cache/**": true,
+    "**/build/**": true,
+    "**/result/**": true,
+    "**/results/**": true,
+    "offline/dist/**": true,
+    "offline/.build/**": true,
+    "**/__pycache__/**": true,
+    "**/bazel-*/**": true,
+    "axi_StorageStacked/validation/**": true,
+    "vortex_StorageStacked/validation/**": true,
+    "coralnpu_StorageStacked/validation/**": true,
+    "coralnpu_StorageStacked/coralnpu/validation/**": true,
+    "offline/validation/**": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.cache": true,
+    "offline/dist": true,
+    "**/bazel-bin": true,
+    "**/bazel-out": true,
+    "**/bazel-coralnpu": true,
+    "**/bazel-testlogs": true
+  },
+  "search.useIgnoreFiles": false,
+  "search.exclude": {
+    "**/.git/**": true,
+    "**/.cache/**": true,
+    "**/build/**": true,
+    "**/result/**": true,
+    "**/results/**": true,
+    "offline/dist/**": true,
+    "offline/.build/**": true,
+    "**/__pycache__/**": true,
+    "**/bazel-*/**": true,
+    "axi_StorageStacked/validation/**": true,
+    "vortex_StorageStacked/validation/**": true,
+    "coralnpu_StorageStacked/validation/**": true,
+    "coralnpu_StorageStacked/coralnpu/validation/**": true,
+    "offline/validation/**": true
+  },
+  "systemverilog.includeIndexing": [
+    "axi_StorageStacked/**/*.{sv,v,svh,vh}",
+    "vortex_StorageStacked/third_party/vortex/**/*.{sv,v,svh,vh,vi,svp}",
+    "coralnpu_StorageStacked/coralnpu/**/*.{sv,v,svh,vh}"
+  ],
+  "systemverilog.excludeIndexing": "**/{.cache,build,result,results,dist,.git,bazel-bin,bazel-out,bazel-coralnpu,bazel-testlogs}/**",
+  "systemverilog.disableIndexing": false,
+  "files.associations": {
+    "*.hh": "cpp",
+    "*.vi": "verilogheader",
+    "*.svp": "systemverilog",
+    "*.svh": "systemverilogheader",
+    "SConscript": "python",
+    "SConstruct": "python"
+  },
+  "makefile.configureOnOpen": false,
+  "systemverilog.forceFastIndexing": true,
+  "bashIde.globPattern": "{vortex_StorageStacked/user,coralnpu_StorageStacked/user}/**/*.sh",
+  "bashIde.backgroundAnalysisIgnore": [
+    "**/result/**",
+    "**/.cache/**",
+    "**/node_modules/**",
+    "**/.git/**"
+  ],
+  "bashIde.shellcheckPath": ""
+}

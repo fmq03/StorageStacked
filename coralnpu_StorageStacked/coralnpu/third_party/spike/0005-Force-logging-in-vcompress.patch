@@ -1,0 +1,31 @@
+From a4c9f635db7fb32e1775f1ab33c69e9e29fd5c22 Mon Sep 17 00:00:00 2001
+From: Alex Van Damme <atv@google.com>
+Date: Tue, 27 Jan 2026 21:33:07 +0000
+Subject: [PATCH 5/5] Force logging in vcompress
+
+---
+ riscv/insns/vcompress_vm.h | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/riscv/insns/vcompress_vm.h b/riscv/insns/vcompress_vm.h
+index 6624d8b4..c04a0c5e 100644
+--- a/riscv/insns/vcompress_vm.h
++++ b/riscv/insns/vcompress_vm.h
+@@ -6,6 +6,14 @@ require_align(insn.rs2(), P.VU.vflmul);
+ require(insn.rd() != insn.rs2());
+ require_noover(insn.rd(), P.VU.vflmul, insn.rs1(), 1);
+ 
++// Force a log entry for the destination register group 
++// to ensure writeback visibility in logs even with an empty mask.
++if (unlikely(P.get_log_commits_enabled())) {
++  for (reg_t i = 0; i < P.VU.vflmul; ++i) {
++    P.get_state()->log_reg_write[((insn.rd() + i) << 4) | 2] = {0, 0};
++  }
++}
++
+ reg_t pos = 0;
+ 
+ VI_GENERAL_LOOP_BASE
+-- 
+2.43.7
+

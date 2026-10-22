@@ -1,0 +1,10 @@
+{
+  "bazel-8.6.0-linux-x86_64": {
+    "url": "https://github.com/bazelbuild/bazel/releases/download/8.6.0/bazel-8.6.0-linux-x86_64",
+    "bytes": 64356553
+  },
+  "lz4-1.10.0.tar.gz": {
+    "url": "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz",
+    "bytes": 387114
+  }
+}

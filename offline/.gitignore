@@ -1,0 +1,6 @@
+.build/
+dist/
+results/
+validation/*
+!validation/README.md
+__pycache__/

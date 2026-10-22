@@ -1,0 +1,86 @@
+From 8b1e48d09bc126b85b43761875aad6ce11b96265 Mon Sep 17 00:00:00 2001
+From: Alex Van Damme <Alex Van Damme>
+Date: Sun, 1 Mar 2026 23:52:51 +0000
+Subject: [PATCH] Disable docs/tests/doxygen and fix cstdint for newer GCC
+
+---
+ CMakeLists.txt             | 8 ++------
+ etc/configure.cmake        | 2 +-
+ srecord/CMakeLists.txt     | 8 --------
+ srecord/input/file/hp64k.h | 1 +
+ 4 files changed, 4 insertions(+), 15 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ea7f41e..0869c51 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -32,7 +32,7 @@ include(GNUInstallDirs)
+ # FHS compliant paths for Linux installation
+ if(NOT WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+ #  set(CMAKE_INSTALL_PREFIX "/opt/${PROJECT_NAME}")
+-  set(CMAKE_INSTALL_PREFIX "/usr")
++  #set(CMAKE_INSTALL_PREFIX "/usr")
+ endif()
+ 
+ # Pull in the rest of the pieces
+@@ -50,12 +50,8 @@ add_subdirectory(srec_cat)
+ add_subdirectory(srec_cmp)
+ add_subdirectory(srec_info)
+ 
+-# Tests & support tools
+-enable_testing()
+-add_subdirectory(test)
++# Tests, documentation disabled for Bazel hermetic build
+ 
+-# Documentation & Man Pages
+-add_subdirectory(doc)
+ 
+ # Package SRecord
+ include(CPack)
+diff --git a/etc/configure.cmake b/etc/configure.cmake
+index 343a70a..f5f89a9 100644
+--- a/etc/configure.cmake
++++ b/etc/configure.cmake
+@@ -104,7 +104,7 @@ option(_TANDEM_SOURCE ON)
+ option(__EXTENSIONS__ ON)
+ 
+ # Doxygen configuration
+-find_package(Doxygen REQUIRED doxygen dot)
++#find_package(Doxygen REQUIRED doxygen dot)
+ 
+ set(DOXYGEN_DOT_GRAPH_MAX_NODES 150)
+ set(DOXYGEN_ALPHABETICAL_INDEX NO)
+diff --git a/srecord/CMakeLists.txt b/srecord/CMakeLists.txt
+index 930dbf9..d91baac 100644
+--- a/srecord/CMakeLists.txt
++++ b/srecord/CMakeLists.txt
+@@ -33,17 +33,9 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+         FILES_MATCHING PATTERN "*.h")
+ 
+-# Install the Doxygen output for the website
+-install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html
+-        DESTINATION ${CMAKE_INSTALL_DOCDIR}/htdocs/srecord
+- 	COMPONENT website)
+ 
+ # Generate config.h to suit local environment
+ configure_file(config.h.in config.h @ONLY)
+ configure_file(patchlevel.h.in patchlevel.h @ONLY)
+ include_directories(${CMAKE_CURRENT_BINARY_DIR})
+ 
+-# Generate doxygen content
+-doxygen_add_docs(doxygen
+-                 ${LIB_SRECORD_HDR}
+-		 ALL)
+diff --git a/srecord/input/file/hp64k.h b/srecord/input/file/hp64k.h
+index a3f8a6d..784b8c1 100644
+--- a/srecord/input/file/hp64k.h
++++ b/srecord/input/file/hp64k.h
+@@ -1,3 +1,4 @@
++#include <cstdint>
+ //
+ // srecord - manipulate eprom load files
+ // Copyright (C) 2019 fenugrec
+-- 
+2.39.5
+

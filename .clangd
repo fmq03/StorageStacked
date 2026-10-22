@@ -1,0 +1,15 @@
+CompileFlags:
+  CompilationDatabase: .vscode/databases/common
+  Remove: [-fno-tree-loop-distribute-patterns, -fno-plt]
+Index:
+  Background: Build
+---
+If:
+  PathMatch: vortex_StorageStacked/.*
+CompileFlags:
+  CompilationDatabase: .vscode/databases/vortex
+---
+If:
+  PathMatch: coralnpu_StorageStacked/.*
+CompileFlags:
+  CompilationDatabase: .vscode/databases/coralnpu

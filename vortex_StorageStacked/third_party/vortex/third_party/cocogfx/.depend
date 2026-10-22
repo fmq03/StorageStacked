@@ -1,0 +1,16 @@
+blitter.o: src/blitter.cpp include/blitter.hpp include/common.hpp \
+ include/format.hpp include/uint24.hpp include/color.hpp
+bmp.o: src/bmp.cpp include/bmp.hpp include/common.hpp
+cgltrace.o: src/cgltrace.cpp include/cgltrace.hpp include/common.hpp \
+ include/format.hpp include/uint24.hpp include/color.hpp
+imageutil.o: src/imageutil.cpp include/imageutil.hpp include/format.hpp \
+ include/common.hpp include/uint24.hpp include/color.hpp \
+ include/blitter.hpp include/tga.hpp include/png.hpp include/bmp.hpp
+main.o: src/main.cpp include/cgltrace.hpp include/common.hpp \
+ include/format.hpp include/uint24.hpp include/color.hpp \
+ include/blitter.hpp include/tga.hpp include/png.hpp include/bmp.hpp \
+ include/math.hpp include/fixed.hpp
+math.o: src/math.cpp include/math.hpp include/common.hpp \
+ include/fixed.hpp src/fpsin.inl
+png.o: src/png.cpp include/png.hpp include/common.hpp
+tga.o: src/tga.cpp include/tga.hpp include/common.hpp

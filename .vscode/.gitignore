@@ -1,0 +1,15 @@
+compile_commands.json
+make_commands.json
+index_coverage.json
+*_verification.json
+gem5_python_navigation_report.json
+gem5-python-stubs/
+deps/
+__pycache__/
+*.log
+bazel_actions.json
+
+projects/
+builtin-headers/
+tools/
+databases/

@@ -1,0 +1,19 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "extensions": {
+    "recommendations": [
+      "llvm-vs-code-extensions.vscode-clangd",
+      "ms-python.python",
+      "ms-python.vscode-pylance",
+      "eirikpre.systemverilog",
+      "timonwong.shellcheck",
+      "jtanx.ctagsx",
+      "scala-lang.scala",
+      "mads-hartmann.bash-ide-vscode"
+    ]
+  }
+}
