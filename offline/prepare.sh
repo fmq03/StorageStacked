@@ -9,12 +9,14 @@ ln -s "$prefix/bin/python3" /usr/local/bin/python3
 ln -s "$prefix/bin/python3" /usr/bin/python3
 # The independent AXI runner must use the same portable compiler as the SDKs.
 rm -rf "$root/axi_StorageStacked/build"
-source "$root/vortex_StorageStacked/third_party/gem5/runtime/environment.sh"
-cmake -S "$root/axi_StorageStacked" -B "$root/axi_StorageStacked/build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$AXI_CXX" \
-  -DCMAKE_C_COMPILER="$AXI_CC" -DCMAKE_ASM_COMPILER="$AXI_CC" \
-  -DPython3_EXECUTABLE="$AXI_PYTHON"
-cmake --build "$root/axi_StorageStacked/build" -j 12
+(
+  source "$root/vortex_StorageStacked/third_party/gem5/runtime/environment.sh"
+  cmake -S "$root/axi_StorageStacked" -B "$root/axi_StorageStacked/build" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$AXI_CXX" \
+    -DCMAKE_C_COMPILER="$AXI_CC" -DCMAKE_ASM_COMPILER="$AXI_CC" \
+    -DPython3_EXECUTABLE="$AXI_PYTHON"
+  cmake --build "$root/axi_StorageStacked/build" -j 12
+)
 # Disable implicit dependency downloads; all repositories are already vendored.
 cat >> "$root/coralnpu_StorageStacked/coralnpu/.bazelrc" <<'BAZEL'
 
@@ -53,5 +55,11 @@ for itcm,dtcm in ((8,32),(512,512),(1024,1024)):
         config['npu'].update(itcm_kib=itcm,dtcm_kib=dtcm,fetch_l0_enabled=l0)
         build_simulator(config)
 PY
+  (
+    cd "$root/coralnpu_StorageStacked/coralnpu"
+    "$SS_DEPS_ROOT/xpu-tools/bin/bazel" --output_user_root="$SS_DEPS_ROOT/bazel" shutdown
+  )
+  find "$SS_DEPS_ROOT/bazel" -mindepth 2 -maxdepth 2 \
+    -type d \( -name server -o -name bazel-workers -o -name sandbox \) -exec rm -rf {} +
 )
 mkdir -p /results

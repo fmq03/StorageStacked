@@ -64,7 +64,7 @@ bash run.sh
 
 共 {len(parts)} 块，每块 25,000,000 字节，最后一块 {parts[-1].stat().st_size:,} 字节。清单只记录文件名和大小，不做哈希校验。脚本按清单顺序合并并解包，直接恢复完整交付目录，不额外保存合并后的大 tar 文件。镜像在交付目录中保持 gzip 压缩，首次运行 `bash run.sh` 自动导入，之后使用 `--pull=never --network=none` 运行。
 
-分块共 {metadata["total_bytes"]:,} 字节，镜像归档 {archive_bytes:,} 字节，Docker 镜像 {image_bytes:,} 字节；导入时还需要展开临时空间，默认验收会生成数 GiB 结果。下载目录、结果目录和 Docker 数据目录如果在同一块磁盘，建议至少预留 100 GB 可用空间；如果在不同磁盘，需要分别检查各自剩余空间。首次导入和默认验收可能耗时数十分钟。`PACKAGE.json` 记录源码版本与文件大小；解包后的 `VALIDATION.json` 和 `ACCEPTANCE.json` 是本次制作方的实际验收摘要。
+分块共 {metadata["total_bytes"]:,} 字节，镜像归档 {archive_bytes:,} 字节，Docker 镜像 {image_bytes:,} 字节；导入时还需要展开临时空间，默认验收会生成数 GiB 结果。下载目录、结果目录和 Docker 数据目录如果在同一块磁盘，建议至少预留 150 GB 可用空间；如果在不同磁盘，需要分别检查各自剩余空间。首次导入和默认验收可能耗时数十分钟。`PACKAGE.json` 记录源码版本与文件大小；解包后的 `VALIDATION.json` 和 `ACCEPTANCE.json` 是本次制作方的实际验收摘要。
 
 分块是一个外层 tar 的连续片段，不能逐块单独解压。Docker 镜像已压缩，外层不重复压缩。
 ''')
