@@ -68,6 +68,12 @@ AArch64 ELF、4 个实际活跃 CPU，GPU L1I/L1D 为 2 路、3 周期；L2 开�
 5 个预期结果均符合：正常环境原入口成功；模拟旧 `clone3=EPERM` 时原入口失败；修复入口成功；正常环境修复入口成功；无关 `getpriority=EPERM` 拒绝仍然保留。
 这是当前 Docker 上对旧限制的模拟，没有把它表述为客户 Docker 20.10 主机验收。详情见 `DOCKER_FIX_VALIDATION.json`。
 
+## 公开下载端抽查
+
+从远端新分支单独克隆，在另一目录执行仓库根 `download.sh`、`run.sh check`。公开 Release 的 8 个元数据文件以及首块、中间块、尾块下载通过；中间块从 1 MiB 部分文件恢复完成。其余 658 个完整分块由本地复用，因此这不是全部分块的全新公网下载。
+
+全部 661 块真实解包后，所有交付文件与已验收包逐字节一致；独立目录的根启动入口工具/库检查通过。自动导入及默认五项使用前述同一归档的实际验收，不重复表述为客户机器验收。详情见 `CLIENT_VALIDATION.json`。
+
 ## 范围
 
 Vortex 结果来自 gem5 CPU + Vortex SimX；CoralNPU 使用 RTL 生成的 Verilator 模型。以上不包含 FPGA/板卡、综合布局布线、芯片时序或功耗验收；客户主机以实际运行生成的 `summary.json.passed=true` 为准。

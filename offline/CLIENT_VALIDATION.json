@@ -1,0 +1,85 @@
+{
+  "passed": true,
+  "created_utc": "2026-10-22T12:30:50.566511+00:00",
+  "release": "https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022",
+  "release_assets": 671,
+  "repository": "https://github.com/fmq03/StorageStacked",
+  "branch": "project-update-20261022",
+  "checkout": "/home/hy258/hy/zhongxing/offline/results/client-checkout-20261022",
+  "checkout_commit": "dd7c5cd2aade129f2534e0fc17cff330651303cc",
+  "release_source_commit": "dd7c5cd2aade129f2534e0fc17cff330651303cc",
+  "image_runtime_commit": "fea1810797a570ae10515916f806bf66d44c3ffe",
+  "public_metadata_files_downloaded": 8,
+  "public_sample_parts": [
+    {
+      "name": "zhongxing-storagestacked-offline-20261022.tar.part-0000",
+      "bytes": 25000000,
+      "initial_partial_bytes": 0,
+      "downloaded_and_byte_compared": true
+    },
+    {
+      "name": "zhongxing-storagestacked-offline-20261022.tar.part-0330",
+      "bytes": 25000000,
+      "initial_partial_bytes": 1048576,
+      "downloaded_and_byte_compared": true
+    },
+    {
+      "name": "zhongxing-storagestacked-offline-20261022.tar.part-0660",
+      "bytes": 9255680,
+      "initial_partial_bytes": 0,
+      "downloaded_and_byte_compared": true
+    }
+  ],
+  "partial_download_recovered": true,
+  "range_rejected_fallback_logged": false,
+  "parts": 661,
+  "reused_local_complete_parts": 658,
+  "full_fresh_public_download": false,
+  "actual_extraction": true,
+  "all_delivery_files_byte_compared": [
+    {
+      "name": "ACCEPTANCE.json",
+      "bytes": 19309
+    },
+    {
+      "name": "DELIVERY.json",
+      "bytes": 20468
+    },
+    {
+      "name": "DOCKER_COMPATIBILITY.md",
+      "bytes": 5681
+    },
+    {
+      "name": "SOURCE_VERSIONS.json",
+      "bytes": 18067
+    },
+    {
+      "name": "VALIDATION.json",
+      "bytes": 49040
+    },
+    {
+      "name": "docker-compat-entrypoint.py",
+      "bytes": 1917
+    },
+    {
+      "name": "run-seccomp-check.sh",
+      "bytes": 247
+    },
+    {
+      "name": "run.sh",
+      "bytes": 2963
+    },
+    {
+      "name": "zhongxing-storagestacked-offline.tar.gz",
+      "bytes": 16509120312
+    },
+    {
+      "name": "使用说明.md",
+      "bytes": 6940
+    }
+  ],
+  "root_launcher_check_passed": true,
+  "archive_import_and_default_five": "matching byte-compared archive; see DELIVERY.json and ACCEPTANCE.json",
+  "customer_machine_tested": false,
+  "scope": "Independent public checkout on the maker host; three public sample parts (one partial resume) and eight metadata files; all other complete parts reused locally."
+}
