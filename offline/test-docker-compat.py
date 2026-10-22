@@ -1,11 +1,12 @@
 """Reproduce the compiler failure and verify fallback without loosening seccomp."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 
 here = Path(__file__).resolve().parent
-image = 'zhongxing-storagestacked:offline-20261009-burst'
+image = os.environ.get('STORAGE_IMAGE', 'zhongxing-storagestacked:offline-20261022')
 probe = '''set -euo pipefail
 source "$STORAGE_WORKSPACE/vortex_StorageStacked/third_party/gem5/runtime/environment.sh"
 printf '.text\\n.globl _start\\n_start:\\n  nop\\n' >/tmp/probe.S

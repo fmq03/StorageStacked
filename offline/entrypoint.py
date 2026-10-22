@@ -82,6 +82,9 @@ def regression(device, session):
                'offline-test', str(ROOT/name/runtime)]
     try:
         invoke(command, ROOT/name)
+        if device == 'coralnpu':
+            invoke(['bash', '-c', 'source "$1/environment.sh"; exec "$AXI_PYTHON" "$1/test_rtl.py"',
+                    'offline-rtl-test', str(ROOT/name/runtime)], ROOT/name)
     finally:
         destination = session/device
         destination.mkdir(parents=True, exist_ok=True)
@@ -98,7 +101,14 @@ def regression(device, session):
         raise RuntimeError('回归未生成汇总报告')
     for p in summaries:
         checked(p)
-    return {'passed': True, 'summaries': [str(p.relative_to(session)) for p in summaries]}
+    defaults = [p for p in summaries if p.parent.name.startswith('test-')]
+    variants = [p for p in summaries if p.parent.name.startswith('rtl-')]
+    if len(defaults) != 1 or (device == 'coralnpu' and len(variants) != 1):
+        raise RuntimeError('回归汇总数量不符')
+    result = {'passed': True, 'summaries': [str(p.relative_to(session)) for p in defaults]}
+    if variants:
+        result['rtl_summary'] = str(variants[0].relative_to(session))
+    return result
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else 'all'

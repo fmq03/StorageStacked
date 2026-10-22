@@ -30,7 +30,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', type=Path)
     parser.add_argument('--repo', required=True)
-    parser.add_argument('--tag', default='offline-20261009')
+    parser.add_argument('--tag', default='offline-20261022')
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--report', type=Path, required=True)
     options = parser.parse_args()

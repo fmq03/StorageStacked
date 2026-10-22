@@ -1,87 +1,96 @@
 # 三项目离线 Docker 交付
 
-交付包包含完整 Linux amd64 镜像、三项目源码、编译工具、设备仿真器、Bazel 依赖、TinyLLM 模型和中文文档。宿主机只需已安装并启动 Docker，用户无需安装 Python、CMake、SystemC、Bazel、交叉编译器或配置环境变量。
+沿用原 `hy2581/zhongxing-storagestacked-offline` 的交付方式，将镜像、源码与制作入口更新到
+`fmq03/StorageStacked` 的 `project-update-20261022` 分支。新版本为 `offline-20261022`；
+旧 `offline-20261009-burst` 是历史快照，不会随源码更新。
 
-## 用户使用
+## 下载与运行
 
-GitHub 下载入口：[offline-20261009-burst](https://github.com/hy2581/zhongxing-storagestacked-offline/releases/tag/offline-20261009-burst)。412 个分块，每块 25,000,000 字节，最后一块较小。克隆 [发布仓库](https://github.com/hy2581/zhongxing-storagestacked-offline)后执行 `bash download.sh`，自动下载并解包；已有全部分块、`PARTS.tsv`、`extract.sh` 与四个启动补丁文件（见兼容说明）时执行 `bash extract.sh`。核对使用文件名、大小和实际导入结果。 下载默认单连接，每 5 秒显示分块进度；连续 60 秒低于 1 字节/秒或单次请求超过 900 秒会重试，每个文件最多尝试 6 次。按 Ctrl+C 可停止下载并保留续传文件；更新脚本后重新运行即可继续。 下载已用实际 Bash 4.2 + curl 7.29 和 Bash 5.2 + curl 8.5 测试；旧版 curl 不支持的 `--http1.1` 参数会自动省略。制作方最新复核见 [CLIENT_VALIDATION.json](https://github.com/hy2581/zhongxing-storagestacked-offline/blob/main/CLIENT_VALIDATION.json)，其中区分制作方验证与客户机器实际验收。
-
-把交付目录复制到本机，进入目录执行：
+宿主机需要 Linux x86-64、Git、Bash、curl、GNU tar/coreutils，以及当前用户可访问的 Docker。
+无需安装 Python、SystemC、Bazel、交叉编译器、GPU 驱动或商业 EDA 软件。
 
 ```bash
+git clone --branch project-update-20261022 https://github.com/fmq03/StorageStacked.git
+cd StorageStacked
+bash download.sh
 bash run.sh
 ```
 
-首次使用会自动从同目录的 `zhongxing-storagestacked-offline.tar.gz` 导入镜像，然后执行 AXI 完整存储验收，以及 Vortex、CoralNPU 各自的 SMOKE 和 TinyLLM。后续运行直接使用本地镜像。每次生成新的 `results/<时间>-<编号>/`；总报告 `summary.json` 的 `passed` 必须为 `true`。
+下载入口为 [offline-20261022 Release](https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022)。
+`download.sh` 下载分块和启动文件，按 `PARTS.tsv` 中的文件名、大小和顺序核对并解包到
+`downloads/zhongxing-storagestacked-offline-20261022/`。默认单连接，支持续传，每 5 秒显示进度；
+停滞 60 秒或单次请求超过 900 秒会重试。每个文件最多尝试 6 次，Ctrl+C 后保留已下载文件。
+`STORAGE_DOWNLOAD_JOBS=2 bash download.sh` 可增加并发。代理必须允许 GitHub Release 的下载跳转。
 
-默认验收保留完整波形并生成视图，通常需要数十分钟；运行时间随机器变化。只检查环境可执行 `bash run.sh check`，单独运行某个设备可使用下面的命令。
+`run.sh` 在新镜像标签不存在时自动导入归档，随后执行 AXI 完整验收、Vortex SMOKE/TinyLLM、
+CoralNPU SMOKE/TinyLLM 五项。SMOKE 输出 `42`，TinyLLM 输出 `blu`；完整通过还要求数值、
+AXI/VCD、Flit 和在线内存检查全部通过。结果保存为 `results/<时间>-<编号>/summary.json`，
+其中 `passed` 必须为 `true`。单纯镜像导入或 `check` 成功不能代替计算验收。
 
-正式 `run.sh` 已修复旧 Docker 下的 `posix_spawn failed: Operation not permitted`：
-保留 Docker seccomp，追加容器内兼容过滤器，使编译器回退到可用的进程创建方式。
-下载和解包会自动安装最新版 `run.sh` 与 `docker-compat-entrypoint.py`；
-已解包的用户只需更新启动补丁，无需重下镜像。
-操作与验证范围见 [Docker 兼容说明](DOCKER_COMPATIBILITY.md)。
-`run-seccomp-check.sh` 仅保留为显式关闭 seccomp 的诊断入口。
-
-启动固定使用 `--pull=never --network=none`。不执行联网安装，不拉取镜像，不使用宿主机项目源码、工具链或许可证。镜像内部保留构建时的固定路径，用户把交付目录放在任意路径即可。
+下载目录可整体复制到内网主机。在解包后的交付目录内执行 `bash run.sh`，不依赖源码仓库路径。
+已有全部分块、清单、`extract.sh` 和四个启动文件时，也可直接执行 `bash extract.sh`。
 
 ```bash
-bash run.sh check              # 工具、动态库与仿真器检查，不代替计算验收
-bash run.sh smoke              # 两个设备的 SMOKE：41 → 42
-bash run.sh llm                # 两个设备的 TinyLLM："red " → "blu"
-bash run.sh axi               # 默认 AXI 文件读写与链路检查
-bash run.sh vortex smoke       # 单独运行 Vortex SMOKE
-bash run.sh coralnpu llm       # 单独运行 CoralNPU TinyLLM
-bash run.sh test               # AXI + 两个设备的完整回归，耗时和结果较大
-bash run.sh shell              # 进入镜像，源码位于 $STORAGE_WORKSPACE
+bash run.sh check
+bash run.sh smoke
+bash run.sh llm
+bash run.sh axi
+bash run.sh vortex smoke
+bash run.sh coralnpu llm
+bash run.sh test
+bash run.sh shell
 ```
 
-自选配置无需配置环境变量，传入 JSON 即可：
+`test` 执行 AXI 完整验收、两个计算平台的原生/配置/负向检查、SMOKE/TinyLLM、NPU 五种 AXI
+burst 拍数，以及三种 TCM 预设与 L0 开关组合的 12 个 SMOKE/TinyLLM 场景。没有独立 TCM benchmark。
+默认验收保留完整波形并生成视图，耗时与结果大小随主机变化。
+
+每次容器使用 `--pull=never --network=none`，不拉取镜像、不联网安装，不挂载宿主机项目源码或工具链。
+默认保留 Docker seccomp，并追加 `clone3 → ENOSYS` 兼容过滤器，处理旧 Docker 的编译进程创建问题。
+详见 [Docker 兼容说明](DOCKER_COMPATIBILITY.md)。`run-seccomp-check.sh` 仅用于显式诊断。
+
+## 用户配置
 
 ```bash
-bash run.sh vortex smoke --config ./my-config.json
-bash run.sh coralnpu llm --config ./my-llm.json
+bash run.sh coralnpu smoke --config ./my-config.json
+bash run.sh vortex llm --config ./my-llm.json
 bash run.sh axi --input ./transactions.json --scale 4 --replay
 ```
 
-配置格式见镜像内两项目的 `user/<项目>/config.json` 和 `docs/`。配置由入口复制到项目内并随结果保存。修改硬件参数可能触发离线增量编译；更换为镜像未包含的新依赖需要另行制作镜像。
+配置文件只读挂载到容器，随后复制为运行输入快照。格式见各项目 `user/<项目>/config.json`。
+NPU `fetch_l0_enabled` 可选 `true` 或 `false`，默认 `false`；ITCM/DTCM (KiB) 组合为
+`8/32`、`512/512`、`1024/1024`。镜像包含六种 RTL 模型、对应的 Chisel/Verilator 构建依赖和设备库，
+按配置选择或增量重建。AXI `burst_beats` 支持 `1/2/4/8/16`，默认 `4`。
+CPU 的 ARM/x86 配置与 GPU 各级缓存参数沿用当前项目实现，具体约束见对应 `docs/`。
 
-默认输出在启动脚本旁边的 `results/`，可选 `STORAGE_RESULTS_DIR` 改变位置，`STORAGE_IMAGE` 选择镜像版本。不同运行互不覆盖。容器退出后会删除，导出的报告、输入快照、实际回读、波形和链路证据保留在宿主机。交互 shell 中的修改随容器删除；需要保存的文件请写入 `/results`。
-
-## 手动导入与运行
-
-推荐使用 `run.sh` 自动处理旧 Docker 兼容。以下手动命令使用镜像原始入口，适用于已更新运行时的环境：
-
-```bash
-docker load --input zhongxing-storagestacked-offline.tar.gz
-mkdir -p results
-docker run --rm --init --pull=never --network=none \
-  --mount "type=bind,source=$(pwd)/results,target=/results" \
-  zhongxing-storagestacked:offline-20261009-burst
-```
-
-适用于 Linux x86-64；其他平台需要能执行 Linux amd64 容器的 Docker 环境。
-
-压缩包、镜像的精确大小见交付包中的 `DELIVERY.json`；默认五项验收会生成数 GiB 的结果，导入镜像还需要临时空间。 分块下载、解包和 Docker 导入的峰值占用需要分别计入；若下载、结果和 Docker 数据目录在同一磁盘，建议预留至少 100 GB 可用空间。镜像和波形结果较大，请以交付清单的字节数预留存储空间。SMOKE 和 TinyLLM 不需要 GPU、FPGA 或商业 EDA 许可证。TinyLLM 为项目自带的小型 FP32 功能模型。
+NPU 每个场景顶层保留 `report.md`、`summary.json`，内容按 `config/`、`logs/`、`build/`、
+`traces/`、`checks/`、`views/` 分组；Vortex 保留自身结果格式。配置、执行报告和实际模型信息随结果导出。
+可用 `STORAGE_RESULTS_DIR` 更改宿主机结果位置，`STORAGE_IMAGE` 指定镜像标签。
+交互 shell 的修改随容器删除，需要保留的内容写到 `/results`。
 
 ## 制作与复验
 
-Docker 制作入口在 `offline/`。修改源码后，制作方执行：
+制作方需要已准备好工具链和依赖缓存的当前工作区。首次依赖获取由三个项目自身构建入口完成，
+Docker 制作脚本不承担下载依赖的职责。使用本地 `ubuntu:20.04` 或 `STORAGE_BASE_IMAGE` 指定的本地镜像。
 
 ```bash
-./offline/build.sh
-./offline/validate.sh
-./offline/export.sh
+bash offline/build.sh
+bash offline/validate.sh
+bash offline/export.sh
+bash offline/split-release.sh
 ```
 
-`build.sh` 从当前已准备好的工作区复制源码、工具和缓存，以本地 `ubuntu:20.04` 镜像构建；Docker 构建阶段也关闭网络。镜像内重新编译 AXI、Vortex、CoralNPU 平台及用户项目，构建缓存只用于增量编译。它不承担首次下载依赖的职责。镜像内部使用准备好的固定目录，避免工具链和构建缓存因改路径而失效。历史结果、Git 元数据、旧 Bazel 工作区、临时 sandbox 和运行状态不进入交付镜像；必要依赖缓存完整保留。
+构建阶段同样关闭网络；从当前工作区复制源码、工具和可复用缓存，在镜像内重新编译 AXI、
+Vortex、CoralNPU 和六种 RTL 配置。历史运行结果、Git 元数据和临时 Bazel server/sandbox 不打包。
+`SOURCE_VERSIONS.json` 记录工作区提交、未提交改动与各子项目版本，不能用旧结果证明新镜像通过。
 
-本包包含打包时工作区中的源码与未提交修改：CoralNPU 使用 RVV 核心与 RVV FP32 线性层；Vortex 的默认 TinyLLM 线性层使用 8 个 SIMT 线程、2 个 warp。两个设备的回归各执行一次，默认 SMOKE 和 TinyLLM 各运行一次，同时保留原生、C ABI 和错误输入检查。
-CoralNPU 的 AXI256 接入支持可配置的 INCR burst：`axi.burst_beats` 可取 1、2、4、8、16，默认 4。
-每个原生 16 字节请求默认转换为 4 拍、每拍 4 字节；AWLEN/ARLEN 为 3，末拍才置 WLAST/RLAST。
-完整回归还执行五种拍数的字节掩码、总线 lane、4 KiB 边界附近访问、反压和重放检查。
-这项改动提供窄拍 burst 转换，多个原生请求的合并与宽拍带宽优化尚未实现。
+`validate.sh` 用新镜像执行 `check` 和一次 `test`；`export.sh` 保存归档，移除交付标签后通过用户
+`run.sh` 自动重新导入，再执行默认五项。只有这些检查全部通过才生成 `DELIVERY.json` 和 `VALIDATION.json`。
+新导出目录为 `offline/dist/zhongxing-storagestacked-offline-20261022/`。已存在的交付包拒绝覆盖。
+`split-release.sh` 将整个目录打成连续 tar 分块，每块 25,000,000 字节；最后一块较小。
 
-导出目录为 `offline/dist/zhongxing-storagestacked-offline-20261009-burst/`。镜像和归档是源码快照，继续修改源码后需要重新制作；已经运行的容器不会自动更新。若需保留同标签的上一版，先为旧镜像添加备份标签并移动已有交付目录，再执行上述命令。
-
-`SOURCE_VERSIONS.json` 记录打包时三个仓库的源码提交与未提交修改，`DELIVERY.json` 记录文件名、精确字节数和验收证据。`ACCEPTANCE.json` 是最终归档导入后的默认验收摘要，`VALIDATION.json` 内嵌三套回归摘要并记录本次断网运行证据。交付核对以版本、文件名/大小、实际 `docker load` 和新生成的运行报告为准。
+核对使用源码提交号、文件名与精确字节数、实际解包、Docker 导入和新生成的验收结果。
+`PACKAGE.json` 记录分块和文件大小，`ACCEPTANCE.json` 记录首次导入后的默认验收，
+`VALIDATION.json` 保留制作方完整回归与 RTL 配置检查；客户主机仍以自己的实际运行结果为准。
+镜像与分块不放入 Git，通过本仓库 Release 分发。建议为下载、解包、Docker 导入和波形结果预留至少 100 GB 空间，
+各文件精确大小以本次 `PACKAGE.json`、`DELIVERY.json` 为准。

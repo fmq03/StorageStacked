@@ -2,7 +2,7 @@
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p "$here/validation"
-validation=${STORAGE_VALIDATION_DIR:-$here/validation/offline-20261009-burst}
+validation=${STORAGE_VALIDATION_DIR:-$here/validation/offline-20261022}
 mkdir -p "$validation"
 run_results="$here/results/check-$(date +%Y%m%d-%H%M%S)-$$"
 export STORAGE_RESULTS_DIR="$run_results"

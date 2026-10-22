@@ -2,7 +2,7 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 context=$root/offline/.build/context
-image=${STORAGE_IMAGE:-zhongxing-storagestacked:offline-20261009-burst}
+image=${STORAGE_IMAGE:-zhongxing-storagestacked:offline-20261022}
 base=${STORAGE_BASE_IMAGE:-ubuntu:20.04}
 docker image inspect "$base" >/dev/null
 mkdir -p "$context/workspace"
@@ -32,7 +32,9 @@ for p in ('axi_StorageStacked','vortex_StorageStacked','coralnpu_StorageStacked'
     commit=subprocess.check_output(['git','-C',str(root/p),'rev-parse','HEAD'],text=True).strip()
     status=subprocess.check_output(['git','-C',str(root/p),'status','--porcelain'],text=True)
     projects[p]={'commit':commit,'working_tree_changes':status.splitlines()}
-Path(sys.argv[2]).write_text(json.dumps({'created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'workspace_root':str(root),'projects':projects},ensure_ascii=False,indent=2)+'\n')
+workspace_commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
+workspace_changes=subprocess.check_output(['git','-C',str(root),'status','--porcelain'],text=True).splitlines()
+Path(sys.argv[2]).write_text(json.dumps({'created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'workspace_root':str(root),'repository':'https://github.com/fmq03/StorageStacked','workspace_commit':workspace_commit,'workspace_changes':workspace_changes,'projects':projects},ensure_ascii=False,indent=2)+'\n')
 PY
 cp "$root/offline/Dockerfile" "$root/offline/entrypoint.py" "$root/offline/docker-compat-entrypoint.py" "$root/offline/prepare.sh" "$root/offline/fix-native-cache.sh" "$context/"
 mkdir -p "$context/system-tools"

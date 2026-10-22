@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-base=${STORAGE_RELEASE_BASE:-https://github.com/hy2581/zhongxing-storagestacked-offline/releases/download/${STORAGE_RELEASE_TAG:-offline-20261009-burst}}
+base=${STORAGE_RELEASE_BASE:-https://github.com/fmq03/StorageStacked/releases/download/${STORAGE_RELEASE_TAG:-offline-20261022}}
 destination=${1:-$here/downloads}
 jobs=${STORAGE_DOWNLOAD_JOBS:-1}
 stall_seconds=${STORAGE_STALL_SECONDS:-60}

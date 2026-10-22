@@ -33,4 +33,22 @@ bash /opt/storagestacked/fix-native-cache.sh
 # accelerate compilation, but are never accepted as proof that source is current.
 (cd "$root/vortex_StorageStacked" && bash build.sh --jobs 12)
 (cd "$root/coralnpu_StorageStacked" && bash build.sh --jobs 12)
+# Materialize all supported RTL models from the bundled source while offline.
+(
+  source "$root/coralnpu_StorageStacked/coralnpu/runtime/environment.sh"
+  "$AXI_PYTHON" - <<'PY'
+import os,sys
+from pathlib import Path
+runtime=Path(os.environ['CORALNPU_HOME'])/'runtime'
+sys.path.insert(0,str(runtime))
+from configure import load_config
+from paths import ROOT
+from platform_build import build_simulator
+for itcm,dtcm in ((8,32),(512,512),(1024,1024)):
+    for l0 in (False,True):
+        config=load_config(ROOT/'user/smoke/config.json')
+        config['npu'].update(itcm_kib=itcm,dtcm_kib=dtcm,fetch_l0_enabled=l0)
+        build_simulator(config)
+PY
+)
 mkdir -p /results

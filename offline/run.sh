@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-image=${STORAGE_IMAGE:-zhongxing-storagestacked:offline-20261009-burst}
-archive=$here/zhongxing-storagestacked-offline.tar.gz
+image=${STORAGE_IMAGE:-zhongxing-storagestacked:offline-20261022}
+archive=${STORAGE_ARCHIVE:-$here/zhongxing-storagestacked-offline.tar.gz}
 if ! command -v docker >/dev/null; then
     echo '需要宿主机已安装并启动 Docker；无需安装项目依赖。' >&2; exit 1
 fi

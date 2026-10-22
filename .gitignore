@@ -19,6 +19,8 @@
 /coralnpu_StorageStacked/coralnpu/hdl/chisel/.tags
 
 /.vscode/editor_dependencies.json
+/downloads/
+/results/
 /offline/.build/
 /offline/dist/
 /offline/results/

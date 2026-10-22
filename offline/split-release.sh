@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-bundle=${STORAGE_BUNDLE:-zhongxing-storagestacked-offline-20261009-burst}
+bundle=${STORAGE_BUNDLE:-zhongxing-storagestacked-offline-20261022}
 [[ $bundle =~ ^zhongxing-storagestacked-offline-[0-9]{8}(-[A-Za-z0-9._-]+)?$ ]] || { echo '交付目录名称无效。' >&2; exit 2; }
 source_dir=$here/dist/$bundle
 destination=${STORAGE_SPLIT_DIR:-$here/dist/$bundle-25MB}
@@ -27,6 +27,9 @@ assert parts and all(p.stat().st_size==25000000 for p in parts[:-1])
 assert 0<parts[-1].stat().st_size<=25000000
 (destination/'PARTS.tsv').write_text(''.join(f'{p.name}\t{p.stat().st_size}\n' for p in parts))
 files=[{'name':p.name,'bytes':p.stat().st_size} for p in sorted(source.iterdir()) if p.is_file()]
+delivery=json.loads((source/'DELIVERY.json').read_text())
+image_bytes=delivery['image_bytes']
+archive_bytes=(source/'zhongxing-storagestacked-offline.tar.gz').stat().st_size
 metadata={'format':'ordered split tar','part_bytes':25000000,'parts':len(parts),
           'total_bytes':sum(p.stat().st_size for p in parts),'delivery_directory':bundle,
           'source_versions':json.loads((source/'SOURCE_VERSIONS.json').read_text()),
@@ -35,13 +38,13 @@ metadata={'format':'ordered split tar','part_bytes':25000000,'parts':len(parts),
 (destination/'PACKAGE.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')
 (destination/'README.md').write_text(f'''# 三项目离线 Docker 分块包
 
-本包包含 Linux amd64 完整 Docker 镜像、运行入口、源码、工具链、模型与验收文档。CoralNPU 启用 RVV，Vortex 的默认 LLM 使用 8 个 SIMT 线程。
+本包包含当前三项目的 Linux amd64 完整 Docker 镜像、运行入口、源码、工具链、模型与验收文档。CoralNPU 支持 RVV、L0 开关与三种 TCM 预设，Vortex 的默认 LLM 使用 8 个 SIMT 线程。
 
 推荐克隆发布仓库后执行 `bash download.sh`，自动下载分块并解包：
 
 ```bash
-git clone https://github.com/hy2581/zhongxing-storagestacked-offline.git
-cd zhongxing-storagestacked-offline
+git clone --branch project-update-20261022 https://github.com/fmq03/StorageStacked.git
+cd StorageStacked
 bash download.sh
 cd downloads/{bundle}
 bash run.sh
@@ -61,7 +64,7 @@ bash run.sh
 
 共 {len(parts)} 块，每块 25,000,000 字节，最后一块 {parts[-1].stat().st_size:,} 字节。清单只记录文件名和大小，不做哈希校验。脚本按清单顺序合并并解包，直接恢复完整交付目录，不额外保存合并后的大 tar 文件。镜像在交付目录中保持 gzip 压缩，首次运行 `bash run.sh` 自动导入，之后使用 `--pull=never --network=none` 运行。
 
-分块文件约 10.3 GB，解包后的交付目录约 10.3 GB，Docker 镜像约 23.9 GB；首次导入还会临时展开约 24 GB，默认验收会生成数 GiB 结果。下载目录、结果目录和 Docker 数据目录如果在同一块磁盘，建议至少预留 100 GB 可用空间；如果在不同磁盘，需要分别检查各自剩余空间。首次导入和默认验收可能耗时数十分钟。`PACKAGE.json` 记录源码版本与文件大小；解包后的 `VALIDATION.json` 和 `ACCEPTANCE.json` 是本次制作方的实际验收摘要。
+分块共 {metadata["total_bytes"]:,} 字节，镜像归档 {archive_bytes:,} 字节，Docker 镜像 {image_bytes:,} 字节；导入时还需要展开临时空间，默认验收会生成数 GiB 结果。下载目录、结果目录和 Docker 数据目录如果在同一块磁盘，建议至少预留 100 GB 可用空间；如果在不同磁盘，需要分别检查各自剩余空间。首次导入和默认验收可能耗时数十分钟。`PACKAGE.json` 记录源码版本与文件大小；解包后的 `VALIDATION.json` 和 `ACCEPTANCE.json` 是本次制作方的实际验收摘要。
 
 分块是一个外层 tar 的连续片段，不能逐块单独解压。Docker 镜像已压缩，外层不重复压缩。
 ''')

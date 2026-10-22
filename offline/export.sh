@@ -3,9 +3,9 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 mode=${1:-all}
 case "$mode" in all|--save-only|--verify-only) ;; *) echo '用法：export.sh [--save-only|--verify-only]' >&2; exit 2 ;; esac
-image=${STORAGE_IMAGE:-zhongxing-storagestacked:offline-20261009-burst}
-destination=${STORAGE_EXPORT_DIR:-$here/dist/zhongxing-storagestacked-offline-20261009-burst}
-validation=${STORAGE_VALIDATION_DIR:-$here/validation/offline-20261009-burst}
+image=${STORAGE_IMAGE:-zhongxing-storagestacked:offline-20261022}
+destination=${STORAGE_EXPORT_DIR:-$here/dist/zhongxing-storagestacked-offline-20261022}
+validation=${STORAGE_VALIDATION_DIR:-$here/validation/offline-20261022}
 mkdir -p "$destination"
 mkdir -p "$validation"
 docker image inspect "$image" >/dev/null
@@ -74,7 +74,8 @@ for device in ('vortex','coralnpu'):
     assert set(embedded[device]['cases'])=={'smoke','llm'}
     assert embedded[device]['cases']['smoke']['output']==42
     assert embedded[device]['cases']['llm']['output']=='blu'
-    llm_paths=list((test_path.parent/device/'user/llm/result').glob('*/llm/llm_summary.json'))
+    llm_paths=list((test_path.parent/device/'user/llm/result').glob('test-*/llm/llm_summary.json'))
+    llm_paths+=list((test_path.parent/device/'user/llm/result').glob('test-*/llm/checks/llm_summary.json'))
     assert len(llm_paths)==1
     llm=json.loads(llm_paths[0].read_text())
     assert llm['passed'] is True
@@ -86,7 +87,7 @@ assert embedded['coralnpu']['burst_tests']['passed'] is True
 assert set(embedded['coralnpu']['burst_tests']['cases'])=={'1','2','4','8','16'}
 for case in embedded['coralnpu']['burst_tests']['cases'].values():
     assert case['passed'] is True
-coral_llm_case=list((test_path.parent/'coralnpu/user/llm/result').glob('*/llm/summary.json'))
+coral_llm_case=list((test_path.parent/'coralnpu/user/llm/result').glob('test-*/llm/summary.json'))
 assert len(coral_llm_case)==1
 coral_run=json.loads(coral_llm_case[0].read_text())
 coral_burst=coral_run['axi_burst']
@@ -99,9 +100,21 @@ assert customer_coral['passed'] is True
 assert customer_coral['axi_burst']==coral_burst
 assert execution['vortex']['threads']==execution['vortex']['active_threads']==8
 assert execution['vortex']['warps']==2 and execution['vortex']['linear_calls']==42
+rtl=json.loads((test_path.parent/regression['cases']['coralnpu']['rtl_summary']).read_text())
+expected={f'i{i}-d{d}-l0{int(l0)}-{project}'
+          for i,d in ((8,32),(512,512),(1024,1024))
+          for l0 in (False,True) for project in ('smoke','llm')}
+assert rtl['passed'] is True and set(rtl['cases'])==expected
+for name,case in rtl['cases'].items():
+    assert case['passed'] is True and case['wave_passed'] is True
+    assert all(case['checks'].values())
+    assert case['output']==(42 if name.endswith('-smoke') else 'blu')
+assert set(rtl['negative'])=={'wrong_loaded_model','wrong_loaded_l0'}
+assert all(case['rejected'] for case in rtl['negative'].values())
 verification={'passed':True,'image':image,'platform':'linux/amd64',
               'network':'none','pull':'never','source_versions':versions,
-              'regressions':embedded,'execution':execution,'coralnpu_axi_burst':coral_burst,'maker_evidence':str(test_path),
+              'regressions':embedded,'execution':execution,'coralnpu_axi_burst':coral_burst,
+              'coralnpu_rtl':rtl,'maker_evidence':str(test_path),
               'customer_first_use':{'automatic_import':True,
                   'image_tag_absent_before_launch':True,'cases':acceptance['cases'],
                   'maker_evidence':str(summaries[0])}}
