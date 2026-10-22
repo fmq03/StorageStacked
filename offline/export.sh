@@ -59,6 +59,8 @@ assert acceptance['source_versions']==versions
 # A package is accepted only after the matching full regression has passed.
 maker=json.loads((validation/'acceptance.json').read_text())
 assert maker['passed'] is True and len(maker['runs'])==1
+assert maker['benchmark_variants']['arm_gpu_cache_smoke']['passed'] is True
+assert maker['benchmark_variants']['arm_gpu_cache_smoke']['host_elf_machine']==183
 test_path=here/maker['runs'][0]['path']
 regression=json.loads(test_path.read_text())
 assert regression['passed'] is True and regression['command']=='test'
@@ -116,6 +118,7 @@ assert all(case['rejected'] for case in rtl['negative'].values())
 verification={'passed':True,'image':image,'platform':'linux/amd64',
               'network':'none','pull':'never','source_versions':versions,
               'regressions':embedded,'execution':execution,'coralnpu_axi_burst':coral_burst,
+              'benchmark_variants':maker['benchmark_variants'],
               'coralnpu_rtl':rtl,'maker_evidence':str(test_path),
               'customer_first_use':{'automatic_import':True,
                   'image_tag_absent_before_launch':True,'cases':acceptance['cases'],

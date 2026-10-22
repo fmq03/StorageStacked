@@ -1,0 +1,86 @@
+Subject: Remove the unused single-page virtual mapping entry
+
+The runtime uses phy_to_virt_map for contiguous mappings. The unused duplicate
+map_p2v path ignored allocation failure and could use an uninitialized result.
+Remove that entry instead of suppressing the ARM compiler warning.
+
+diff --git a/sw/runtime/common/vm.cpp b/sw/runtime/common/vm.cpp
+--- a/sw/runtime/common/vm.cpp
++++ b/sw/runtime/common/vm.cpp
+@@ -128,56 +128,6 @@ bool VMManager::need_trans(uint64_t dev_pAddr) {
+   return true;
+ }
+ 
+-uint64_t VMManager::map_p2v(uint64_t ppn, uint32_t flags) {
+-  if (addr_mapping.find(ppn) != addr_mapping.end())
+-    return addr_mapping[ppn];
+-
+-  uint64_t vpn;
+-  if (randomize_va_) {
+-    const int MAX_ATTEMPTS = 1000;
+-    bool allocated = false;
+-    for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+-      uint64_t va_range_start = ALLOC_BASE_ADDR;
+-      uint64_t va_range_end = VX_MEM_PAGE_TABLE_BASE_ADDR;
+-#if VX_VM_ADDR_MODE == SV32
+-      uint64_t max_va = 0xFFFFFFFFULL;
+-      if (va_range_end > max_va)
+-        va_range_end = max_va;
+-#endif
+-      uint64_t va_range_size = va_range_end - va_range_start;
+-      uint64_t max_pages = va_range_size >> VX_VM_PAGE_LOG2_SIZE;
+-      std::uniform_int_distribution<uint64_t> dist(0, max_pages - 1);
+-      uint64_t random_page_offset = dist(rng_);
+-      uint64_t candidate_va = va_range_start + (random_page_offset << VX_VM_PAGE_LOG2_SIZE);
+-
+-      bool in_use = false;
+-      for (const auto& mapping : addr_mapping) {
+-        if (mapping.second == (candidate_va >> VX_VM_PAGE_LOG2_SIZE)) {
+-          in_use = true;
+-          break;
+-        }
+-      }
+-      if (!in_use && virtual_mem_->reserve(candidate_va, VX_VM_PAGE_SIZE) == 0) {
+-        vpn = candidate_va >> VX_VM_PAGE_LOG2_SIZE;
+-        allocated = true;
+-        break;
+-      }
+-    }
+-    if (!allocated) {
+-      virtual_mem_->allocate(VX_VM_PAGE_SIZE, &vpn);
+-      vpn >>= VX_VM_PAGE_LOG2_SIZE;
+-    }
+-  } else {
+-    virtual_mem_->allocate(VX_VM_PAGE_SIZE, &vpn);
+-    vpn >>= VX_VM_PAGE_LOG2_SIZE;
+-  }
+-
+-  CHECK_ERR(update_page_table(ppn, vpn, pte_flags_from_access(flags)), );
+-  addr_mapping[ppn] = vpn;
+-  flush();
+-  return vpn;
+-}
+-
+ int VMManager::phy_to_virt_map(uint64_t size, uint64_t* dev_pAddr, uint32_t flags) {
+   if (!need_trans(*dev_pAddr))
+     return 0;
+diff --git a/sw/runtime/common/vm.h b/sw/runtime/common/vm.h
+--- a/sw/runtime/common/vm.h
++++ b/sw/runtime/common/vm.h
+@@ -77,7 +77,6 @@ public:
+   int phy_to_virt_map(uint64_t size, uint64_t* dev_pAddr, uint32_t flags);
+   bool need_trans(uint64_t dev_pAddr);
+   uint64_t page_table_walk(uint64_t vAddr_bits);
+-  uint64_t map_p2v(uint64_t ppn, uint32_t flags);
+   int virtual_mem_reserve(uint64_t dev_addr, uint64_t size, int flags);
+ 
+   // Install an identity (VA == PA) mapping covering [addr, addr + size).
+@@ -86,7 +85,7 @@ public:
+ 
+   // Push every dirty shadow PT page to device memory (one device write
+   // per dirty page). Implicitly invoked at the end of init() /
+-  // phy_to_virt_map() / install_identity_map() / map_p2v() so callers
++  // phy_to_virt_map() / install_identity_map() so callers
+   // can ignore it; exposed publicly for explicit pre-launch sync.
+   int flush();
+ 

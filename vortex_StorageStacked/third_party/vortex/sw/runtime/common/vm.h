@@ -77,7 +77,6 @@ public:
   int phy_to_virt_map(uint64_t size, uint64_t* dev_pAddr, uint32_t flags);
   bool need_trans(uint64_t dev_pAddr);
   uint64_t page_table_walk(uint64_t vAddr_bits);
-  uint64_t map_p2v(uint64_t ppn, uint32_t flags);
   int virtual_mem_reserve(uint64_t dev_addr, uint64_t size, int flags);
 
   // Install an identity (VA == PA) mapping covering [addr, addr + size).
@@ -86,7 +85,7 @@ public:
 
   // Push every dirty shadow PT page to device memory (one device write
   // per dirty page). Implicitly invoked at the end of init() /
-  // phy_to_virt_map() / install_identity_map() / map_p2v() so callers
+  // phy_to_virt_map() / install_identity_map() so callers
   // can ignore it; exposed publicly for explicit pre-launch sync.
   int flush();
 
