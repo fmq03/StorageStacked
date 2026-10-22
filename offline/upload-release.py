@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import threading
 import time
+from urllib.parse import urlencode
 
 
 class UploadPacer:
@@ -80,13 +81,14 @@ def main():
     # A draft is discoverable through the authenticated release list before
     # its tag becomes available through the published-release endpoint.
     candidates = gh('api', '--paginate', f'repos/{options.repo}/releases?per_page=100',
-                    '--jq', '.[] | {id,draft,html_url,tag_name}')
+                    '--jq', '.[] | {id,draft,html_url,tag_name,upload_url}')
     releases = [item for item in map(json.loads, candidates.splitlines())
                 if item['tag_name'] == options.tag]
     if len(releases) != 1:
         raise RuntimeError('未找到唯一对应的 Release：'+options.tag)
     release = releases[0]
     endpoint = f'repos/{options.repo}/releases/{release["id"]}/assets'
+    upload_url = release['upload_url'].split('{', 1)[0]
 
     def assets():
         response = gh('api', '--paginate', endpoint+'?per_page=100',
@@ -117,8 +119,13 @@ def main():
                     if existing['state'] == 'uploaded' and existing['size'] == path.stat().st_size:
                         break
                     gh('api', '--method', 'DELETE', f'repos/{options.repo}/releases/assets/{existing["id"]}')
-                gh('release', 'upload', options.tag, path, '--repo', options.repo,
-                   before_attempt=pacer.reserve)
+                uploaded = json.loads(gh(
+                    'api', '--method', 'POST', upload_url+'?'+urlencode({'name': path.name}),
+                    '--header', 'Content-Type: application/octet-stream', '--input', path,
+                    '--jq', '{id,name,size,state}', before_attempt=pacer.reserve))
+                if (uploaded['name'] != path.name or uploaded['size'] != path.stat().st_size
+                        or uploaded['state'] != 'uploaded'):
+                    raise RuntimeError('Remote upload response does not match the local file')
                 break
             except (RuntimeError, subprocess.TimeoutExpired) as error:
                 if attempt == 5:
