@@ -1,0 +1,179 @@
+{
+  "passed": true,
+  "source_commit": "fea1810797a570ae10515916f806bf66d44c3ffe",
+  "image": "zhongxing-storagestacked:offline-20261022",
+  "actual_docker_server": "29.1.3",
+  "compatibility_scope": "Simulated clone3 EPERM on the actual current Docker; not a Docker 20.10 host acceptance.",
+  "compatibility": {
+    "passed": true,
+    "image": "zhongxing-storagestacked:offline-20261022",
+    "cases": [
+      {
+        "case": "original_default",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "case": "original_clone3_eperm",
+        "exit_code": 1,
+        "output": "clang++: error: unable to execute command: posix_spawn failed: Operation not permitted\n"
+      },
+      {
+        "case": "fixed_clone3_eperm",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "case": "fixed_default",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "case": "previous_denials_preserved",
+        "exit_code": 0,
+        "output": "clone3 ENOSYS; unrelated getpriority EPERM preserved\n"
+      }
+    ]
+  },
+  "arm_device_prefetch": {
+    "passed": true,
+    "source_commit": "fea1810797a570ae10515916f806bf66d44c3ffe",
+    "summary": "offline/results/check-20261022-185201-1155199/arm-cache/20261022-105204-18415ad1/vortex/smoke/summary.json",
+    "output": 42,
+    "active_cpus": 4,
+    "uncacheable_prefetches_rejected": 5,
+    "checks": {
+      "check_summary": {
+        "passed": true,
+        "axi_data_bits": 256,
+        "transactions": 2305,
+        "axi_handshakes": 7991,
+        "max_tlm_latency_ns": 317.0,
+        "coverage": {
+          "narrow_bursts": 1069,
+          "full_width_bursts": 1236,
+          "bursts_256_beats": 0,
+          "masked_write_beats": 4,
+          "aw_before_w": 2127,
+          "w_before_aw": 0,
+          "error_responses": 0,
+          "checked_read_bytes": 8860
+        }
+      },
+      "aou_check_summary": {
+        "passed": true,
+        "master_data_bits": 256,
+        "wide_handshakes": 7991,
+        "wide_vcd_data_beats": 3559,
+        "width": 256,
+        "planes": 2,
+        "memory_completed": 2305,
+        "memory_errors": 0,
+        "target_reads": 178,
+        "target_writes": 2127,
+        "target_read_beats": 324,
+        "target_write_beats": 3235,
+        "tx_flits": 7717,
+        "rx_flits": 11533,
+        "forward_replays": 0,
+        "reverse_replays": 0,
+        "crc_errors": 0,
+        "order_violations": 0
+      },
+      "memsim_check": {
+        "passed": true,
+        "bursts": 2305,
+        "children": 3547,
+        "errors": 0,
+        "image_bytes": 75584,
+        "window_bytes": 4294967296,
+        "period_fs": 250000,
+        "commands": {
+          "REFpb": 278816,
+          "ACT": 172,
+          "WR": 3235,
+          "PREpb": 172,
+          "RD": 312
+        },
+        "dfi_data_events": 6019,
+        "submit_stalls": 113,
+        "response_stalls": 0
+      },
+      "memsim_core": {
+        "passed": true,
+        "submitted": 3547,
+        "returned": 3547,
+        "submit_stalls": 113,
+        "cycles": 8504204,
+        "commands": 282707,
+        "dfi_events": 288726,
+        "command_errors": 0,
+        "dfi_errors": 0
+      }
+    },
+    "wave": {
+      "offline-6bb0ae7eb3d44daabf9a39d277d5b165": {
+        "passed": true,
+        "source": "../../../../user/smoke/result/offline-6bb0ae7eb3d44daabf9a39d277d5b165",
+        "sampled_rising_edges": 1063026,
+        "handshakes": {
+          "AW": 2127,
+          "W": 3235,
+          "B": 2127,
+          "AR": 178,
+          "R": 324
+        },
+        "stalled_edges": {
+          "W": 5354,
+          "B": 1144,
+          "R": 187
+        },
+        "first_valid_ns": {
+          "wvalid": 1731514.0,
+          "awvalid": 1731520.0,
+          "bvalid": 1731566.0,
+          "arvalid": 1843992.0,
+          "rvalid": 1844038.0
+        },
+        "ready_transitions": {
+          "arready": 2,
+          "awready": 2,
+          "bready": 425207,
+          "rready": 303720,
+          "wready": 4175
+        },
+        "first_handshake_ns": {
+          "AW": 1731522.0,
+          "W": 1731526.0,
+          "B": 1731568.0,
+          "AR": 1843994.0,
+          "R": 1844044.0
+        },
+        "checked": [
+          "VCD/CSV equality",
+          "VALID/payload hold",
+          "clocked output transitions",
+          "BVALID after AW/all W",
+          "RVALID after AR",
+          "WLAST/RLAST",
+          "drained"
+        ]
+      }
+    }
+  },
+  "npu_external_l0_configuration": {
+    "passed": true,
+    "output": 42,
+    "model": {
+      "fetch_l0_enabled": true,
+      "itcm_kib": 8,
+      "dtcm_kib": 32,
+      "rvv_enabled": true,
+      "float_enabled": true,
+      "itcm_base": 0,
+      "dtcm_base": 65536,
+      "csr_base": 196608
+    },
+    "summary": "/home/hy258/hy/zhongxing/offline/results/docker-refresh-20261022/l0-prefetch-results/20261022-105201-25273d35/summary.json"
+  }
+}

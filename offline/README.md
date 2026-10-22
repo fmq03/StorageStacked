@@ -62,6 +62,7 @@ NPU `fetch_l0_enabled` 可选 `true` 或 `false`，默认 `false`；ITCM/DTCM (K
 `8/32`、`512/512`、`1024/1024`。镜像包含六种 RTL 模型、对应的 Chisel/Verilator 构建依赖和设备库，
 按配置选择或增量重建。AXI `burst_beats` 支持 `1/2/4/8/16`，默认 `4`。
 CPU 的 ARM/x86 配置与 GPU 各级缓存参数沿用当前项目实现，具体约束见对应 `docs/`。
+GPU `threads` 表示每个 warp 的线程数，`warps` 表示每核的 warp 容量。TinyLLM 的工作组线程数为模型维度与两者乘积的较小值；当前默认容量为 4 线程/warp、4 warp/核，实际使用 8 线程、2 个 warp。
 
 NPU 每个场景顶层保留 `report.md`、`summary.json`，内容按 `config/`、`logs/`、`build/`、
 `traces/`、`checks/`、`views/` 分组；Vortex 保留自身结果格式。配置、执行报告和实际模型信息随结果导出。

@@ -84,6 +84,7 @@ for device in ('vortex','coralnpu'):
     execution[device]=llm['execution']
     if device=='vortex':
         vortex_config=json.loads((llm_paths[0].parent/'input.json').read_text())['gpu']
+        vortex_model=llm['architecture']
 assert execution['coralnpu']['core']=='RvvCoreMiniAxi'
 assert execution['coralnpu']['linear']=='RVV FP32'
 assert execution['coralnpu']['rvv_linear_calls']==42
@@ -102,8 +103,15 @@ assert coral_burst['write_bursts']+coral_burst['read_bursts']==coral_run['source
 customer_coral=json.loads((summaries[0].parent/acceptance['cases']['coralnpu/llm']['summary']).read_text())
 assert customer_coral['passed'] is True
 assert customer_coral['axi_burst']==coral_burst
-assert execution['vortex']['threads']==execution['vortex']['active_threads']==vortex_config['threads']
-assert execution['vortex']['warps']==vortex_config['warps'] and execution['vortex']['linear_calls']==42
+workgroup_threads=min(vortex_model['dim'],vortex_config['threads']*vortex_config['warps'])
+used_warps=(workgroup_threads+vortex_config['threads']-1)//vortex_config['threads']
+assert execution['vortex']['threads']==execution['vortex']['active_threads']==workgroup_threads
+assert execution['vortex']['warps']==used_warps<=vortex_config['warps']
+assert execution['vortex']['linear_calls']==42
+vortex_simt={'configured_threads_per_warp':vortex_config['threads'],
+             'configured_warps_per_core':vortex_config['warps'],
+             'model_dimension':vortex_model['dim'],'workgroup_threads':workgroup_threads,
+             'used_warps':used_warps}
 rtl=json.loads((test_path.parent/regression['cases']['coralnpu']['rtl_summary']).read_text())
 expected={f'i{i}-d{d}-l0{int(l0)}-{project}'
           for i,d in ((8,32),(512,512),(1024,1024))
@@ -117,7 +125,8 @@ assert set(rtl['negative'])=={'wrong_loaded_model','wrong_loaded_l0'}
 assert all(case['rejected'] for case in rtl['negative'].values())
 verification={'passed':True,'image':image,'platform':'linux/amd64',
               'network':'none','pull':'never','source_versions':versions,
-              'regressions':embedded,'execution':execution,'coralnpu_axi_burst':coral_burst,
+              'regressions':embedded,'execution':execution,'vortex_simt':vortex_simt,
+              'coralnpu_axi_burst':coral_burst,
               'benchmark_variants':maker['benchmark_variants'],
               'coralnpu_rtl':rtl,'maker_evidence':str(test_path),
               'customer_first_use':{'automatic_import':True,

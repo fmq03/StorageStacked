@@ -1,0 +1,53 @@
+{
+  "passed": true,
+  "created_utc": "2026-10-22T11:42:35.055132+00:00",
+  "image": "zhongxing-storagestacked:offline-20261022",
+  "parts": 661,
+  "total_bytes": 16509255680,
+  "actual_extraction": true,
+  "files_compared_byte_for_byte": [
+    {
+      "name": "ACCEPTANCE.json",
+      "bytes": 19309
+    },
+    {
+      "name": "DELIVERY.json",
+      "bytes": 20468
+    },
+    {
+      "name": "DOCKER_COMPATIBILITY.md",
+      "bytes": 5681
+    },
+    {
+      "name": "SOURCE_VERSIONS.json",
+      "bytes": 18067
+    },
+    {
+      "name": "VALIDATION.json",
+      "bytes": 49040
+    },
+    {
+      "name": "docker-compat-entrypoint.py",
+      "bytes": 1917
+    },
+    {
+      "name": "run-seccomp-check.sh",
+      "bytes": 247
+    },
+    {
+      "name": "run.sh",
+      "bytes": 2963
+    },
+    {
+      "name": "zhongxing-storagestacked-offline.tar.gz",
+      "bytes": 16509120312
+    },
+    {
+      "name": "使用说明.md",
+      "bytes": 6940
+    }
+  ],
+  "archive_import_and_default_run": "matching exported archive; see DELIVERY.json and ACCEPTANCE.json",
+  "restored_package": "/home/hy258/hy/zhongxing/offline/results/split-restored-20261022/zhongxing-storagestacked-offline-20261022",
+  "customer_host_acceptance": "not performed on customer host"
+}
