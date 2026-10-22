@@ -8,3 +8,9 @@
 运行侧对同一外部存储块的读写冲突等待真实完成，保留异步链路中的访问顺序；验收按事务时刻独立检查。
 
 主机 ISA 通过用户配置 `host.isa` 选择 x86-64 或 AArch64。运行支持分别选择 gem5 构建、主机 ELF、stub/backend 运行库与 ARM 加载器；`src/arch/arm/mmu.cc` 和 `translation_trace.hh` 为 SE 模式添加有界的真实地址转换采样，与 x86 的验收证据保持同一格式，不修改翻译结果。
+
+## ARM SE 设备预取
+
+`arm_se_device_prefetch.patch` 已应用到当前源码；当前工作区无需重复应用。它修复 ARM SE 直接页表路径遗漏的不可缓存预取检查。Ubuntu 20.04 AArch64 glibc 的 `memcpy` 会对设备 BAR 发出 `PRFM`，原路径将其送入缓存/设备并使 TimingSimpleCPU 等待无法返回的预取响应。修复沿用 gem5 全系统路径的 `PrefetchUncacheable`，由 CPU 撤销预取，正常读写继续经过真实存储链路，并累计 `mmu.prefetchFaults`。
+
+离线验收的 ARM/GPU 缓存 SMOKE 检查输出、四核执行、完整存储链路以及实际拒绝的设备预取数。

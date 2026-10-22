@@ -358,8 +358,16 @@ MMU::translateSe(const RequestPtr &req, ThreadContext *tc, Mode mode,
     } else {
         req->setPaddr(pte->paddr + p->pTable->pageOffset(vaddr));
 
-        if (pte->flags & EmulationPageTable::Uncacheable)
+        if (pte->flags & EmulationPageTable::Uncacheable) {
+            // SE mappings must reject device prefetches just like FS entries.
+            if (req->isPrefetch()) {
+                stats.prefetchFaults++;
+                return std::make_shared<PrefetchAbort>(
+                    vaddr_tainted, ArmFault::PrefetchUncacheable,
+                    state.isStage2, TranMethod::VmsaTran);
+            }
             req->setFlags(Request::UNCACHEABLE);
+        }
 
         auto fault = finalizePhysical(req, tc, mode);
         if (fault == NoFault) {
