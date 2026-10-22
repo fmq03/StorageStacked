@@ -44,6 +44,9 @@ sys.path.insert(0,str(runtime))
 from configure import load_config
 from paths import ROOT
 from platform_build import build_simulator
+from native_build import bazel
+bazel('build', [f'//native:i{i}-d{d}-l0{l0}.so'
+                for i,d in ((8,32),(512,512),(1024,1024)) for l0 in (0,1)])
 for itcm,dtcm in ((8,32),(512,512),(1024,1024)):
     for l0 in (False,True):
         config=load_config(ROOT/'user/smoke/config.json')
