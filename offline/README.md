@@ -86,7 +86,7 @@ Vortex、CoralNPU 和六种 RTL 配置。历史运行结果、Git 元数据和�
 Vortex 工具环境限制在子进程内，NPU 构建使用与容器运行时一致的独立环境；构建容器退出后，`finalize-image.sh` 在新容器中清除临时服务、worker 和 sandbox 状态。
 `SOURCE_VERSIONS.json` 记录工作区提交、未提交改动与各子项目版本，不能用旧结果证明新镜像通过。
 
-`validate.sh` 用新镜像执行 `check` 和一次 `test`，并行验证 ARM 主机与自定义 GPU 缓存的 SMOKE，检查 AArch64 ELF、实际参与 CPU 及输出；`export.sh` 保存归档，移除交付标签后通过用户
+`validate.sh` 用新镜像执行 `check` 和一次 `test`，并行验证 ARM 主机与自定义 GPU 缓存的 SMOKE，检查 AArch64 ELF、实际参与 CPU、输出及实际发生的不可缓存设备预取拒绝；`export.sh` 保存归档，移除交付标签后通过用户
 `run.sh` 自动重新导入，再执行默认五项。只有这些检查全部通过才生成 `DELIVERY.json` 和 `VALIDATION.json`。
 新导出目录为 `offline/dist/zhongxing-storagestacked-offline-20261022/`。已存在的交付包拒绝覆盖。
 `split-release.sh` 将整个目录打成连续 tar 分块，每块 25,000,000 字节；最后一块较小。
@@ -96,3 +96,7 @@ Vortex 工具环境限制在子进程内，NPU 构建使用与容器运行时一
 `VALIDATION.json` 保留制作方完整回归与 RTL 配置检查；客户主机仍以自己的实际运行结果为准。
 镜像与分块不放入 Git，通过本仓库 Release 分发。建议为下载、解包、Docker 导入和波形结果预留至少 150 GB 空间，
 各文件精确大小以本次 `PACKAGE.json`、`DELIVERY.json` 为准。
+
+发布方可用 `upload-release.py` 上传已验收的分块目录。脚本按远端文件名、大小与状态恢复上传，
+并保存上传请求的时间记录；超过每小时额度时分时继续，恢复时使用相同的 `--report` 路径。
+上传完成还需核对附件集合，最后公开 Release。

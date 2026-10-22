@@ -38,7 +38,7 @@ arm_pid=
     exit 1
 }
 python3 - "$here" "$run_results" "$validation" <<'PY'
-import json,sys
+import json,re,sys
 from pathlib import Path
 here=Path(sys.argv[1]); result_root=Path(sys.argv[2]); validation=Path(sys.argv[3]); summaries=[]
 for p in result_root.glob('*/summary.json'):
@@ -57,9 +57,12 @@ full=json.loads((here/summaries[0]['path']).read_text());assert arm['source_vers
 elf=(arm_case.parent/'build/host.elf').read_bytes()
 assert elf[:4]==b'\x7fELF' and elf[5]==1 and int.from_bytes(elf[18:20],'little')==183
 assert device['host_execution']['active_cpus']==config['host']['num_cpus']
+prefetches=sum(map(int,re.findall(r'\.mmu\.prefetchFaults\s+(\d+)',(arm_case.parent/'stats.txt').read_text())))
+assert prefetches>0,'ARM fixture did not exercise device prefetch rejection'
 variant={'passed':True,'path':str(arm_paths[0].relative_to(here)),
          'device_summary':str(arm_case.relative_to(here)),
          'host_elf_machine':183,'configuration':config,
+         'uncacheable_prefetches_rejected':prefetches,
          'output':42,'host_execution':device['host_execution']}
 (validation/'acceptance.json').write_text(json.dumps({'passed':True,'network':'none','pull':'never','host_mounts':['results (read-write)','compatibility helper (read-only)','ARM configuration (read-only)'],'runs':summaries,'benchmark_variants':{'arm_gpu_cache_smoke':variant}},ensure_ascii=False,indent=2)+'\n')
 print('PASS：工具检查、完整回归及 ARM/GPU 缓存 SMOKE；导出脚本另行验证归档首次导入与默认入口。')

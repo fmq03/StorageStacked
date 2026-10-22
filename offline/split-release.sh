@@ -10,9 +10,15 @@ destination=${STORAGE_SPLIT_DIR:-$here/dist/$bundle-25MB}
 }
 [[ ! -e $destination ]] || { echo "分块目录已存在：$destination" >&2; exit 1; }
 mkdir -p -- "$destination"
-# The image is already gzip-compressed. The outer tar keeps the complete
-# delivery together without recompressing it or creating another huge file.
-tar -C "$here/dist" -cf - "$bundle" | split -b 25000000 -d -a 4 - "$destination/$bundle.tar.part-"
+# Keep the immutable image first so a draft can receive its completed parts
+# while acceptance reports are still being generated.
+archive_name=zhongxing-storagestacked-offline.tar.gz
+members=("$bundle/$archive_name")
+for file in "$source_dir"/*; do
+    [[ -f $file ]] || { echo "交付目录含非文件项：$file" >&2; exit 1; }
+    [[ ${file##*/} == "$archive_name" ]] || members+=("$bundle/${file##*/}")
+done
+tar -C "$here/dist" -cf - "${members[@]}" | split -b 25000000 -d -a 4 - "$destination/$bundle.tar.part-"
 cp "$here/extract-release.sh" "$destination/extract.sh"
 cp "$here/download-release.sh" "$destination/download.sh"
 for name in run.sh docker-compat-entrypoint.py run-seccomp-check.sh DOCKER_COMPATIBILITY.md; do
