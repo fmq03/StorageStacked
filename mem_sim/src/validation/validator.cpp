@@ -365,6 +365,8 @@ void validate_and_replay_bank_state(
     }
   };
 
+  require_state(!channel_state.self_refresh || issued.command == Command::SREFEX,
+                "self-refresh requires SREFEX before other commands");
   switch (issued.command) {
   case Command::ACT:
     require_state(!spec.split_activate,

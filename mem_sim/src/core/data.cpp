@@ -611,6 +611,7 @@ void apply_physical_storage_stats(Stats &stats,
   stats.power_events = storage.power_events;
   stats.thermal_updates = storage.thermal_updates;
   stats.power_energy_pj = storage.power_energy_pj;
+  stats.self_refresh_energy_pj = storage.self_refresh_energy_pj;
   stats.power_act_energy_pj = storage.power_act_energy_pj;
   stats.power_pre_energy_pj = storage.power_pre_energy_pj;
   stats.power_read_energy_pj = storage.power_read_energy_pj;
@@ -963,6 +964,7 @@ PhysicalStorageStats MemoryImage::storage_stats() const {
   stats.power_events = power_events_;
   stats.thermal_updates = thermal_updates_;
   stats.power_energy_pj = power_energy_pj_;
+  stats.self_refresh_energy_pj = self_refresh_energy_pj_;
   stats.power_act_energy_pj = power_act_energy_pj_;
   stats.power_pre_energy_pj = power_pre_energy_pj_;
   stats.power_read_energy_pj = power_read_energy_pj_;
@@ -1397,6 +1399,49 @@ void MemoryImage::apply_thermal_event(const PhysicalAddress &physical,
     couple_thermal_neighbor(key, 0, 0, -1, vertical, cycle, true);
     couple_thermal_neighbor(key, 0, 0, 1, vertical, cycle, true);
   }
+}
+
+void MemoryImage::record_self_refresh_residency(int channel, Cycle cycle,
+                                               double time_ns) {
+  if (!spec_ || channel < 0 || channel >= spec_->org.channels ||
+      !std::isfinite(time_ns) || time_ns < 0.0)
+    throw std::invalid_argument("invalid self-refresh residency scope/time");
+  if (!options_.power_enabled || time_ns == 0.0) return;
+  const double energy = options_.idd_vdd * options_.idd6x_ma *
+      options_.idd_devices_per_rank * spec_->org.ranks * time_ns *
+      options_.power_scale;
+  self_refresh_energy_pj_ += energy;
+  power_energy_pj_ += energy;
+  if (!options_.thermal_enabled || energy == 0.0) return;
+  if (self_refresh_thermal_grid_.empty()) {
+    DecodedAddress decoded;
+    decoded.channel = channel;
+    const auto geometry = physical_address(0, &decoded);
+    const int grid_cols = std::max(1, options_.thermal_grid_cols_per_tile);
+    const int grid_rows = std::max(1, options_.thermal_grid_rows_per_tile);
+    // HBM DRAMsim3 distributes background energy over memory planes. Our
+    // existing grid has memory layers only (no extra logic plane). LPDDR uses
+    // the same uniform-plane method on this model's stack/grid abstraction.
+    for (int layer = 0; layer < std::max(1, spec_->stack_height); ++layer)
+      for (int y = 0; y < geometry.thermal_rows; ++y)
+        for (int x = 0; x < geometry.thermal_cols; ++x) {
+          auto p = geometry;
+          p.layer = p.die = p.tile_z = p.thermal_z = layer;
+          p.thermal_x = x; p.thermal_y = y;
+          p.tile_x = x / grid_cols; p.tile_y = y / grid_rows;
+          p.thermal_grid_x = x % grid_cols;
+          p.thermal_grid_y = y % grid_rows;
+          p.tile_id = (layer * p.floorplan_rows + p.tile_y) *
+                      p.floorplan_cols + p.tile_x;
+          p.channel = p.pseudo_channel = p.sid = p.rank = -1;
+          p.bank_group = p.bank = p.row = p.column = -1;
+          p.subarray = p.mat_x = p.mat_y = p.mat_id = p.cell_x = p.cell_y = -1;
+          self_refresh_thermal_grid_.push_back(p);
+        }
+  }
+  const double per_cell = energy / self_refresh_thermal_grid_.size();
+  for (const auto& p : self_refresh_thermal_grid_)
+    apply_thermal_event(p, cycle, per_cell);
 }
 
 void MemoryImage::record_command_event(Command command,

@@ -28,6 +28,8 @@ transaction completion、64 B host request 的多子事务重组、多 Stack 路
 
 本目录保存回归测试。测试覆盖 CLI 主路径、统计字段、命令序列、trace validation 和若干协议边界。
 
+Self-Refresh 回归位于 `sequence_tests.cpp`：四协议 × Direct/Behavioral 自动进出、恢复时间、CMD/DFI 验证及驻留非法 ACT 拒绝；覆盖十个刷新间隔的外部义务抑制、IDD6 能量手算、重复 finalize、两 Stack × 两 Channel 汇总和唤醒隔离、进入请求取消、满维护队列退出及维护命令唤醒。方法参考 DRAMsim3，作用域保留本项目 Channel 抽象。
+
 主要文件：
 
 - `smoke.sh`：端到端 CLI smoke regression。

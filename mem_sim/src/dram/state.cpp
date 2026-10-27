@@ -5,6 +5,8 @@
 namespace hbm_sim {
 
 CommandStateResult check_command_state(const CommandStateSnapshot& state, Command cmd) {
+  if (state.self_refresh_active && cmd != Command::SREFEX)
+    return {false, "self-refresh requires SREFEX before other commands"};
   // 这里刻意只用 CommandStateSnapshot，不读取 BankState/TimingEngine。这样同一套
   // 状态机既能服务在线 Controller，也能服务离线 Validator 或未来插件。
   switch (cmd) {

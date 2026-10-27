@@ -200,6 +200,9 @@ struct Stats {
   std::uint64_t low_power_entries = 0;
   std::uint64_t low_power_exits = 0;
   std::uint64_t low_power_cycles = 0;
+  std::uint64_t self_refresh_cycles = 0;
+  double self_refresh_time_ns = 0.0;
+  double self_refresh_energy_pj = 0.0;
   std::uint64_t low_power_exit_blocked_cycles = 0;
   // 命令/地址总线保护带来的 bit 级开销，例如 LPDDR6 CA parity。它和
   // interface_read/write_bytes 分开保存，避免把命令开销误认为 payload 数据。
@@ -235,8 +238,9 @@ struct Stats {
   std::uint64_t write_queue_len_sum = 0;
   std::uint64_t priority_queue_len_sum = 0;
   std::uint64_t active_queue_len_sum = 0;
-  // 读延迟累计值，配合 completed_reads 计算平均值。
+  // Controller 接收至当前模型完成点的事务延迟累计值；包含转发/合并完成。
   std::uint64_t total_read_latency = 0;
+  std::uint64_t total_write_latency = 0;
   // 完成 DRAM transaction 折算出的 payload 数据量。HBM4 的一个 64B host
   // line 默认拆成两个 32B transaction，因此不能直接乘 host line_size。
   std::uint64_t read_bytes = 0;
@@ -259,6 +263,9 @@ struct Stats {
 
   double avg_read_latency() const {
     return completed_reads == 0 ? 0.0 : static_cast<double>(total_read_latency) / completed_reads;
+  }
+  double avg_write_latency() const {
+    return completed_writes == 0 ? 0.0 : static_cast<double>(total_write_latency) / completed_writes;
   }
 
   double read_queue_len_avg_per_controller() const {

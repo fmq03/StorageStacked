@@ -197,6 +197,7 @@ private:
   // 在该命令真正 issue 前保留状态，避免 PHY 与 controller 状态机脱节。
   std::optional<Command> explicit_low_power_exit_pending_;
   Cycle low_power_idle_since_ = 0;
+  std::optional<std::uint64_t> automatic_self_refresh_request_;
   Cycle low_power_exit_until_ = 0;
   std::uint64_t next_controller_sequence_ = 1;
 

@@ -180,6 +180,9 @@ ResultFields collect_stats(const Stats& stats) {
   record_field(fields, "low_power_entries", stats.low_power_entries);
   record_field(fields, "low_power_exits", stats.low_power_exits);
   record_field(fields, "low_power_cycles", stats.low_power_cycles);
+  record_field(fields, "self_refresh_cycles", stats.self_refresh_cycles);
+  record_field(fields, "self_refresh_time_ns", stats.self_refresh_time_ns);
+  record_field(fields, "self_refresh_energy_pJ", stats.self_refresh_energy_pj);
   record_field(fields, "low_power_exit_blocked", stats.low_power_exit_blocked_cycles);
   record_field(fields, "interface_command_bits", stats.interface_command_bits);
   record_field(fields, "interface_overhead_bits", stats.interface_overhead_bits);
@@ -215,6 +218,7 @@ ResultFields collect_stats(const Stats& stats) {
   record_field(fields, "hit_cycle_limit", stats.hit_cycle_limit);
   // Retain full numerical precision; rounding is a presentation concern.
   record_field(fields, "avg_read_latency", stats.avg_read_latency());
+  record_field(fields, "avg_write_latency", stats.avg_write_latency());
   record_field(fields, "read_q_avg_per_ctrl", stats.read_queue_len_avg_per_controller());
   record_field(fields, "write_q_avg_per_ctrl", stats.write_queue_len_avg_per_controller());
   record_field(fields, "priority_q_avg_per_ctrl", stats.priority_queue_len_avg_per_controller());

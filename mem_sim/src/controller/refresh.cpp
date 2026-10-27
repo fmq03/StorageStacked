@@ -12,6 +12,7 @@ namespace hbm_sim {
 void RefreshManager::reset(const DramSpec &spec, Cycle clk) {
   validate_spec(spec);
   rank_cursor_ = 0;
+  self_refresh_active_ = false;
   // per-bank refresh 用 nREFIpb；all-bank refresh 用 nREFI。若某个 preset 没有
   // 给 nREFIpb，则回退到 nREFI，保证 refresh manager 不因未建 per-bank
   // 表而崩溃。
@@ -45,7 +46,7 @@ RefreshTickResult RefreshManager::tick(const DramSpec &spec, Cycle clk,
   for (std::size_t rank = 0; rank < rank_states_.size(); ++rank) {
     auto &state = rank_states_[rank];
     while (clk >= state.next_refresh_cycle) {
-      state.credit++;
+      if (!self_refresh_active_) state.credit++;
       state.next_refresh_cycle += interval_ticks;
       newly_due[rank] = true;
     }
@@ -53,6 +54,10 @@ RefreshTickResult RefreshManager::tick(const DramSpec &spec, Cycle clk,
       state.pullin_count = 0;
   }
 
+  if (self_refresh_active_) {
+    result.credit = aggregate_credit();
+    return result;
+  }
   const int credit_limit = std::max(0, spec.refresh_credit_limit);
   for (std::size_t offset = 0; offset < rank_states_.size(); ++offset) {
     const int rank = (rank_cursor_ + static_cast<int>(offset)) %

@@ -156,6 +156,17 @@ bool Controller::enqueue(Request req) {
     }
   }
   req.arrival = clk_;
+  if (req.type != RequestType::Maintenance && automatic_self_refresh_request_) {
+    const auto id = *automatic_self_refresh_request_;
+    std::erase_if(pending_maintenance_, [id](const Request& r) {
+      return r.id == id && r.next == Command::SREFEN;
+    });
+    std::erase_if(request_queues_[BufferKind::Priority], [id](const Request& r) {
+      return r.id == id && r.next == Command::SREFEN;
+    });
+    automatic_self_refresh_request_.reset();
+    low_power_idle_since_ = 0;
+  }
   if (low_power_active_ && req.type != RequestType::Maintenance) {
     if (explicit_power_down_active_ || explicit_self_refresh_active_) {
       // PDE/SREFEN 已经真实进入 PHY，不能只清 controller 标志。由 controller
@@ -578,6 +589,14 @@ void Controller::tick() {
   if (low_power_active_) {
     stats_.low_power_cycles++;
   }
+  if (explicit_self_refresh_active_) {
+    stats_.self_refresh_cycles++;
+    const double time_ns = spec_.timing.tCK_ps /
+        (1000.0 * std::max(1, spec_.tick_multiplier));
+    stats_.self_refresh_time_ns += time_ns;
+    memory_image_->record_self_refresh_residency(options_.global_channel_id,
+                                                clk_, time_ns);
+  }
 
   complete_pending();
   if (low_power_exit_until_ > clk_) {
@@ -585,6 +604,23 @@ void Controller::tick() {
     return;
   }
   timing_engine_.prune_recent_acts(spec_, clk_);
+  // An automatic SREFEN may have been queued just before new work arrived.
+  // Wake on queued work as DRAMsim3 does, not solely at enqueue() time.
+  const auto needs_sref_wakeup = [](const Request& request) {
+    return request.next != Command::SREFEX && request.next != Command::SREFEN;
+  };
+  if (explicit_self_refresh_active_ && !explicit_low_power_exit_pending_ &&
+      (!request_queues_[BufferKind::Read].empty() ||
+       !request_queues_[BufferKind::Write].empty() ||
+       !request_queues_[BufferKind::Active].empty() ||
+       std::any_of(request_queues_[BufferKind::Priority].begin(),
+                   request_queues_[BufferKind::Priority].end(), needs_sref_wakeup) ||
+       std::any_of(pending_maintenance_.begin(), pending_maintenance_.end(),
+                   needs_sref_wakeup))) {
+    DecodedAddress decoded;
+    schedule_maintenance(Command::SREFEX, decoded);
+    explicit_low_power_exit_pending_ = Command::SREFEX;
+  }
   schedule_refresh();
   service_pending_maintenance();
   apply_row_policy_pre_schedule();
@@ -628,8 +664,18 @@ void Controller::tick() {
       if (!low_power_active_ &&
           clk_ - low_power_idle_since_ >=
               timing_delay(std::max(0, spec_.low_power_entry_cycles))) {
-        low_power_active_ = true;
-        stats_.low_power_entries++;
+        if (spec_.low_power_mode == LowPowerMode::SelfRefresh) {
+          // DRAMsim3 waits for closed idle banks; open-page rows do not
+          // force precharge just to enter the automatic low-power policy.
+          DecodedAddress decoded;
+          if (!any_bank_busy_in_channel(decoded)) {
+            automatic_self_refresh_request_ = next_maintenance_id_;
+            schedule_maintenance(Command::SREFEN, decoded);
+          }
+        } else {
+          low_power_active_ = true;
+          stats_.low_power_entries++;
+        }
       }
     } else {
       low_power_idle_since_ = 0;
@@ -687,9 +733,11 @@ void Controller::complete_pending() {
         responses_.push_back(std::move(response));
       }
     } else if (it->type == RequestType::Write) {
-      // completion 已在发射路径确定：Direct PHY 使用发出后 1 cycle 的轻量
-      // 语义，Behavioral PHY 则等待 MemPhy 报告包含写数据时序的完成事件。
+      // completion 沿用现有执行路径：Direct 的普通 WR 是发出后 1 tick，
+      // WRA 还受自动 PRE/write-recovery gate 约束；Behavioral 等待 PHY
+      // 完成事件。这里仅累计事务延迟，不重新定义任一完成时序。
       stats_.completed_writes++;
+      stats_.total_write_latency += it->completion - it->arrival;
       if (!it->bypass_dram) {
         const std::size_t payload_bytes = request_data_size(spec_, *it);
         const int interface_bytes =
@@ -1607,13 +1655,18 @@ void Controller::issue(Candidate cand) {
     low_power_active_ = explicit_self_refresh_active_;
     stats_.low_power_exits++;
   } else if (issued == Command::SREFEN) {
+    automatic_self_refresh_request_.reset();
     if (!explicit_self_refresh_active_) {
       stats_.low_power_entries++;
     }
     explicit_self_refresh_active_ = true;
+    refresh_manager_.set_self_refresh(true);
     low_power_active_ = true;
   } else if (issued == Command::SREFEX) {
     explicit_self_refresh_active_ = false;
+    refresh_manager_.set_self_refresh(false);
+    low_power_exit_until_ = std::max(low_power_exit_until_,
+        clk_ + timing_delay(std::max(1, spec_.timing.nSREFEX)));
     if (explicit_low_power_exit_pending_ == Command::SREFEX) {
       explicit_low_power_exit_pending_.reset();
     }
@@ -1904,17 +1957,46 @@ void Controller::schedule_refresh() {
 }
 
 void Controller::service_pending_maintenance() {
+  if (explicit_self_refresh_active_) {
+    for (auto* queue : {&pending_maintenance_, &request_queues_[BufferKind::Priority]}) {
+      auto exit = std::find_if(queue->begin(), queue->end(), [](const Request& r) {
+        return r.next == Command::SREFEX;
+      });
+      if (exit != queue->end()) std::rotate(queue->begin(), exit, std::next(exit));
+    }
+  }
+  // A full queue of commands blocked by SREF must not prevent its exit.
+  // Requeue one request while preserving bounded priority-buffer capacity.
+  if (explicit_self_refresh_active_ && !pending_maintenance_.empty() &&
+      pending_maintenance_.front().next == Command::SREFEX &&
+      !buffer_has_space(BufferKind::Priority)) {
+    Request exit = pending_maintenance_.front();
+    pending_maintenance_.pop_front();
+    pending_maintenance_.push_front(request_queues_[BufferKind::Priority].back());
+    request_queues_[BufferKind::Priority].pop_back();
+    request_queues_[BufferKind::Priority].push_front(std::move(exit));
+  }
   // pending_maintenance_ 是无限小队列，用来暂存 manager 生成但 priority buffer
   // 暂时放不下的维护请求。每个 tick 尽可能搬运，保持维护压力可见。
   while (!pending_maintenance_.empty() &&
          buffer_has_space(BufferKind::Priority)) {
-    request_queues_[BufferKind::Priority].push_back(pending_maintenance_.front());
+    if (pending_maintenance_.front().next == Command::SREFEX)
+      request_queues_[BufferKind::Priority].push_front(pending_maintenance_.front());
+    else
+      request_queues_[BufferKind::Priority].push_back(pending_maintenance_.front());
     pending_maintenance_.pop_front();
   }
 }
 
 void Controller::schedule_maintenance(Command cmd,
                                       const DecodedAddress &decoded) {
+  if (cmd == Command::SREFEX) {
+    const auto is_exit = [](const Request& r) { return r.next == Command::SREFEX; };
+    if (std::any_of(pending_maintenance_.begin(), pending_maintenance_.end(), is_exit) ||
+        std::any_of(request_queues_[BufferKind::Priority].begin(),
+                    request_queues_[BufferKind::Priority].end(), is_exit))
+      return;
+  }
   // 维护请求没有真实地址，decoded 直接携带目标 bank/scope。id 使用独立的
   // next_maintenance_id_，避免和 frontend request id 混淆。
   Request req;
@@ -1925,7 +2007,10 @@ void Controller::schedule_maintenance(Command cmd,
   req.decoded = decoded;
   req.inject_cycle = clk_;
   req.arrival = clk_;
-  pending_maintenance_.push_back(req);
+  if (cmd == Command::SREFEX)
+    pending_maintenance_.push_front(req);
+  else
+    pending_maintenance_.push_back(req);
   stats_.maintenance_requests++;
 }
 

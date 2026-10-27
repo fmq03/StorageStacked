@@ -103,7 +103,8 @@ ResultReport make_result_report(const ResultFields& f) {
       "remaining_requests remaining_pending hit_cycle_limit system_cycles "
       "read_bytes write_bytes achieved_bw_GBps peak_bandwidth_GBps bandwidth_util_pct "
       "storage_lines_allocated storage_bytes_allocated power_energy_pJ "
-      "thermal_avg_temp_C thermal_peak_temp_C");
+      "thermal_avg_temp_C thermal_peak_temp_C self_refresh_cycles "
+      "self_refresh_time_ns self_refresh_energy_pJ");
   select(r.validation, f, "cmd_validation dfi_validation cmd_validation_checked "
       "dfi_validation_events data_checked_reads data_mismatches "
       "ecc_uncorrectable_errors golden_verified golden_mismatches");
@@ -114,12 +115,22 @@ ResultReport make_result_report(const ResultFields& f) {
     r.metrics["simulation_time_ns"] = number(f, "system_cycles") * ns;
     r.metrics["avg_read_latency_ns"] = number(f, "completed_reads") == 0
         ? ResultValue(nullptr) : ResultValue(number(f, "avg_read_latency") * ns);
+    r.metrics["avg_write_latency_ns"] = number(f, "completed_writes") == 0
+        ? ResultValue(nullptr) : ResultValue(number(f, "avg_write_latency") * ns);
     const double classified = number(f, "row_hits") + number(f, "row_misses") +
                               number(f, "row_conflicts");
     r.metrics["row_hit_pct"] = classified == 0 ? ResultValue(nullptr)
         : ResultValue(100 * number(f, "row_hits") / classified);
   }
-  if (!enabled(f, "power_model_enabled")) r.metrics.erase("power_energy_pJ");
+  if (!enabled(f, "power_model_enabled")) {
+    r.metrics.erase("power_energy_pJ");
+    r.metrics.erase("self_refresh_energy_pJ");
+  }
+  if (!f.contains("self_refresh_cycles") || number(f, "self_refresh_cycles") == 0) {
+    r.metrics.erase("self_refresh_cycles");
+    r.metrics.erase("self_refresh_time_ns");
+    r.metrics.erase("self_refresh_energy_pJ");
+  }
   if (!enabled(f, "thermal_model_enabled")) {
     r.metrics.erase("thermal_avg_temp_C");
     r.metrics.erase("thermal_peak_temp_C");
@@ -150,6 +161,9 @@ ResultReport make_result_report(const ResultFields& f) {
         s[key] = f.at(prefix + old);
       s["avg_read_latency_ns"] = number(f, prefix + "reads") == 0 ? ResultValue(nullptr)
           : ResultValue(number(f, prefix + "avg_read_latency") *
+                        number(f, "tick_duration_ps") / 1000);
+      s["avg_write_latency_ns"] = number(f, prefix + "writes") == 0 ? ResultValue(nullptr)
+          : ResultValue(number(f, prefix + "avg_write_latency") *
                         number(f, "tick_duration_ps") / 1000);
       r.stacks.push_back(std::move(s));
     }
@@ -266,12 +280,19 @@ void print_result(std::ostream& out, const ResultReport& r) {
       << "Simulation Time          : " << s("simulation_time_ns") << " ns\n"
       << "Bandwidth / Utilization  : " << s("achieved_bw_GBps") << " GB/s / " << s("bandwidth_util_pct") << "%\n"
       << "Read Transaction Latency : " << s("avg_read_latency_ns") << " ns\n"
+      << "Write Transaction Latency: " << s("avg_write_latency_ns") << " ns\n"
       << "Row Hit Rate             : " << s("row_hit_pct") << "% (first-scheduling classification)\n"
       << "Validation               : Command=" << v("cmd_validation") << "; DFI=" << v("dfi_validation")
       << "; checked_reads=" << v("data_checked_reads") << "; data_errors=" << v("data_mismatches");
   if (v("data_checked_reads") == "0") out << " (no independent data-check evidence)";
   out << '\n';
   if (r.metrics.contains("power_energy_pJ")) out << "Energy                   : " << s("power_energy_pJ") << " pJ\n";
+  if (r.metrics.contains("self_refresh_time_ns")) {
+    out << "Self-refresh Residency   : " << s("self_refresh_time_ns")
+        << " ns (sum over controllers)\n";
+    if (r.metrics.contains("self_refresh_energy_pJ"))
+      out << "Self-refresh Energy      : " << s("self_refresh_energy_pJ") << " pJ\n";
+  }
   if (r.metrics.contains("thermal_peak_temp_C")) out << "Mean / Peak Temperature  : " << s("thermal_avg_temp_C") << " / " << s("thermal_peak_temp_C") << " degC\n";
   if (r.metrics.contains("storage_lines_allocated")) out << "Backend Allocation       : " << s("storage_lines_allocated") << " lines; " << s("storage_bytes_allocated") << " B (data-byte accounting)\n";
   if (r.validation.contains("golden_mismatches")) out << "Golden Check             : " << v("golden_verified") << " lines; errors=" << v("golden_mismatches") << '\n';

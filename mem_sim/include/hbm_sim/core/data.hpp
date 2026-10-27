@@ -140,6 +140,7 @@ struct PhysicalStorageStats {
   std::uint64_t power_events = 0;
   std::uint64_t thermal_updates = 0;
   double power_energy_pj = 0.0;
+  double self_refresh_energy_pj = 0.0;
   double power_act_energy_pj = 0.0;
   double power_pre_energy_pj = 0.0;
   double power_read_energy_pj = 0.0;
@@ -356,6 +357,8 @@ public:
   // 把所有已创建的稀疏热节点同步冷却到同一查询周期。历史峰值不变；
   // 结束时调用后，thermal_avg_temp_c 和 thermal map 才具有统一时间截面。
   void advance_thermal(Cycle cycle);
+  // DRAMsim3 IDD6 residency method, adapted to our channel-wide SREF scope.
+  void record_self_refresh_residency(int channel, Cycle cycle, double time_ns);
   void record_command_event(Command command, const DecodedAddress &decoded,
                             Cycle cycle, std::size_t payload_bytes = 0);
 
@@ -453,6 +456,10 @@ private:
   std::uint64_t power_events_ = 0;
   std::uint64_t thermal_updates_ = 0;
   double power_energy_pj_ = 0.0;
+  double self_refresh_energy_pj_ = 0.0;
+  // Uniform background power map, following DRAMsim3 UpdateEpoch. Grid
+  // coordinates carry no fictitious row/bank address.
+  std::vector<PhysicalAddress> self_refresh_thermal_grid_;
   double power_act_energy_pj_ = 0.0;
   double power_pre_energy_pj_ = 0.0;
   double power_read_energy_pj_ = 0.0;

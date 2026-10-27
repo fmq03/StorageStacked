@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import contextlib
 import csv
 import json
 import os
@@ -32,6 +33,9 @@ def parse_args() -> argparse.Namespace:
     # epochs are required before using its final steady-temperature output.
     parser.add_argument("--thermal-cycles", type=int, default=20000)
     parser.add_argument("--skip-thermal-runtime", action="store_true")
+    parser.add_argument(
+        "--artifact-dir", type=Path,
+        help="preserve input traces and raw simulator outputs in this empty directory")
     parser.add_argument("--json-out", type=Path)
     return parser.parse_args()
 
@@ -69,6 +73,19 @@ def main() -> int:
     hbm_thermal_ini = dramsim_root / "configs/HBM_4Gb_x128.ini"
     for required in (binary, dramsim_binary, hbm2_ini, PROJECT_CONFIG):
         if not required.is_file():
+            # --dramsim3-root 是外部参考仓库的根目录，不是仓库自带路径。这里明确
+            # 区分“路径写错”和“没构建”，否则报错只给一个文件名，容易被当成占位符
+            # 没替换。
+            if required == dramsim_binary:
+                raise SystemExit(
+                    f"DRAMsim3 executable not found: {required}\n"
+                    f"Check --dramsim3-root (currently {dramsim_root}); it must point "
+                    f"at the DRAMsim3 repository root, and "
+                    f"{args.dramsim3_build}/ must be built with CMD_TRACE=ON:\n"
+                    f"  cmake -S {dramsim_root} -B {dramsim_root / args.dramsim3_build} "
+                    f"-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "
+                    f"-DCMD_TRACE=ON\n"
+                    f"  cmake --build {dramsim_root / args.dramsim3_build} --parallel")
             raise SystemExit(f"required file not found: {required}")
 
     ini = read_ini(hbm2_ini)
@@ -95,7 +112,15 @@ def main() -> int:
     }
 
     checks: list[dict] = []
-    with tempfile.TemporaryDirectory(prefix="hbm_dramsim3_aux_") as temp_name:
+    artifact_dir = args.artifact_dir.resolve() if args.artifact_dir else None
+    if artifact_dir:
+        if artifact_dir.exists() and any(artifact_dir.iterdir()):
+            raise SystemExit(f"artifact directory is not empty: {artifact_dir}")
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        workspace = contextlib.nullcontext(artifact_dir)
+    else:
+        workspace = tempfile.TemporaryDirectory(prefix="hbm_dramsim3_aux_")
+    with workspace as temp_name:
         temp = Path(temp_name)
         dram_trace = temp / "single_read.trace"
         dram_trace.write_text("0x0 READ 0\n", encoding="ascii")
@@ -109,8 +134,24 @@ def main() -> int:
         if completed.returncode:
             raise RuntimeError(completed.stdout + completed.stderr)
         external_stats = json.loads((dram_out / "dramsim3.json").read_text())["0"]
+        # DRAMsim3 只在编译期开了 CMD_TRACE 时才写每通道命令 trace
+        # （src/controller.cc 的 #ifdef CMD_TRACE，由 CMakeLists 的 CMD_TRACE 选项
+        # 注入）。缺失时 dramsim3main 仍会正常退出并产出 dramsim3.json，所以这里
+        # 必须显式说明原因，否则只会抛一个看起来像路径写错的 FileNotFoundError。
+        command_trace = dram_out / "dramsim3ch_0cmd.trace"
+        if not command_trace.is_file():
+            raise SystemExit(
+                f"DRAMsim3 did not write {command_trace.name}; the build at\n"
+                f"  {dramsim_root / args.dramsim3_build}\n"
+                f"was configured without CMD_TRACE. Rebuild it with:\n"
+                f"  cmake -S {dramsim_root} -B "
+                f"{dramsim_root / args.dramsim3_build} -DCMAKE_BUILD_TYPE=Release "
+                f"-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMD_TRACE=ON\n"
+                f"  cmake --build {dramsim_root / args.dramsim3_build} --parallel\n"
+                f"Note: CMake >= 3.5 policy override is required because DRAMsim3's "
+                f"CMakeLists declares cmake_minimum_required(VERSION 3.0.0).")
         external_commands = []
-        for line in (dram_out / "dramsim3ch_0cmd.trace").read_text().splitlines():
+        for line in command_trace.read_text().splitlines():
             fields = line.split()
             if len(fields) >= 2:
                 external_commands.append({"cycle": int(fields[0]), "command": fields[1]})
@@ -120,9 +161,12 @@ def main() -> int:
         project_trace = temp / "project.trace"
         project_trace.write_text("0 R 0x0\n", encoding="ascii")
         project_csv = temp / "project_commands.csv"
-        project_stats, _ = run_simulator(
+        project_stats, project_stdout = run_simulator(
             [str(binary), *PROJECT_SELECTION, "--trace", str(project_trace),
              "--cmd-trace", str(project_csv), "--validate-cmd-trace"], cwd=ROOT, diagnostic=True)
+        (temp / "project_read_stats.json").write_text(
+            json.dumps(project_stats, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (temp / "project_read_stdout.txt").write_text(project_stdout, encoding="utf-8")
         # DRAMsim3 normalizes HBM input columns by *2, then divides by BL
         # for transaction addressing (configuration.cc InitDRAMParams /
         # SetAddressMapping). Do not equate the raw INI count with our slots.
@@ -186,9 +230,13 @@ def main() -> int:
         dram_write_stats = json.loads((dram_write_out / "dramsim3.json").read_text())["0"]
         project_write_trace = temp / "project_write.trace"
         project_write_trace.write_text("0 W 0x0\n", encoding="ascii")
-        project_write_stats, _ = run_simulator(
+        project_write_stats, project_write_stdout = run_simulator(
             [str(binary), *PROJECT_SELECTION, "--trace",
              str(project_write_trace)], cwd=ROOT, diagnostic=True)
+        (temp / "project_write_stats.json").write_text(
+            json.dumps(project_write_stats, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (temp / "project_write_stdout.txt").write_text(
+            project_write_stdout, encoding="utf-8")
         observed["write_energy_pJ"] = float(project_write_stats["power_write_energy_pJ"])
         write_count = int(dram_write_stats["num_write_cmds"])
         external_write_per_command = (
@@ -214,9 +262,13 @@ def main() -> int:
         dram_refresh_stats = json.loads((dram_refresh_out / "dramsim3.json").read_text())["0"]
         project_refresh_trace = temp / "project_refresh.trace"
         project_refresh_trace.write_text("0 M REFab 0x0\n", encoding="ascii")
-        project_refresh_stats, _ = run_simulator(
+        project_refresh_stats, project_refresh_stdout = run_simulator(
             [str(binary), *PROJECT_SELECTION, "--trace",
              str(project_refresh_trace)], cwd=ROOT, diagnostic=True)
+        (temp / "project_refresh_stats.json").write_text(
+            json.dumps(project_refresh_stats, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (temp / "project_refresh_stdout.txt").write_text(
+            project_refresh_stdout, encoding="utf-8")
         observed["refresh_energy_pJ"] = float(
             project_refresh_stats["power_refresh_energy_pJ"])
         refresh_count = int(dram_refresh_stats["num_ref_cmds"])
@@ -246,10 +298,15 @@ def main() -> int:
             with (thermal_out / "dramsim3final_temp.csv").open(
                     newline="", encoding="utf-8") as stream:
                 external_peak = max(float(row["temperature"]) for row in csv.DictReader(stream))
-            project_thermal_stats, _ = run_simulator(
+            project_thermal_stats, project_thermal_stdout = run_simulator(
                 [str(binary), *PROJECT_SELECTION, "--requests", "2000",
                  "--pattern", "random", "--read-ratio", "70", "--inject-interval", "1",
                  "--seed", "20260816", "--max-cycles", "100000000"], cwd=ROOT, diagnostic=True)
+            (temp / "project_thermal_stats.json").write_text(
+                json.dumps(project_thermal_stats, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8")
+            (temp / "project_thermal_stdout.txt").write_text(
+                project_thermal_stdout, encoding="utf-8")
             project_peak = float(project_thermal_stats["thermal_peak_temp_C"])
             thermal_ini = read_ini(hbm_thermal_ini)
             ambient = ini_float(thermal_ini["thermal"]["amb_temp"])
@@ -277,6 +334,7 @@ def main() -> int:
         "external_engine_executed": True,
         "external_engine_binary": str(dramsim_binary),
         "external_thermal_binary": None if args.skip_thermal_runtime else str(thermal_binary),
+        "artifacts_directory": None if artifact_dir is None else str(artifact_dir),
         "dramsim3_root": str(dramsim_root), "dramsim3_commit": commit,
         "reference_config": str(hbm2_ini), "project_config": str(PROJECT_CONFIG),
         "project_preset": DRAMSIM3_HBM2[2],

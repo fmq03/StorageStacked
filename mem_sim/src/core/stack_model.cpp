@@ -250,6 +250,7 @@ merge_physical_storage_stats(const std::vector<PhysicalStorageStats> &stats) {
     total.power_events += src.power_events;
     total.thermal_updates += src.thermal_updates;
     total.power_energy_pj += src.power_energy_pj;
+    total.self_refresh_energy_pj += src.self_refresh_energy_pj;
     total.power_act_energy_pj += src.power_act_energy_pj;
     total.power_pre_energy_pj += src.power_pre_energy_pj;
     total.power_read_energy_pj += src.power_read_energy_pj;

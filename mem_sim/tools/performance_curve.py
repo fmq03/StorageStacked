@@ -77,7 +77,10 @@ def main() -> int:
                     "requests": args.requests, "system_cycles": int(stats["system_cycles"]),
                     "completed_reads": int(stats["completed_reads"]),
                     "completed_writes": int(stats["completed_writes"]),
-                    "avg_read_latency_ticks": float(stats["avg_read_latency"]),
+                    "avg_read_latency_ticks": (float(stats["avg_read_latency"])
+                                               if int(stats["completed_reads"]) else None),
+                    "avg_write_latency_ticks": (float(stats["avg_write_latency"])
+                                                if int(stats["completed_writes"]) else None),
                     "achieved_bw_GBps": float(stats["achieved_bw_GBps"]),
                     "peak_bandwidth_GBps": float(stats["peak_bandwidth_GBps"]),
                     "bandwidth_util_pct": float(stats["bandwidth_util_pct"]),

@@ -141,6 +141,7 @@ void merge_stats(Stats &dst, const Stats &src) {
   dst.power_events += src.power_events;
   dst.thermal_updates += src.thermal_updates;
   dst.power_energy_pj += src.power_energy_pj;
+  dst.self_refresh_energy_pj += src.self_refresh_energy_pj;
   dst.power_act_energy_pj += src.power_act_energy_pj;
   dst.power_pre_energy_pj += src.power_pre_energy_pj;
   dst.power_read_energy_pj += src.power_read_energy_pj;
@@ -208,6 +209,8 @@ void merge_stats(Stats &dst, const Stats &src) {
   dst.low_power_entries += src.low_power_entries;
   dst.low_power_exits += src.low_power_exits;
   dst.low_power_cycles += src.low_power_cycles;
+  dst.self_refresh_cycles += src.self_refresh_cycles;
+  dst.self_refresh_time_ns += src.self_refresh_time_ns;
   dst.low_power_exit_blocked_cycles += src.low_power_exit_blocked_cycles;
   dst.interface_command_bits += src.interface_command_bits;
   dst.interface_overhead_bits += src.interface_overhead_bits;
@@ -216,6 +219,7 @@ void merge_stats(Stats &dst, const Stats &src) {
   dst.priority_queue_len_sum += src.priority_queue_len_sum;
   dst.active_queue_len_sum += src.active_queue_len_sum;
   dst.total_read_latency += src.total_read_latency;
+  dst.total_write_latency += src.total_write_latency;
   dst.read_bytes += src.read_bytes;
   dst.write_bytes += src.write_bytes;
   dst.interface_read_bytes += src.interface_read_bytes;

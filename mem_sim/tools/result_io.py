@@ -59,6 +59,11 @@ def read_result(path: Path, *, require_completed: bool = False) -> dict[str, str
             elif raw.get("completed_reads") == 0:
                 # Legacy numerical zero only; canonical JSON uses null.
                 raw["avg_read_latency"] = 0
+            if raw.get("avg_write_latency_ns") is not None:
+                raw["avg_write_latency"] = (raw["avg_write_latency_ns"] * 1000 /
+                                            raw["tick_duration_ps"])
+            elif raw.get("completed_writes") == 0:
+                raw["avg_write_latency"] = 0
             for stack in report.get("stacks", []):
                 prefix = f"stack_{stack['stack']}_"
                 for old, key in (("reads", "completed_reads"), ("writes", "completed_writes"),
@@ -67,6 +72,9 @@ def read_result(path: Path, *, require_completed: bool = False) -> dict[str, str
                 if stack.get("avg_read_latency_ns") is not None:
                     raw[prefix + "avg_read_latency"] = (
                         stack["avg_read_latency_ns"] * 1000 / raw["tick_duration_ps"])
+                if stack.get("avg_write_latency_ns") is not None:
+                    raw[prefix + "avg_write_latency"] = (
+                        stack["avg_write_latency_ns"] * 1000 / raw["tick_duration_ps"])
             # Public null means unavailable, never zero. Keep absent when reading.
             raw = {k: v for k, v in raw.items() if v is not None}
         metrics = {}

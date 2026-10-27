@@ -146,10 +146,21 @@ def read_stats(path: Path | None) -> dict[str, str]:
                                                      float(result["tick_duration_ps"]) / 1000)
             else:
                 result["avg_read_latency_ticks"] = result["avg_read_latency"]
+    if "avg_write_latency_ns" not in result and int(result.get("completed_writes", "0")) > 0:
+        if "avg_write_latency" in result:
+            if "tick_duration_ps" in result:
+                result["avg_write_latency_ns"] = str(float(result["avg_write_latency"]) *
+                                                      float(result["tick_duration_ps"]) / 1000)
+            else:
+                result["avg_write_latency_ticks"] = result["avg_write_latency"]
+    for kind in ("read", "write"):
+        if int(result.get(f"completed_{kind}s", "0")) == 0:
+            result[f"avg_{kind}_latency_ns"] = "N/A"
     # Keep the dashboard readable even when stdout contains a full configuration dump.
     wanted = (
         "standard", "mem_phy_mode", "host_requests", "dram_transactions", "simulation_time_ns",
         "completed_reads", "completed_writes", "avg_read_latency_ns", "avg_read_latency_ticks",
+        "avg_write_latency_ns", "avg_write_latency_ticks",
         "achieved_bw_GBps", "peak_bandwidth_GBps", "bandwidth_util_pct",
         "row_hit_pct", "data_checked_reads", "data_mismatches",
         "thermal_peak_temp_C", "power_energy_pJ", "cmd_validation", "dfi_validation",
@@ -166,7 +177,8 @@ def read_performance(path: Path | None) -> list[dict[str, Any]]:
     if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
         raise SystemExit(f"performance JSON has no rows array: {path}")
     fields = ("standard", "read_ratio_pct", "offered_requests_per_tick",
-              "avg_read_latency_ticks", "achieved_bw_GBps", "bandwidth_util_pct")
+              "avg_read_latency_ticks", "avg_write_latency_ticks",
+              "achieved_bw_GBps", "bandwidth_util_pct")
     return [{field: row.get(field) for field in fields} for row in payload["rows"]
             if isinstance(row, dict)]
 
@@ -231,7 +243,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 <section class="card"><h2>Trace explorer</h2><p id="timelineHint" class="hint"></p><div class="tabs"><button id="bankView" class="active">Command / bank view</button><button id="requestView" class="ghost">Request swimlanes</button><label class="ghost" style="padding:7px 8px;cursor:pointer">Open command CSV<input id="traceUpload" type="file" accept=".csv,text/csv" hidden></label></div><div id="rangeStats" class="range"></div><canvas id="overview" class="overview" width="1400" height="76"></canvas><div class="controls"><label>Start cycle<input id="start" type="number"></label><label>End cycle<input id="end" type="number"></label><label>Stack<select id="stack"></select></label><label>Channel<select id="channel"></select></label><label>Command<select id="command"></select></label><label>Request<input id="requestFilter" type="number" placeholder="all"></label><label>Lanes<select id="lanes"><option value="12">12</option><option value="24" selected>24</option><option value="48">48</option></select></label><button id="reset">Full range</button></div><div class="legend"><span style="--c:#4ade80">ACT/open</span><span style="--c:#60a5fa">read</span><span style="--c:#fb923c">write</span><span style="--c:#f87171">PRE/close</span><span style="--c:#c084fc">refresh/RFM</span><span style="--c:#94a3b8">other</span></div><canvas id="timeline" width="1400" height="530"></canvas><div id="eventDetails" class="details">Click an event to inspect its cycle, request and decoded DRAM location.</div><p class="hint">Overview click recentres the view. Command view uses bank lanes; Request view groups commands by request lifetime. Both are offline equivalents of Ramulator trace exploration.</p></section>
 <section class="card"><h2>Command mix</h2><div id="mix" class="bars"></div></section>
 <section class="card"><h2>DFI activity</h2><div id="dfi" class="grid"></div></section>
-<section class="card"><h2>Injection-rate / latency / throughput</h2><p class="hint">Shown when <code>tools/performance_curve.py --json-out</code> is supplied.</p><svg id="curve" viewBox="0 0 1200 290" preserveAspectRatio="none"></svg><p id="curveHint" class="hint"></p></section>
+<section class="card"><h2>Injection-rate / latency / throughput</h2><p class="hint">Shown when <code>tools/performance_curve.py --json-out</code> is supplied. Latency is per completed DRAM transaction, in controller ticks.</p><div class="controls"><label>Latency series<select id="curveLatency"><option value="read">read transactions</option><option value="write">write transactions</option></select></label></div><svg id="curve" viewBox="0 0 1200 290" preserveAspectRatio="none"></svg><p id="curveHint" class="hint"></p></section>
 <section class="card"><h2>Thermal map</h2><p class="hint">Shown when <code>--dump-thermal-map</code> is supplied. Repeat <code>--thermal-map</code> for multiple Stack files. X/Y are thermal-grid coordinates; empty dashed cells were not touched by the sparse model.</p><div class="controls"><label>Stack<select id="thermalStack"></select></label><label>Layer<select id="layer"></select></label><label>Colour scale<select id="thermalScale"><option value="global">whole run</option><option value="layer">current layer</option></select></label></div><div id="thermalLegend" class="thermal-legend"></div><div id="thermal" class="thermal"></div></section>
 </main><script>
 const DATA=__DATA__;
@@ -248,19 +260,24 @@ function drawCurve(){
   const svg=el('curve'),rows=DATA.performance;
   if(!rows.length){svg.innerHTML='';el('curveHint').textContent='No performance JSON supplied.';return}
   const W=1200,H=290,pad={l:76,r:76,t:32,b:44};
-  const numeric=rows.map(r=>({...r,x:Number(r.offered_requests_per_tick),bw:Number(r.achieved_bw_GBps),lat:Number(r.avg_read_latency_ticks)})).filter(r=>Number.isFinite(r.x)&&Number.isFinite(r.bw)&&Number.isFinite(r.lat));
+  const latencyKind=el('curveLatency').value,latencyKey=`avg_${latencyKind}_latency_ticks`;
+  const measured=v=>v===null||v===undefined||v===''?null:Number(v);
+  const numeric=rows.map(r=>({...r,x:Number(r.offered_requests_per_tick),bw:Number(r.achieved_bw_GBps),lat:measured(r[latencyKey])})).filter(r=>Number.isFinite(r.x)&&Number.isFinite(r.bw));
   if(!numeric.length){svg.innerHTML='';el('curveHint').textContent='Performance JSON contains no numeric curve rows.';return}
-  const xmax=Math.max(...numeric.map(r=>r.x),1e-9),ymax=Math.max(...numeric.map(r=>r.bw),1),lmax=Math.max(...numeric.map(r=>r.lat),1);
+  const latencies=numeric.filter(r=>r.lat!==null&&Number.isFinite(r.lat));
+  const xmax=Math.max(...numeric.map(r=>r.x),1e-9),ymax=Math.max(...numeric.map(r=>r.bw),1),lmax=Math.max(...latencies.map(r=>r.lat),1);
   const X=x=>pad.l+x/xmax*(W-pad.l-pad.r),Y=y=>H-pad.b-y/ymax*(H-pad.t-pad.b),YL=y=>H-pad.b-y/lmax*(H-pad.t-pad.b);
   const groups={};for(const r of numeric){const key=`${r.standard} R${r.read_ratio_pct}`;(groups[key]??=[]).push(r)}
-  let out=`<text x="${pad.l}" y="18" fill="#99a9c5" font-size="12">payload throughput GB/s (solid)</text><text x="${W-pad.r}" y="18" text-anchor="end" fill="#99a9c5" font-size="12">read latency ticks (dashed)</text>`;
+  let out=`<text x="${pad.l}" y="18" fill="#99a9c5" font-size="12">payload throughput GB/s (solid)</text><text x="${W-pad.r}" y="18" text-anchor="end" fill="#99a9c5" font-size="12">${latencyKind} transaction latency ticks (dashed)</text>`;
   for(let tick=0;tick<=4;tick++){const f=tick/4,y=H-pad.b-f*(H-pad.t-pad.b),x=pad.l+f*(W-pad.l-pad.r);out+=`<path d="M${pad.l} ${y}H${W-pad.r}" stroke="#263453" stroke-width="1" vector-effect="non-scaling-stroke"/><text x="${pad.l-8}" y="${y+4}" text-anchor="end" fill="#99a9c5" font-size="11">${(f*ymax).toFixed(1)}</text><text x="${W-pad.r+8}" y="${y+4}" fill="#99a9c5" font-size="11">${(f*lmax).toFixed(0)}</text><path d="M${x} ${pad.t}V${H-pad.b}" stroke="#1f2b47" stroke-width="1" vector-effect="non-scaling-stroke"/><text x="${x}" y="${H-24}" text-anchor="middle" fill="#99a9c5" font-size="11">${(f*xmax).toFixed(2)}</text>`}
   out+=`<path d="M${pad.l} ${pad.t}V${H-pad.b}H${W-pad.r}V${pad.t}" stroke="#52617f" stroke-width="1" vector-effect="non-scaling-stroke" fill="none"/><text x="${W/2}" y="${H-7}" text-anchor="middle" fill="#99a9c5" font-size="11">offered requests / tick</text>`;
-  let i=0;for(const [name,g] of Object.entries(groups)){const color=['#60a5fa','#4ade80','#fb923c','#c084fc','#f87171','#facc15'][i++%6];g.sort((a,b)=>a.x-b.x);const points=(fy)=>g.map(r=>`${X(r.x)},${fy(r)}`).join(' ');out+=`<polyline points="${points(r=>Y(r.bw))}" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" fill="none"/><polyline points="${points(r=>YL(r.lat))}" stroke="${color}" stroke-width="2" stroke-dasharray="6 5" vector-effect="non-scaling-stroke" fill="none"/>${g.map(r=>`<circle cx="${X(r.x)}" cy="${Y(r.bw)}" r="3.5" fill="${color}"/>`).join('')}<text x="${W-pad.r-8}" y="${32+i*17}" text-anchor="end" fill="${color}" font-size="12">${esc(name)}</text>`}
-  svg.innerHTML=out;el('curveHint').textContent=`${numeric.length} deterministic sweep points. Left scale max ${ymax.toFixed(1)} GB/s; right scale max ${lmax.toFixed(1)} ticks.`
+  let i=0;for(const [name,g] of Object.entries(groups)){const color=['#60a5fa','#4ade80','#fb923c','#c084fc','#f87171','#facc15'][i++%6];g.sort((a,b)=>a.x-b.x);const points=(items,fy)=>items.map(r=>`${X(r.x)},${fy(r)}`).join(' '),measuredGroup=g.filter(r=>r.lat!==null&&Number.isFinite(r.lat));out+=`<polyline points="${points(g,r=>Y(r.bw))}" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" fill="none"/>${measuredGroup.length?`<polyline points="${points(measuredGroup,r=>YL(r.lat))}" stroke="${color}" stroke-width="2" stroke-dasharray="6 5" vector-effect="non-scaling-stroke" fill="none"/>`:''}${g.map(r=>`<circle cx="${X(r.x)}" cy="${Y(r.bw)}" r="3.5" fill="${color}"/>`).join('')}<text x="${W-pad.r-8}" y="${32+i*17}" text-anchor="end" fill="${color}" font-size="12">${esc(name)}</text>`}
+  svg.innerHTML=out;el('curveHint').textContent=`${numeric.length} deterministic sweep points; ${latencies.length} with measured ${latencyKind} latency. Left scale max ${ymax.toFixed(1)} GB/s; right scale max ${lmax.toFixed(1)} ticks.`
 }
 function thermalColor(t,min,max){const f=max===min?.5:(t-min)/(max-min);return `hsl(${220-220*f} 78% ${78-30*f}%)`}
 function drawThermal(){const tiles=DATA.thermal,stackSelect=el('thermalStack'),layerSelect=el('layer'),scaleSelect=el('thermalScale'),grid=el('thermal'),legend=el('thermalLegend');if(!tiles.length){stackSelect.innerHTML='<option>n/a</option>';layerSelect.innerHTML='<option>n/a</option>';legend.textContent='';grid.innerHTML='<p class="empty">No thermal map supplied.</p>';return}const stacks=[...new Set(tiles.map(x=>x.stack))].sort((a,b)=>a-b),globalTemps=tiles.map(x=>x.temperature),globalMin=Math.min(...globalTemps),globalMax=Math.max(...globalTemps);option(stackSelect,stacks);const render=()=>{const cells=tiles.filter(x=>String(x.stack)===stackSelect.value&&String(x.layer)===layerSelect.value);if(!cells.length){grid.innerHTML='<p class="empty">No cells in this layer.</p>';return}const cols=Math.max(...cells.map(x=>x.cols),...cells.map(x=>x.x+1)),rows=Math.max(...cells.map(x=>x.rows),...cells.map(x=>x.y+1)),temps=cells.map(x=>x.temperature),min=scaleSelect.value==='global'?globalMin:Math.min(...temps),max=scaleSelect.value==='global'?globalMax:Math.max(...temps),byPos=new Map(cells.map(x=>[`${x.x},${x.y}`,x]));grid.style.gridTemplateColumns=`repeat(${cols},minmax(32px,1fr))`;const html=[];for(let y=0;y<rows;y++){for(let x=0;x<cols;x++){const c=byPos.get(`${x},${y}`);if(!c){html.push(`<div class="tile missing" title="thermal grid (${x},${y}) was not touched">·</div>`);continue}html.push(`<div class="tile" title="stack ${c.stack}, layer ${c.layer}; thermal (${c.x},${c.y}); tile (${c.tile_x},${c.tile_y}) + local grid (${c.grid_x},${c.grid_y}); ${c.address_kind==='coupling_only'?'coupling-only node; DRAM address unknown':'representative first location'}: CH ${c.channel}, PC ${c.pseudo_channel}, SID ${c.sid}, rank ${c.rank}, BG ${c.bank_group}, bank ${c.bank}, row ${c.row}, column ${c.column}; aggregate ${c.temperature.toFixed(2)} °C; ${c.energy.toFixed(2)} pJ; ${c.events} events" style="background:${thermalColor(c.temperature,min,max)}">${c.temperature.toFixed(1)}</div>`)} }grid.innerHTML=html.join('');legend.textContent=`X: 0…${cols-1}, Y: 0…${rows-1} • colour range ${min.toFixed(2)}…${max.toFixed(2)} °C (${scaleSelect.value==='global'?'whole run':'current layer'})`};const updateLayers=()=>{const layers=[...new Set(tiles.filter(x=>String(x.stack)===stackSelect.value).map(x=>x.layer))].sort((a,b)=>a-b);option(layerSelect,layers);render()};stackSelect.onchange=updateLayers;layerSelect.onchange=render;scaleSelect.onchange=render;updateLayers()}
+el('curveLatency').onchange=drawCurve;
+if(DATA.performance.length&&!DATA.performance.some(r=>r.avg_read_latency_ticks!==null&&r.avg_read_latency_ticks!==undefined)&&DATA.performance.some(r=>r.avg_write_latency_ticks!==null&&r.avg_write_latency_ticks!==undefined))el('curveLatency').value='write';
 metrics();drawMix();drawDfi();drawCurve();drawThermal();
 // Enhanced explorer: mirrors the useful offline portions of Ramulator's visualizer
 // while retaining the project-specific DFI, payload and thermal panels above.

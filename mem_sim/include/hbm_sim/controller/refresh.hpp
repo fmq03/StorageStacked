@@ -40,6 +40,9 @@ class RefreshManager {
   void reset(const DramSpec& spec, Cycle clk);
   // tick() 在到达 interval 时返回一批维护命令；没有到期时 commands 为空。
   RefreshTickResult tick(const DramSpec& spec, Cycle clk, bool prefer_postpone, bool allow_pull_in);
+  // DRAMsim3 skips periodic REF for self-refreshing ranks. Our SREF scope is
+  // the controller channel; periodic phase continues without new obligations.
+  void set_self_refresh(bool active) { self_refresh_active_ = active; }
 
  private:
   struct RankRefreshState {
@@ -62,6 +65,7 @@ class RefreshManager {
 
   std::vector<RankRefreshState> rank_states_;
   int rank_cursor_ = 0;
+  bool self_refresh_active_ = false;
 };
 
 }  // namespace hbm_sim

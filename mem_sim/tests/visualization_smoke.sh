@@ -17,7 +17,7 @@ trap 'rm -rf -- "$vis_tmp_dir"' EXIT
   > "$vis_tmp_dir/stats.txt"
 
 cat > "$vis_tmp_dir/performance.json" <<'JSON'
-{"rows":[{"standard":"HBM4","read_ratio_pct":100,"offered_requests_per_tick":0.25,"avg_read_latency_ticks":20.0,"achieved_bw_GBps":8.0,"bandwidth_util_pct":12.5},{"standard":"HBM4","read_ratio_pct":100,"offered_requests_per_tick":1.0,"avg_read_latency_ticks":80.0,"achieved_bw_GBps":15.0,"bandwidth_util_pct":23.4}]}
+{"rows":[{"standard":"HBM4","read_ratio_pct":100,"offered_requests_per_tick":0.25,"avg_read_latency_ticks":20.0,"avg_write_latency_ticks":null,"achieved_bw_GBps":8.0,"bandwidth_util_pct":12.5},{"standard":"HBM4","read_ratio_pct":100,"offered_requests_per_tick":1.0,"avg_read_latency_ticks":80.0,"avg_write_latency_ticks":null,"achieved_bw_GBps":15.0,"bandwidth_util_pct":23.4},{"standard":"HBM4","read_ratio_pct":0,"offered_requests_per_tick":0.25,"avg_read_latency_ticks":null,"avg_write_latency_ticks":25.0,"achieved_bw_GBps":7.0,"bandwidth_util_pct":11.0}]}
 JSON
 
 python3 "$vis_source/tools/visualize.py" \
@@ -49,6 +49,9 @@ grep -q "Request swimlanes" "$vis_tmp_dir/dashboard.html"
 grep -q '"commands"' "$vis_tmp_dir/dashboard.html"
 grep -q '"sampled":true' "$vis_tmp_dir/dashboard.html"
 grep -q '"performance":\[{"standard":"HBM4"' "$vis_tmp_dir/dashboard.html"
+grep -q 'avg_write_latency_ns' "$vis_tmp_dir/dashboard.html"
+grep -q '"avg_write_latency_ticks":25.0' "$vis_tmp_dir/dashboard.html"
+grep -q 'id="curveLatency"' "$vis_tmp_dir/dashboard.html"
 grep -q '<polyline points=' "$vis_tmp_dir/dashboard.html" || grep -q 'polyline points=' "$vis_source/tools/visualize.py"
 
 echo "visualization smoke passed"

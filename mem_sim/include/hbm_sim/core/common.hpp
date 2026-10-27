@@ -83,10 +83,10 @@ enum class Command {
   // LPDDR DVFS 频率切换控制命令，状态机要求进入切换前 channel idle。
   DVFS,
   // 低功耗状态入口/出口。PDE/PDX 表示 power-down，SREFEN/SREFEX 表示 self-refresh。
-  PDE,
-  PDX,
-  SREFEN,
-  SREFEX,
+  PDE,//进入
+  PDX,//退出
+  SREFEN,//进入
+  SREFEX,//退出
   // RAS/ECC/link 维护入口。ECCSCRUB 表示后台 scrub/repair，RASERR 表示错误恢复
   // 或 link retry 占用窗口；具体错误注入后续可继续细化。
   ECCSCRUB,

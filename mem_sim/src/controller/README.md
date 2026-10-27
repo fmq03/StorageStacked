@@ -69,3 +69,8 @@ CAS_RD/CAS_WR 共用 WCK 状态更新，仅分别增加读/写 CAS 计数。
 - 只更新命令计数，没有更新 interface overhead，导致带宽利用率错误。
 - HBM 半周期 tick 和普通 nCK 混用，导致 edge pairing 或 timing 间隔偏移。
 - LPDDR WCK/CAS 状态只在 RD 路径更新，WR 路径忘记同步。
+# Self-Refresh reference
+
+自动 self-refresh 参考 DRAMsim3 `controller.cc` 的空闲门限与命令唤醒方法，使用已有维护路径发出 SREFEN/SREFEX；只有关闭且排空的 Channel 能进入。`refresh.cpp` 保持周期相位并跳过驻留期间的外部 REF，参考 DRAMsim3 `Refresh::InsertRefresh`。退出统一等待 nSREFEX。当前状态作用域是 Controller/Channel，非独立 Rank；自动 power-down 保留原有 residency 路径。
+
+驻留电流能量通过 `MemoryImage::record_self_refresh_residency` 计算并送入背景热网格，参考 DRAMsim3 `configuration.cc`、`simple_stats.cc` 和 `thermal.cc`。全局统计必须经 MemorySystem 按共享 MemoryImage 去重，不能直接求和 Controller 的物理能量快照。

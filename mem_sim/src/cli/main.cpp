@@ -2714,6 +2714,7 @@ int main(int argc, char** argv) {
       const double avg_latency = per.completed_reads == 0 ? 0.0 :
           static_cast<double>(per.total_read_latency) / per.completed_reads;
       hbm_sim::record_field(full_stats, (prefix + "avg_read_latency").c_str(), avg_latency);
+      hbm_sim::record_field(full_stats, (prefix + "avg_write_latency").c_str(), per.avg_write_latency());
       hbm_sim::record_field(full_stats, (prefix + "ingress_stalls").c_str(), per.stack_ingress_stall_cycles);
       hbm_sim::record_field(full_stats, (prefix + "qos_dispatches").c_str(), per.qos_priority_dispatches);
       hbm_sim::record_field(full_stats, (prefix + "power_pJ").c_str(), per.power_energy_pj);

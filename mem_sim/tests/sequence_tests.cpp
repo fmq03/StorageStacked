@@ -1508,6 +1508,7 @@ void test_active_six_stack_memory_system_routing_qos_and_stats() {
           "stack ingress QoS did not account the priority request");
   require(memory.per_stack_stats().size() == 6,
           "active six-stack system did not expose per-stack stats");
+  std::uint64_t stack_write_latency_sum = 0;
 
   for (int stack = 0; stack < options.stack_count; stack++) {
     bool initialized = false;
@@ -1521,7 +1522,14 @@ void test_active_six_stack_memory_system_routing_qos_and_stats() {
     require(memory.per_stack_stats()[static_cast<std::size_t>(stack)]
                     .completed_writes == expected_writes,
             "per-stack completion statistics are incorrect");
+    stack_write_latency_sum +=
+        memory.per_stack_stats()[static_cast<std::size_t>(stack)]
+            .total_write_latency;
   }
+  require(memory.stats().total_write_latency == stack_write_latency_sum &&
+              memory.stats().avg_write_latency() ==
+                  static_cast<double>(stack_write_latency_sum) / writes.size(),
+          "system write latency must be weighted by completed transactions");
 
   std::vector<bool> traced(6, false);
   std::uint64_t first_stack0_request = 0;
@@ -1660,9 +1668,15 @@ void test_write_forward_and_coalesce() {
   int response_count = 0;
   int forwarded_responses = 0;
   int coalesced_responses = 0;
+  std::uint64_t write_latency_sum = 0;
   while (controller.has_response()) {
     const hbm_sim::TransactionResponse response = controller.pop_response();
     response_count++;
+    if (response.type == RequestType::Write) {
+      require(response.completion_cycle >= response.arrival_cycle,
+              "write response completed before arrival");
+      write_latency_sum += response.completion_cycle - response.arrival_cycle;
+    }
     if (response.forwarded) {
       forwarded_responses++;
       require(response.type == RequestType::Read && !response.data.empty(),
@@ -1678,6 +1692,10 @@ void test_write_forward_and_coalesce() {
               coalesced_responses == 1,
           "Controller did not return one response for each accepted bypass "
           "request");
+  require(controller.stats().total_write_latency == write_latency_sum &&
+              controller.stats().avg_write_latency() ==
+                  static_cast<double>(write_latency_sum) / 2,
+          "coalesced write latency did not use every completed transaction");
 }
 
 void test_closed_page_row_policy() {
@@ -2180,6 +2198,185 @@ void test_lpddr6_ca_parity_command_overhead() {
       controller.stats().interface_overhead_bits >=
           controller.stats().interface_command_bits,
       "CA parity command bits must be included in total interface overhead");
+}
+
+void test_self_refresh_skips_external_deadlines() {
+  auto spec = hbm_sim::make_spec("lpddr6");
+  spec.supports_refresh = true;
+  spec.refresh_pullin_limit = 0;
+  spec.refresh_postpone_limit = 0;
+  hbm_sim::RefreshManager manager;
+  manager.reset(spec, 0);
+  const Cycle interval = static_cast<Cycle>(spec.timing.nREFIpb) *
+                         std::max(1, spec.tick_multiplier);
+  require(interval > 0, "self-refresh fixture has no periodic interval");
+  manager.set_self_refresh(true);
+  for (Cycle cycle = 1; cycle <= interval * 10; ++cycle) {
+    auto result = manager.tick(spec, cycle, false, false);
+    require(result.commands.empty() && result.credit == 0,
+            "self-refresh generated external REF or refresh debt");
+  }
+  manager.set_self_refresh(false);
+  require(manager.tick(spec, interval * 10 + 1, false, false).commands.empty(),
+          "self-refresh exit caught up skipped external deadlines");
+  require(!manager.tick(spec, interval * 11, false, false).commands.empty(),
+          "periodic REF did not resume on its original phase");
+}
+
+void test_automatic_self_refresh_residency_and_wakeup() {
+  for (const char* standard : {"hbm3", "hbm4", "lpddr5", "lpddr6"})
+  for (auto mode : {hbm_sim::MemPhyMode::Direct,
+                    hbm_sim::MemPhyMode::Behavioral}) {
+    auto spec = hbm_sim::make_spec(standard);
+    spec.supports_refresh = false;
+    spec.supports_rfm = false;
+    spec.low_power_mode = hbm_sim::LowPowerMode::SelfRefresh;
+    spec.low_power_entry_cycles = 2;
+    hbm_sim::refresh_timing_constraints(spec);
+    hbm_sim::StorageModelOptions storage;
+    storage.power_enabled = true;
+    storage.idd_vdd = 1.0;
+    storage.idd6x_ma = 2.0;
+    storage.idd_devices_per_rank = 3.0;
+    hbm_sim::ControllerOptions options;
+    options.phy.mode = mode;
+    options.memory_image = std::make_shared<hbm_sim::MemoryImage>(spec, 0, storage);
+    Controller controller(spec, options);
+    for (int i = 0; i < 1000 && controller.stats().srefen == 0; ++i)
+      controller.tick();
+    require(controller.stats().srefen == 1,
+            "automatic self-refresh did not issue SREFEN");
+    for (int i = 0; i < 100; ++i) controller.tick();
+    controller.finalize_run_stats();
+    require(controller.stats().self_refresh_cycles == 100,
+            "self-refresh residency differs from actual SREF duration");
+    const double expected = 6.0 * spec.org.ranks *
+                            controller.stats().self_refresh_time_ns;
+    require(std::abs(controller.stats().self_refresh_energy_pj - expected) < 1e-8,
+            "IDD6 self-refresh energy has wrong time/device units");
+    controller.finalize_run_stats();
+    require(std::abs(controller.stats().self_refresh_energy_pj - expected) < 1e-8,
+            "finalize counted residency energy twice");
+    require(controller.enqueue(make_request(990, RequestType::Read, 0, 0, 0, 1)),
+            "self-refresh wakeup request rejected");
+    controller.run_until_done(controller.clock() + 5000);
+    require(controller.stats().completed_reads == 1 && controller.stats().srefex == 1,
+            "self-refresh wakeup failed to complete request");
+    auto enter = find_first(controller.issued_commands(), Command::SREFEN);
+    auto exit = find_first(controller.issued_commands(), Command::SREFEX);
+    auto act = find_first(controller.issued_commands(),
+                          spec.split_activate ? Command::ACT1 : Command::ACT);
+    require(enter && exit && act && act->cycle >= exit->cycle +
+                static_cast<Cycle>(spec.timing.nSREFEX) * spec.tick_multiplier,
+            "self-refresh wakeup bypassed recovery delay");
+    require(hbm_sim::validate_command_trace(spec, controller.issued_commands()).ok(),
+            "validator rejected automatic self-refresh command trace");
+    const auto events = hbm_sim::build_dfi_trace(spec, controller.issued_commands());
+    require(hbm_sim::validate_dfi_trace(spec, controller.issued_commands(), events).ok(),
+            "DFI validation rejected self-refresh/wakeup data path");
+    auto illegal = controller.issued_commands();
+    auto command = *act;
+    command.cycle = enter->cycle + 1;
+    auto position = std::find_if(illegal.begin(), illegal.end(), [](const IssuedCommand& c) {
+      return c.command == Command::SREFEX;
+    });
+    illegal.insert(position, command);
+    require(!hbm_sim::validate_command_trace(spec, illegal).ok(),
+            "validator accepted an activate during self-refresh residency");
+  }
+}
+
+void test_self_refresh_background_and_multichannel() {
+  auto spec = hbm_sim::make_spec("lpddr6");
+  spec.org.channels = 2;
+  set_fixture_density_from_geometry(spec);
+  spec.supports_refresh = false;
+  spec.supports_rfm = false;
+  spec.low_power_mode = hbm_sim::LowPowerMode::SelfRefresh;
+  spec.low_power_entry_cycles = 2;
+  hbm_sim::refresh_timing_constraints(spec);
+  hbm_sim::MemorySystemOptions options;
+  options.stack_count = 2;
+  hbm_sim::StorageModelOptions storage;
+  storage.idd_vdd = 1;
+  storage.idd6x_ma = 2;
+  storage.idd_devices_per_rank = 3;
+  storage.power_enabled = true;
+  storage.thermal_enabled = true;
+  storage.thermal_coupling_enabled = false;
+  for (int stack = 0; stack < 2; ++stack) {
+    storage.stack_id = stack;
+    options.stack_memory_images.push_back(
+        std::make_shared<hbm_sim::MemoryImage>(spec, 0, storage));
+  }
+  MemorySystem system(spec, options);
+  for (int i = 0; i < 100; ++i) system.step();
+  system.finish();
+  double physical_energy = 0;
+  for (const auto& image : system.stack_memory_images()) {
+    const auto s = image->storage_stats();
+    physical_energy += s.self_refresh_energy_pj;
+    require(s.thermal_peak_temp_c > storage.thermal_ambient_c,
+            "self-refresh background did not heat the thermal grid");
+    require(s.power_events == 2,
+            "residency generated fictitious command power events");
+  }
+  require(std::abs(system.stats().self_refresh_energy_pj - physical_energy) < 1e-8,
+          "shared stack image counted self-refresh energy multiple times");
+  const double expected = 6 * spec.org.ranks * system.stats().self_refresh_time_ns;
+  require(std::abs(physical_energy - expected) < 1e-8,
+          "multichannel residency current scope is inconsistent");
+  Request read = make_request(991, RequestType::Read, 0, 0, 0, 1);
+  read.address = 0;
+  require(system.try_submit(read),
+          "multichannel self-refresh request rejected");
+  for (int i = 0; i < 5000 && !system.idle(); ++i) system.step();
+  system.finish();
+  require(system.stats().completed_reads == 1, "multichannel wakeup failed");
+  std::uint64_t exits = 0;
+  for (const auto& controller : system.controllers()) exits += controller.stats().srefex;
+  require(exits == 1, "one-channel wakeup disturbed other channels/stacks");
+}
+
+void test_self_refresh_entry_race() {
+  auto spec = hbm_sim::make_spec("lpddr6");
+  spec.supports_refresh = false;
+  spec.supports_rfm = false;
+  spec.low_power_mode = hbm_sim::LowPowerMode::SelfRefresh;
+  spec.low_power_entry_cycles = 1;
+  hbm_sim::refresh_timing_constraints(spec);
+  Controller controller(spec);
+  controller.tick();
+  controller.tick(); // SREFEN intent has been scheduled, but not issued.
+  require(controller.stats().srefen == 0, "race fixture already entered SREF");
+  controller.enqueue(make_request(992, RequestType::Read, 0, 0, 0, 1));
+  controller.run_until_done(5000);
+  require(controller.stats().completed_reads == 1 && controller.stats().srefen == 0,
+          "new request did not cancel an unissued automatic SREFEN");
+}
+
+void test_self_refresh_exit_with_full_priority_buffer() {
+  auto spec = hbm_sim::make_spec("lpddr6");
+  spec.supports_refresh = false;
+  spec.supports_rfm = false;
+  spec.low_power_mode = hbm_sim::LowPowerMode::SelfRefresh;
+  hbm_sim::refresh_timing_constraints(spec);
+  hbm_sim::ControllerOptions options;
+  options.priority_buffer_size = 1;
+  options.phy.mode = hbm_sim::MemPhyMode::Behavioral;
+  Controller controller(spec, options);
+  for (int i = 0; i < 1000 && controller.stats().srefen == 0; ++i) controller.tick();
+  require(controller.stats().srefen == 1, "full-buffer fixture did not enter SREF");
+  Request maintenance = make_request(993, RequestType::Maintenance, 0, 0, 0, 0);
+  maintenance.next = Command::MRW;
+  require(controller.enqueue(maintenance), "full-buffer fixture maintenance rejected");
+  for (int i = 0; i < 3000 && controller.stats().mrw == 0; ++i) controller.tick();
+  require(controller.stats().mrw == 1 && controller.stats().srefex == 1,
+          "queued maintenance did not wake a self-refreshing controller");
+  controller.enqueue(make_request(994, RequestType::Read, 0, 0, 0, 1));
+  controller.run_until_done(controller.clock() + 5000);
+  require(controller.stats().completed_reads == 1 && controller.stats().srefex >= 1,
+          "full priority buffer blocked self-refresh exit");
 }
 
 void test_refresh_credit_and_low_power() {
@@ -4391,6 +4588,11 @@ int main() {
   test_lpddr6_wck_always_on_mode();
   test_lpddr6_ca_parity_command_overhead();
   test_refresh_credit_and_low_power();
+  test_self_refresh_skips_external_deadlines();
+  test_automatic_self_refresh_residency_and_wakeup();
+  test_self_refresh_background_and_multichannel();
+  test_self_refresh_entry_race();
+  test_self_refresh_exit_with_full_priority_buffer();
   test_refresh_credit_conservation_and_rank_rotation();
   test_lpddr6_efficiency_mode_mapping();
   test_lpddr_shared_metadata_lane_research_overhead();

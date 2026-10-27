@@ -7,6 +7,7 @@
 - JSON 不再反解析终端文本；整数和浮点值按类型保存。
 - summary 使用英文精简报告（MODEL / PARAMETERS / RESULTS）；指标和提示使用英文，用户自定义名称原样保留。只有 diagnostic 附加内部字段，不能要求普通结果含全部内部计数。
 - `row_hit_pct` 的分母是首次调度分类总数；平均队列诊断统一使用 aggregate_ctrl_cycles 归一化。
+- 读写事务延迟按各自已完成事务数求平均；无同类完成时公共 JSON 为 null，summary 为 N/A。
 - 内部计数被 Controller/MemorySystem/验证测试使用，不等于每一项都应公开。
 - 新增公共指标须说明独立用途、单位、范围、分母和无数据时的状态，并更新结果契约测试。
 

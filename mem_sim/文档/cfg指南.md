@@ -2,7 +2,7 @@
 
 本文件是配置项含义、可修改范围和参数联动的唯一详细说明。构建、数据路径与运行操作见
 [项目指南](项目指南.md)，指标与性能解读见[输出指南](输出指南.md)，资料可信度见[审计](审计.md)。
-以下命令均在仓库根目录执行；配置表使用 canonical key，分节简写见下表。
+以下命令均在仓库根目录执行；配置表使用统一字段名（canonical key），分节简写见下表。
 表中 `mats_per_subarray_x/y` 等是成对字段的缩写，实际写成 `_x` 或 `_y` 两个键；
 斜杠和通配符不是配置键的一部分。字段名大小写经解析器归一，推荐沿用模板写法。
 
@@ -17,7 +17,7 @@ HBM 家族选 hbm3/hbm4，LPDDR 家族选 lpddr5/lpddr6。不需要另加载开�
 
 ```bash
 mkdir -p experiments/local outputs/cfg_example
-cp configs/hbm.cfg experiments/local/my_model.cfg
+cp -i configs/hbm.cfg experiments/local/my_model.cfg
 # 编辑副本，选择 [model] base_standard 和下面需要的输入项
 ./build-clang-debug/hbm_sim --config experiments/local/my_model.cfg \
   --check-config --dump-resolved-config outputs/cfg_example/resolved.cfg
@@ -26,7 +26,8 @@ cp configs/hbm.cfg experiments/local/my_model.cfg
   --dump-timing-table outputs/cfg_example/timing.csv
 ```
 
-只有确实要新建副本时才执行 cp；不要覆盖已有实验。LPDDR 同理，替换复制源即可。
+只有确实要新建副本时才执行 `cp -i`；已有文件时不要确认覆盖，复跑可直接使用原文件。
+LPDDR 同理，替换复制源即可。
 `--check-config` 检查实际选中的参数组合，不运行请求；通过后仍需小规模数据和时序回归。
 最终默认值来自“内置标准 profile + 当前配置 + 选择的 section”，不要把模板中省略的字段当成零。
 `resolved.cfg` 是可重载的生效快照，不是适合继续改少量主参数的简洁模板：
@@ -196,19 +197,19 @@ density_gb = auto
 | 配置键/CLI | 含义 | 可否自定义/注意事项 | 修改建议 / 联动项 |
 |---|---|---|---|
 | `standard` / `--standard` | hbm3/hbm4/lpddr5/lpddr6 | 可；会改变默认 traits/profile | 联动修改：选择已有协议基准；一起核对 PHY 协议、组织、模式及显式 Timing |
-| `pattern` | stream/random | 可；trace 存在时由 trace 驱动 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
+| `pattern` | stream/random | 可；trace 存在时由 trace 驱动 | 选择合成访问方式；使用 trace 时不据此解释负载 |
 | `trace` / `trace_path` | trace 文件 | 可；相对路径以运行目录解析 | 联动修改：配套 trace 格式、requests、line_size 和地址容量；启用后不再按合成模式理解流量 |
-| `requests` | host 请求上限；trace 中 0 为全部 | 可 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
-| `read_ratio` | 合成读比例，百分数 | 可，0–100 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
-| `seed` | 随机种子 | 可；可复现必须保存 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
+| `requests` | host 请求上限；trace 中 0 为全部 | 可 | 控制实验规模；比较性能时固定请求数 |
+| `read_ratio` | 合成读比例，百分数 | 可，0–100 | 只改变读写组成；与 seed、pattern 一起记录 |
+| `seed` | 随机种子 | 可；可复现必须保存 | 复现实验时保持不变 |
 | `random_address_space_bytes` | random 聚合地址空间上限；0 为 stack_count × 单实例几何容量 | 可；须按 line_size 对齐且至少容纳一个 HostRequest，小型文件后端建议显式设置 | 可单独改动工作集；0 自动取 stack_count × 单实例几何容量；显式范围须同时适配请求对齐与每实例后端容量 |
 | `addr_stride` | 合成地址步长，byte | 可；建议 transaction/line 对齐 | 联动核对：line_size、dram_transaction_bytes、请求数和地址上限；不自动修正越界步长 |
 | `inject_interval` | 前端注入间隔，controller tick | 可；性能曲线的主自变量；`0` 表示所有合成请求从 cycle 0 起尽快注入 | 可单独改动负载压力；`1` 是每 tick 一个请求，`0` 是不按时间节流的饱和注入，比较实验需显式记录 |
 | `init_sequence` | none/auto/hbm/hbm3/hbm4/lpddr/lpddr5/lpddr6/lpddr6_full | 可；必须与标准族匹配；`lpddr6_full` 额外覆盖低功耗往返序列 | 可选已有序列；与 standard、低功耗/WCK 能力一起核对 |
 | `init_sequence_interval` | 控制序列命令间隔 | 可 | 可单独调节序列间隔；结合 init_sequence 和 Timing 验证，不能绕过命令合法性 |
-| `max_cycles` | 系统周期上限 | 可；命中上限不代表正常完成 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
-| `progress_interval` | 每 N 个 system cycle 向 stderr 打印进度 | 0 关闭；不改变仿真结果 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
-| `stats_view` | summary / diagnostic | summary 日常精简报告；diagnostic 按需查看内部字段 | 可单独改动：负载规模、实验条件或显示选项；按本行取值限制设置 |
+| `max_cycles` | 系统周期上限 | 可；命中上限不代表正常完成 | 截断结果不能当作已完成的性能实验 |
+| `progress_interval` | 每 N 个 system cycle 向 stderr 打印进度 | 0 关闭；不改变仿真结果 | 只影响进度显示，不改变模型时间 |
+| `stats_view` | summary / diagnostic | summary 日常精简报告；diagnostic 按需查看内部字段 | 日常用 summary；排查内部计数时才用 diagnostic |
 
 <a id="appendix-a-2"></a>
 
@@ -254,7 +255,7 @@ density_gb = auto
 | `row_policy_cap` | closed_cap 列访问上限 | 可 | 条件项：仅研究 closed_cap 时调整，与 row_policy 配套 |
 | `addr_mapping` | default/RoBaRaCoCh/ChRaBaRoCo/RoCoRaBaCh | 可；改变局部性 | 可单独选已有映射策略；组织改变后核对地址落点，比较性能时固定映射 |
 | `channel_mapper` | decoded/round_robin/xor | 可；公平比较需固定 | 可单独选已有映射策略；组织改变后核对地址落点，比较性能时固定映射 |
-| `single_controller` | 单控制器独立实验 | 局部控制器对照实验。**与 channels>1 组合语义不自洽**：该路径拿完整 spec 直接构造单个 Controller，跳过 `MemorySystem::make_channel_spec` 的 channel 本地化，`Controller::flat_bank()` 于是把全局 channel 维度也算进去——同一份报告容量下仿真的是另一台机器。引擎只给警告（`src/stats/result.cpp`）不拦截。 | 联动修改：局部验证口径；核对 channels、完整系统配置及响应接口限制。正式带宽实验用默认 MemorySystem；必须用单控制器时把 channels 设为 1 |
+| `single_controller` | 单控制器验证模式 | 只运行一个控制器，不代表完整多 Channel Stack；与 `channels>1` 同用时报告组织和实际执行范围容易混淆 | 正式全栈实验用默认 MemorySystem；单控制器对照应设 `channels=1`，且不使用系统级响应导出 |
 | `stack_count` | 独立 stack 数 | 可；主动模型真正复制端点和 image | 可修改系统规模；联动总容量、总带宽、工作集及每实例后端/输出文件 |
 | `stack_mapping` | interleaved/blocked | 可 | 可选策略；interleaved 配套 stack_interleave_bytes，blocked 按容量分区；核对各实例地址范围 |
 | `stack_interleave_bytes` | stack 条带大小 | 可；必须为 line_size 整数倍 | 联动修改：stack_mapping=interleaved 时使用，须为 line_size 整数倍 |
@@ -319,13 +320,13 @@ density_gb = auto
 | `lpddr_dvfs_mode` | nominal/low/disabled | LPDDR DVFS/低速流程枚举；low 不自动等同 JEDEC DVFSL timing | 联动修改：low 档 data_rate_mbps 应匹配 lpddr_low_data_rate_mbps；<=3200 Mb/s 才使用 JEDEC DVFSL timing/nACU 列，超过范围回退 non-DVFSL 列；核对 WCK 训练与 nDVFS |
 | `lpddr_wck_mode` | `cas_sync`/`always_on` | LPDDR WCK；`burst_sync` 仅保留枚举占位，解析器会拒绝，不能作为实验配置 | 可选 cas_sync/always_on；联动 nCAS、nWCK2CK、nWCKPST 和训练；burst_sync 不支持 |
 | `hbm_link_crc_mode` / `--hbm-link-crc`、`hbm_link_crc_bits_per_request` / `--hbm-link-crc-bits` | HBM CRC 模式/开销 | 项目合成研究项：JESD270-4A 无 CRC、无 retry，标准链路保护为 parity（APAR/AERR、DPAR/DERR）；不得作为 HBM 标准特性引用 | 联动修改：CRC 模式及位数；当前 crc16 可在位数为 0 时补成 16；不得靠任意字符串创造 CRC 算法 |
-| `hbm_ras_metadata_bits_per_request` / `--hbm-ras-metadata-bits`、`hbm_ecc_bits_per_request` / `--hbm-ecc-bits` | HBM 接口 metadata | HBM 专用 | 可研究接口开销；配套协议保护开关，检查通用与专用位数的最终记账；不等于 payload ECC |
+| `hbm_ras_metadata_bits_per_request` / `--hbm-ras-metadata-bits`、`hbm_ecc_bits_per_request` / `--hbm-ecc-bits` | HBM 接口 metadata | HBM 专用 | 可研究接口附加位；配套协议保护开关，核对通用与专用位数是否重复计入；不等于 payload ECC |
 | `hbm_link_retry_enabled` / `--hbm-link-retry` | HBM retry 入口 | 项目合成研究项；标准无重试/重放机制 | 一般按基准；研究重试需与 CRC、nLINKRETRY 和相关控制序列一起验证 |
 | `lpddr_link_protection` | LPDDR link protection | LPDDR 专用 | 联动修改：各保护/DBI 开关及对应 bits 字段、协议模式；LPDDR6 标准/设备模式下不可与 DBI 同时启用；不自动等同于 payload 纠错 |
 | `lpddr_dbi_enabled` / `--lpddr-dbi`、`lpddr_dbi_bits_per_request` / `--lpddr-dbi-bits` | DBI 及开销 | LPDDR 专用 | 联动修改：各保护/DBI 开关及对应 bits 字段、协议模式；LPDDR6 标准/设备模式下不可与 link protection/link ECC 同时启用；不自动等同于 payload 纠错 |
 | `lpddr_link_ecc_enabled` / `--lpddr-link-ecc`、`lpddr_link_ecc_bits_per_request` / `--lpddr-link-ecc-bits` | link ECC | LPDDR 专用 | 联动修改：各保护/DBI 开关及对应 bits 字段、协议模式；LPDDR6 标准/设备模式下不可与 DBI 同时启用；不自动等同于 payload 纠错 |
 | `lpddr_ca_parity_enabled` / `--lpddr-ca-parity`、`lpddr_ca_parity_bits_per_command` / `--lpddr-ca-parity-bits` | CA parity | LPDDR 专用 | 联动修改：各保护/DBI 开关及对应 bits 字段、协议模式；不自动等同于 payload 纠错 |
-| `metadata_bits_per_request`、`ecc_bits_per_request` | 通用接口开销 | 影响 interface bandwidth | 可研究接口开销；配套协议保护开关，检查通用与专用位数的最终记账；不等于 payload ECC |
+| `metadata_bits_per_request`、`ecc_bits_per_request` | 通用接口附加位 | 影响折算的接口需求带宽 | 配套协议专用保护位一起检查，避免同一附加位重复计入；不等于 payload ECC |
 
 能力开关和 profile 专用字段如下。它们可以自定义，但多数是标准/profile 身份的一部分，
 用于对照实验时也必须记录，不能只记录 timing：
@@ -354,6 +355,19 @@ density_gb = auto
 `address_mapping` 是 `addr_mapping` 的配置文件别名。
 主配置或 `[override]` 中写裸 `note=` 会按未知键拒绝。自包含配置应使用
 `parameter_reference`，并同时保留 `timing_override_source` 的机器可读来源标签。
+
+#### 3.5.1 自刷新配置要点
+
+选择 `low_power_mode=self_refresh` 后，控制器在请求排空、目标 Bank 已关闭且空闲达到
+`low_power_entry_cycles` 时发出 `SREFEN`；有新访问时先发 `SREFEX`，等待退出延迟后再访问。
+`low_power_entry_cycles` 是**进入前的空闲门限**，不是驻留时长或内部刷新间隔。
+当前按 Controller/Channel 管理，不模拟每个 Rank 的独立自刷新；打开的行不会为了进入
+自刷新而被强制关闭。
+
+启用功耗时，驻留能量使用 `power_vdd`、`idd6x`、`idd_devices_per_rank` 和
+`power_scale`，按驻留的模型时间计算，并计入热模型。默认电流是研究输入；
+这条路径不模拟芯片内部刷新事件或漏电失效。CLI 在请求完成后停止；需要观察驻留，
+应在 trace 中安排一段空闲后再有访问，或通过外部接口继续推进时间。
 
 <a id="appendix-a-6"></a>
 
@@ -501,18 +515,8 @@ LPDDR ACT1 → RD/WR    = nRCDRD / nRCDWR（绝对 gate）
 `tREFI_us`、`tREFIpb_ns/us`、`tREFIdb_ns`、`tREFDB2ACT_ns`、
 `tREFDB2REFDB_S_ns`、`tREFDB2REFDB_L_ns`、`tWCKTRAIN_ns` 和 `tDVFS_ns`。
 
-替换目标器件 Timing 的推荐流程：
-
-1. 先确定 speed-bin、`tCK_ps`、density、stack height 和模式；
-2. 复制对应家族的完整 `configs/hbm.cfg` 或 `configs/lpddr.cfg`，在 `[model]`
-   选择基准标准，在 `[override]` 逐项记录目标型号差异，用 `timing_override_source`
-   和 `parameter_reference` 记录来源；
-3. 先填 JEDEC 固定项和公式项，再填 vendor-dependent RL/WL/row/refresh/RAS；
-4. 同一参数只使用 nCK 或一个时间单位版本，避免后写字段无意覆盖；
-5. 运行 `--dump-timing-table` 检查值、来源、required/provisional；
-6. 对每个被 Controller 使用的核心约束执行 `t-1` 禁止、`t` 允许；
-7. 运行 same/different BG、读写换向、tFAW、refresh/RFM 和低功耗序列；
-8. 最后才用 `--strict-timing-table` 作为器件数值配置门槛。
+别名与 nCK 输入不可对同一约束同时填写。如何修改、检查冲突并验证生效值，
+统一按下一节 3.6.12 的操作清单执行；目标器件数值还需满足[审计](审计.md)中的来源要求。
 
 <a id="timing-editing"></a>
 
@@ -638,7 +642,7 @@ mkdir -p outputs/timing_check
 | `power_scale` | 全部命令能量缩放 | 敏感性/校准参数 | 可单独做功耗敏感性实验；同时影响供给热模型的能量，绝对数值需校准 |
 | `power_act_pj`、`power_act1_pj`、`power_act2_pj` | ACT/ACT1/ACT2 单事件成本，pJ | 非负，按协议启用对应事件 | 一般保持基准或按事件校准；配套 power_source 和对应实际命令，不同作用域成本不自动互推 |
 | `power_pre_pj`、`power_preab_pj`、`power_cas_pj` | PRE/PREab/CAS 单事件成本，pJ | 不要将单事件参数当累计能量 | 一般保持基准或按事件校准；配套 power_source 和对应实际命令，不同作用域成本不自动互推 |
-| `power_read_pj`、`power_write_pj` | 读/写固定事件成本，pJ | 与 per_byte 项共同记账 | 联动校准：固定读写事件成本 + 对应 per_byte 成本 × payload 字节数，避免重复计能 |
+| `power_read_pj`、`power_write_pj` | 读/写固定事件成本，pJ | 与 per_byte 项相加得到本次读写能量 | 联动校准：固定成本 + 每 Byte 成本 × payload 字节数；勿把同一能量重复计入 |
 | `power_read_per_byte_pj`、`power_write_per_byte_pj` | 读/写每 Byte 成本，pJ/Byte | 按 payload 字节数缩放 | 联动校准：固定读写事件成本 + 对应 per_byte 成本 × payload 字节数，避免重复计能 |
 | `power_refpb_pj`、`power_refdb_pj`、`power_refab_pj` | 各刷新事件成本，pJ | 对应维护命令范围 | 一般保持基准或按事件校准；配套 power_source 和对应实际命令，不同作用域成本不自动互推 |
 | `power_rfmpb_pj`、`power_rfmab_pj`、`power_control_pj` | RFM/其他控制事件成本，pJ | 研究输入，需校准 | 一般保持基准或按事件校准；配套 power_source 和对应实际命令，不同作用域成本不自动互推 |
@@ -669,21 +673,21 @@ mkdir -p outputs/timing_check
 
 | 配置键/CLI | 含义 | 修改建议 / 联动项 |
 |---|---|---|
-| `stats_json` | 机器结果 JSON 路径；summary 也可以导出 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
-| `dump_resolved_config` | 生效配置快照，包含派生值和来源 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
-| `dump_config_diff` | 配置覆盖差异导出路径；不是终端内置基准变化清单 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
-| `explain_config` | 需要解释覆盖链的配置键 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
-| `cmd_trace` | command CSV 路径 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
+| `stats_json` | 机器结果 JSON 路径；summary 也可以导出 | 日常建议保存，供可视化和对比工具读取 |
+| `dump_resolved_config` | 生效配置快照，包含派生值和来源 | 自定义模型建议保存，用于复现参数 |
+| `dump_config_diff` | 配置覆盖差异导出路径；不是终端内置基准变化清单 | 需要追查配置覆盖时使用 |
+| `explain_config` | 需要解释覆盖链的配置键 | 按单个键查询其生效来源 |
+| `cmd_trace` | command CSV 路径 | 排查时序或生成命令时间线时启用；长跑注意文件大小 |
 | `response_trace` | HostResponse CSV 路径 | 可选输出路径；联动 response_delivery_mode 和对应队列，CLI 可由 trace 选项推导响应模式 |
 | `transaction_response_trace` | DRAM 子事务响应 CSV 路径 | 可选输出路径；联动 response_delivery_mode 和对应队列，CLI 可由 trace 选项推导响应模式 |
-| `dfi_trace` | DFI beat CSV 路径 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
-| `dfi_signal_trace` | DFI-like signal CSV 路径 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
-| `dump_timing_table` | 最终 timing CSV | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
+| `dfi_trace` | DFI beat CSV 路径 | 检查 Behavioral PHY 的命令/数据事件时启用 |
+| `dfi_signal_trace` | DFI-like signal CSV 路径 | 需要查看更细的行为信号事件时启用 |
+| `dump_timing_table` | 最终 timing CSV | 修改时序后建议保存并核对值与来源 |
 | `memory_image` | 初始 image | 联动修改：初始镜像地址/内容须匹配当前几何、后端容量和待测数据 |
 | `dump_memory_image` | 最终镜像按扩展名选择格式：`.csv` 为明细表，`.bin` 为可重载二进制 checkpoint，其他扩展名为文本镜像；与 `memory_data_file` 指定的持久后端文件不是同一种格式 | 可选导出；与格式、输出规模及多 Stack 路径配套，导出不改变容量 |
 | `dump_memory_csv` | 最终 CSV image | 可选导出；与格式、输出规模及多 Stack 路径配套，导出不改变容量 |
 | `verify_golden` | 仿真后 golden 校验 | 验证输入：需匹配相同工作负载、初始数据和组织，不能任意替换参考文件 |
-| `mismatch_report` | 不匹配报告 | 可单独选择输出路径/诊断项；不用于设定器件参数，注意输出成本 |
+| `mismatch_report` | 不匹配报告 | 数据验证时启用；无错误也须结合实际检查数判断 |
 | `dump_thermal_map` | 热 map 输出 | 可选输出路径；配套 thermal_model、网格及多 Stack 文件，坐标解释见输出指南 |
 | `validate_cmd_trace` | 运行 command validator | 可单独启用验证；按当前模型检查对应轨迹，不能由 pass 推断完整器件认证 |
 | `validate_dfi_trace` | 运行 DFI validator | 可单独启用验证；按当前模型检查对应轨迹，不能由 pass 推断完整器件认证 |

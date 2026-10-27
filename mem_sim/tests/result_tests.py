@@ -276,6 +276,7 @@ class ResultContract(unittest.TestCase):
                                   'Run Status', 'Simulation Time', 'Bandwidth / Utilization',
                                   'Read Transaction Latency', 'Validation', 'Completed_Reads'):
                         self.assertIn(label, run.stdout)
+                    self.assertIn('Write Transaction Latency', run.stdout)
                     with tempfile.TemporaryDirectory(prefix='hbm_english_report_') as temp:
                         report = Path(temp) / 'summary.txt'
                         report.write_text(run.stdout)
@@ -283,13 +284,15 @@ class ResultContract(unittest.TestCase):
                             read_result(report)
 
     def test_tool_helpers_do_not_collect_diagnostics_by_default(self):
-        command = [str(BINARY), '--standard', 'hbm4', '--requests', '8']
+        command = [str(BINARY), '--standard', 'hbm4', '--requests', '8',
+                   '--read-ratio', '50']
         public, _ = run_simulator(command, cwd=ROOT, timeout=20)
         self.assertIn('row_hit_pct', public)
         self.assertNotIn('row_hits', public)
         diagnostic, _ = run_simulator(command, cwd=ROOT, timeout=20, diagnostic=True)
         self.assertIn('row_hits', diagnostic)
-        for key in ('completed_reads', 'system_cycles', 'avg_read_latency_ns'):
+        for key in ('completed_reads', 'system_cycles', 'avg_read_latency_ns',
+                    'avg_write_latency_ns'):
             self.assertEqual(public[key], diagnostic[key])
         disabled, _ = run_simulator(command + ['--power-model', 'false',
                                                '--thermal-model', 'false'], cwd=ROOT, timeout=20)
@@ -326,6 +329,7 @@ class ResultContract(unittest.TestCase):
             self.assertEqual(model['capacity_per_instance_bytes'], capacity)
             self.assertEqual(model['aggregate_capacity_bytes'], capacity * model['stack_count'])
             self.assertIsNone(raw['metrics']['avg_read_latency_ns'])
+            self.assertIsNotNone(raw['metrics']['avg_write_latency_ns'])
             self.assertIn('N/A ns', run.stdout)
             self.assertIn('built-in HBM3', raw['comparison_baseline'])
 
@@ -334,6 +338,7 @@ class ResultContract(unittest.TestCase):
             result = Path(temp) / 'result.json'
             for standard in ('hbm3', 'hbm4', 'lpddr5', 'lpddr6'):
                 command = [str(BINARY), '--standard', standard, '--requests', '16',
+                           '--read-ratio', '50',
                            '--stack-count', '2', '--stats-view', 'diagnostic',
                            '--stats-json', str(result)]
                 run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=20)
@@ -343,6 +348,11 @@ class ResultContract(unittest.TestCase):
                 ns = raw['parameters']['tick_duration_ps'] / 1000
                 self.assertAlmostEqual(m['simulation_time_ns'], d['system_cycles'] * ns)
                 self.assertAlmostEqual(m['avg_read_latency_ns'], d['avg_read_latency'] * ns)
+                self.assertAlmostEqual(m['avg_write_latency_ns'], d['avg_write_latency'] * ns)
+                self.assertAlmostEqual(
+                    m['avg_write_latency_ns'],
+                    sum(stack['avg_write_latency_ns'] * stack['completed_writes']
+                        for stack in raw['stacks']) / m['completed_writes'])
                 denominator = d['row_hits'] + d['row_misses'] + d['row_conflicts']
                 if denominator:
                     self.assertAlmostEqual(m['row_hit_pct'], 100 * d['row_hits'] / denominator)
@@ -357,6 +367,22 @@ class ResultContract(unittest.TestCase):
                 else:
                     self.assertNotIn('ranks', raw['model'])
                     self.assertNotIn('lpddr_wck_ratio', raw['parameters'])
+
+    def test_transaction_latency_unavailable_without_matching_completions(self):
+        with tempfile.TemporaryDirectory(prefix='hbm_latency_boundary_') as temp:
+            result = Path(temp) / 'result.json'
+            for read_ratio, absent, present in (
+                    (100, 'avg_write_latency_ns', 'avg_read_latency_ns'),
+                    (0, 'avg_read_latency_ns', 'avg_write_latency_ns')):
+                run = subprocess.run(
+                    [str(BINARY), '--standard', 'hbm4', '--requests', '8',
+                     '--read-ratio', str(read_ratio), '--stats-json', str(result)],
+                    cwd=ROOT, capture_output=True, text=True, timeout=20)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                metrics = json.loads(result.read_text())['metrics']
+                self.assertIsNone(metrics[absent])
+                self.assertGreater(metrics[present], 0)
+                self.assertIn('Write Transaction Latency', run.stdout)
 
     def test_old_results_and_compact_input_error(self):
         with tempfile.TemporaryDirectory(prefix="hbm_result_legacy_") as temp:
