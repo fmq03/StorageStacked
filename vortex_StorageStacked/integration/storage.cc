@@ -43,6 +43,8 @@ Bridge::Bridge(sc_module_name n, const gem5::StorageBridgeParams& p)
     master.maxId = 1023;
     // 创建共享存储配置，先采用其默认值。
     StorageConfig storage;
+    // 继承 gem5 参数中的诊断 trace 级别。
+    storage.trace_level = p.trace_level;
     // 从 gem5 参数复制存储窗口基址和大小。
     storage.base = p.base; storage.size = p.size;
     // 复制 AoU 平面数和重放测试开关。
@@ -124,15 +126,17 @@ Bridge::Bridge(sc_module_name n, const gem5::StorageBridgeParams& p)
          // 继续写入每符号位数和 ns 周转时间，结束 JSON。
          << ",\"bits_per_symbol\":" << LINK_BITS_PER_SYMBOL << ",\"tat_ns\":" << LINK_TAT_NS << "}\n";
     // 创建输出目录中的 axi_wave.vcd 波形文件。
-    vcd = sc_create_vcd_trace_file((directory + "/axi_wave").c_str());
-    // 设置 VCD 时间单位为 1 fs。
-    vcd->set_time_unit(1, SC_FS);
-    // 注册公共 AXI 时钟和低有效复位的波形。
-    sc_trace(vcd, clock, "ACLK"); sc_trace(vcd, resetn, "ARESETn");
-    // 注册 AXI 五通道信号的波形。
-    wires.trace(vcd);
-    // 若后端存在，注册其内部状态波形。
-    if (aou) aou->trace(vcd);
+    if (p.trace_level == "full") {
+        vcd = sc_create_vcd_trace_file((directory + "/axi_wave").c_str());
+        // 设置 VCD 时间单位为 1 fs。
+        vcd->set_time_unit(1, SC_FS);
+        // 注册公共 AXI 时钟和低有效复位的波形。
+        sc_trace(vcd, clock, "ACLK"); sc_trace(vcd, resetn, "ARESETn");
+        // 注册 AXI 五通道信号的波形。
+        wires.trace(vcd);
+        // 若后端存在，注册其内部状态波形。
+        if (aou) aou->trace(vcd);
+    }
     // 注册启动复位线程。
     SC_THREAD(reset);
     // 注册 AXI 上升沿的时钟一致性检查方法，并跳过初始化调用。

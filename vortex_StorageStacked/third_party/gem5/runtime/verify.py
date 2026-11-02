@@ -52,6 +52,8 @@ def verify_soc(root,c,actual):
     dump(root/'soc_summary.json',result);return result
 
 def verify(root):
+    from trace_policy import require_full
+    require_full(root)
     c = read(root / 'resolved.json')
     dev = c['device']
     a = c['architecture']

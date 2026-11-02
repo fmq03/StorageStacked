@@ -47,7 +47,7 @@ def main():
         # 传入内存 burst 槽位数与响应保持时间。
         memsim_slots=memory['slots'],memsim_response_hold=memory['response_hold'],
         # 将 CSV/VCD 输出目录传给桥，结束存储桥参数列表。
-        trace_dir=str(output))
+        trace_dir=str(output),trace_level=a.get("trace_level","full"))
     # 创建只响应 BAR 地址窗口的 gem5 到 64 位 TLM 转换桥。
     system.bridge=Gem5ToTlmBridge64(addr_ranges=[AddrRange(base,size=size)])
     # 将转换桥的 TLM 发起端连接到存储桥的目标端。

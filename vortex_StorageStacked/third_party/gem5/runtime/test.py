@@ -1,3 +1,4 @@
+from paths import STORAGE_MEMSIM_SOURCE, STORAGE_MEMSIM_ONLINE_CHECK, STORAGE_SOURCE, STORAGE_CHECKS
 """One regression run; each selected project executes its default scenario once."""
 import argparse,datetime,json,subprocess,sys
 from pathlib import Path
@@ -11,6 +12,8 @@ cases=[]
 def add(name,project,updates):
     c=json.loads((ROOT/'user'/project/'config.json').read_text())
     for group,fields in updates.items():c[group].update(fields)
+    if c['simulation'].get('trace_level','full') != 'full':
+        raise ValueError('Acceptance requires trace_level=full')
     path=ROOT/'user'/project/'result'/stamp/(name+'.json');dump(path,c)
     cases.append((name,project,path,c))
 if o.project in (None,'smoke'):
@@ -32,7 +35,7 @@ try:
     negative=check(by_name['smoke'][0] if 'smoke' in by_name else None,by_name['llm'][0] if 'llm' in by_name else None)
     native_plan=json.loads(subprocess.check_output(['ctest','--test-dir',str(MEMSIM_BUILD),'--show-only=json-v1'],text=True))
     with (output/'native.log').open('w') as log:subprocess.run(['ctest','--test-dir',str(MEMSIM_BUILD),'--output-on-failure'],stdout=log,stderr=subprocess.STDOUT,check=True)
-    with (output/'api.log').open('w') as log:subprocess.run(['python',str(STORAGE_ROOT/'mem_sim/integration/check_online.py'),str(MEMSIM_BUILD/'libstoragestacked_memsim.so'),str(output/'api')],stdout=log,stderr=subprocess.STDOUT,check=True)
+    with (output/'api.log').open('w') as log:subprocess.run(['python',str(STORAGE_MEMSIM_ONLINE_CHECK),str(MEMSIM_BUILD/'libstoragestacked_memsim.so'),str(output/'api')],stdout=log,stderr=subprocess.STDOUT,check=True)
     s={'passed':True,'regression_runs':1,'host_configuration_tests_passed':True,'native_tests_passed':len(native_plan['tests']),'api_check':json.loads((output/'api/api_check.json').read_text()),'negative':negative,'cases':{}}
     for name,result,item in finished:
         value=item['smoke']['output'] if 'smoke' in item else item['llm']['generated_text']

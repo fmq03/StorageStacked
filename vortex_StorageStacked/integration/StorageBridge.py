@@ -48,5 +48,7 @@ class StorageBridge(SystemC_ScModule):
     outstanding = Param.Unsigned(4, 'Bounded TLM transaction slots')
     # 声明确定性通道延迟与响应反压开关，默认启用。
     stalls = Param.Bool(True, 'Deterministic stalls on all five channels')
+    # 声明诊断 trace 级别：full 保存全部原始记录，light 关闭 VCD 与 UCIe 原始帧记录。
+    trace_level = Param.String('full', 'full or light diagnostic trace')
     # 声明 CSV 日志和 VCD 波形的输出目录，默认空字符串。
     trace_dir = Param.String('', 'Directory for CSV/VCD traces')

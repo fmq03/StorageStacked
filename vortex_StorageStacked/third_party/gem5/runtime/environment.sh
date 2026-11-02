@@ -8,6 +8,7 @@ source "$SS_ROOT/third_party/gem5/runtime/settings.sh"
 mkdir -p "$SS_DEPS_ROOT"
 export SS_DEPS_ROOT=$(cd "$SS_DEPS_ROOT" && pwd)
 export SS_PREFIX="$SS_DEPS_ROOT/toolchain"
+export AXI_PYTHON="$SS_PREFIX/bin/python"
 export MAMBA_ROOT_PREFIX="$SS_DEPS_ROOT/mamba"
 if [[ ! -x "$SS_PREFIX/bin/python" ]]; then
     echo '请先在仓库根目录执行 ./build.sh' >&2
@@ -25,7 +26,7 @@ if [[ ! -f "$STORAGE_STACK_ROOT/storage_axi/storage_config.hh" ]]; then
     return 1
 fi
 export STORAGE_STACK_ROOT=$(cd "$STORAGE_STACK_ROOT" && pwd)
-export MEMSIM_HOME="$STORAGE_STACK_ROOT/mem_sim"
+export MEMSIM_HOME=$("$AXI_PYTHON" "$STORAGE_STACK_ROOT/scripts/storage_manifest.py" --field memsim_source)
 export MEMSIM_BUILD="$SS_ROOT/third_party/.cache/build/memsim"
 export MEMSIM_BIN="$MEMSIM_BUILD/hbm_sim"
 export AXI_PROJECT_DIR="$SS_ROOT/integration"
@@ -33,7 +34,6 @@ export AXI_PROFILE=unified
 export AXI_ENV_ROOT="$SS_DEPS_ROOT/runs"
 export AXI_GEM5_HOME="$GEM5_HOME"
 export AXI_GEM5_BIN="$GEM5_HOME/build/AXI/gem5.opt"
-export AXI_PYTHON="$SS_PREFIX/bin/python"
 export AXI_CXX="$SS_PREFIX/bin/x86_64-conda-linux-gnu-g++"
 export AXI_CC="$SS_PREFIX/bin/x86_64-conda-linux-gnu-gcc"
 export CXX="$AXI_CXX"
@@ -45,7 +45,7 @@ ln -sfn "$AXI_CXX" "$SS_DEPS_ROOT/host-bin/g++"
 # Keep build tools independent of the calling shell.
 export PATH="$SS_DEPS_ROOT/host-bin:$SS_DEPS_ROOT/xpu-tools/bin:$SS_PREFIX/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export GEM5_SCONS="$SS_PREFIX/bin/scons"
-export TMPDIR="$SS_DEPS_ROOT/tmp"
+export TMPDIR="${TMPDIR:-$SS_DEPS_ROOT/tmp}"
 export XDG_CACHE_HOME="$SS_DEPS_ROOT/cache"
 export CCACHE_TEMPDIR="$SS_DEPS_ROOT/tmp/ccache"
 export CPATH="$SS_PREFIX/include"
@@ -57,4 +57,4 @@ mkdir -p "$AXI_ENV_ROOT"
 export VORTEX_HOME="$DEVICE_HOME"
 export VORTEX_BUILD="$DEVICE_BUILD"
 
-export PYTHONPATH="$STORAGE_STACK_ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$SS_ROOT/third_party/gem5/runtime:$("$AXI_PYTHON" "$STORAGE_STACK_ROOT/scripts/storage_manifest.py" --pythonpath)"

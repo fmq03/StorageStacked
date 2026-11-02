@@ -1,0 +1,14 @@
+{
+  "vortex_requests.csv": "traces/vortex/vortex_requests.csv",
+  "cpu_requests.csv": "traces/vortex/cpu_requests.csv",
+  "device_requests.csv": "traces/vortex/device_requests.csv",
+  "stats.txt": "traces/vortex/stats.txt",
+  "config.ini": "config/config.ini",
+  "transactions.csv": "traces/vortex/transactions.csv",
+  "hettrace": "traces/vortex/hettrace",
+  "mmu_translations.csv": "traces/vortex/mmu_translations.csv",
+  "citations.bib": "traces/vortex/citations.bib",
+  "config.dot": "traces/vortex/config.dot",
+  "config.dot.pdf": "traces/vortex/config.dot.pdf",
+  "config.dot.svg": "views/config.dot.svg"
+}

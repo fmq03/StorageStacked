@@ -1,3 +1,4 @@
+from paths import STORAGE_MEMSIM_SOURCE, STORAGE_MEMSIM_ONLINE_CHECK, STORAGE_SOURCE, STORAGE_CHECKS
 """Build the reusable platform for one validated project configuration."""
 import argparse,json,os,shutil,subprocess
 from pathlib import Path
@@ -24,10 +25,10 @@ def build(config,force=False,ready=False,refresh=False):
             raise RuntimeError('aarch64 requires aarch64-linux-gnu-g++ and /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 (Ubuntu: g++-aarch64-linux-gnu libc6-dev-arm64-cross)')
     BUILD.mkdir(parents=True,exist_ok=True)
     dump(CACHE/'link.json',c['ucie']);os.environ['STORAGE_LINK_CONFIG']=str(CACHE/'link.json')
-    run(['cmake','-S',STORAGE_ROOT/'mem_sim','-B',MEMSIM_BUILD,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_CXX_COMPILER='+os.environ['AXI_CXX']])
+    run(['cmake','-S',STORAGE_MEMSIM_SOURCE,'-B',MEMSIM_BUILD,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_CXX_COMPILER='+os.environ['AXI_CXX']])
     run(['cmake','--build',MEMSIM_BUILD,'-j',SETTINGS['jobs']])
     home=ROOT/'third_party/gem5';scons=os.environ['GEM5_SCONS']
-    args=['CXX='+os.environ['AXI_CXX'],'CC='+os.environ['AXI_CC'],'PYTHON_CONFIG='+os.environ['PYTHON_CONFIG'],'EXTRAS='+str(ROOT/'integration')+':'+str(STORAGE_ROOT/'storage_axi')]
+    args=['CXX='+os.environ['AXI_CXX'],'CC='+os.environ['AXI_CC'],'PYTHON_CONFIG='+os.environ['PYTHON_CONFIG'],'EXTRAS='+str(ROOT/'integration')+':'+str(STORAGE_SOURCE)]
     target='build/'+gem5.parent.name;build_opt='X86' if isa=='x86_64' else 'ARM'
     if not (gem5.parent/'gem5.build/config').exists():run([scons,'defconfig',target,'build_opts/'+build_opt,*args],home)
     run([scons,'setconfig',target,'RUBY=n','USE_KVM='+('y' if isa=='x86_64' else 'n'),'USE_SYSTEMC=y',*args],home)

@@ -3,6 +3,8 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import os
+from environment import describe
 
 from paths import ROOT, BUILD, MEMSIM_BUILD, VORTEX_BUILD, ARM_SYSROOT, gem5_binary, host_runtime, relative, dump
 from configure import load_config, resolved_parts, address_map
@@ -10,6 +12,7 @@ from storage_dependency import require_build, storage_version
 from elf_model import read as read_model
 from report import write_status
 from portable import sanitize
+from result_layout import organize
 
 
 def local_path(base, value):
@@ -53,7 +56,7 @@ def resolve(output):
     files=[elf,output/'build/program.vxbin',output/'build/host.elf',gem5,
            host_runtime(isa)/'libvortex.so',host_runtime(isa)/f'libvortex-gem5-{isa}.so',
            VORTEX_BUILD/'sim/simx/libvortex-gem5.so',MEMSIM_BUILD/'libstoragestacked_memsim.so']
-    dump(output/'environment.json',{'storage':storage_version(),
+    dump(output/'environment.json',{**describe(gem5=ROOT/'third_party/gem5',compiler=os.environ['AXI_CXX'],standard=17),'storage':storage_version(),
          'files':[{'name':relative(path,output),'bytes':path.stat().st_size} for path in files]})
     (output/'build/simulator.path').write_text(relative(gem5,output)+'\n')
     (output/'build/system.path').write_text(relative(ROOT/'integration/system.py',output)+'\n')
@@ -78,7 +81,8 @@ def finish(output, stage, code):
             summary = {}
         if not isinstance(summary, dict):
             summary = {}
-        if code or not summary.get('passed'):
+        diagnostic = summary.get('trace_level') == 'light' and summary.get('link_verified') is False
+        if code or (not summary.get('passed') and not diagnostic):
             log = {'build': 'build.log', 'simulate': 'run.log', 'validate': 'validation.log'}[stage]
             error = summary.get('error') or f'{stage} failed (exit {code}); see {log}'
             write_status(output, stage, error)
@@ -86,6 +90,7 @@ def finish(output, stage, code):
                 raise RuntimeError('Validation did not produce a passing summary')
     finally:
         sanitize(output)
+        organize(output)
 
 
 def main():

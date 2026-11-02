@@ -26,7 +26,7 @@ if [[ -d "$ss_deps/toolchain/conda-meta" ]]; then
     # Explicit installs relink packages even when identical. Check first so a
     # repeated setup never rewrites a toolchain that may be compiling gem5.
     if ! diff -u \
-        <(sed -n '/^https:/{s/#.*//;p;}' "$ss_root/third_party/gem5/runtime/defaults/conda-linux-64.lock" | sort) \
+        <(sed -n '/^https:/{s/#.*//;p;}' "$ss_root/../common/toolchain/conda-linux-64.lock" | sort) \
         <("$ss_mamba" --no-rc env export --explicit --prefix "$ss_deps/toolchain" | sed -n '/^https:/{s/#.*//;p;}' | sort); then
         echo '现有环境与锁文件不同，请指定新的 SS_DEPS_ROOT。' >&2
         exit 1
@@ -34,7 +34,7 @@ if [[ -d "$ss_deps/toolchain/conda-meta" ]]; then
     echo '现有工具环境与锁文件一致，无需重新安装。'
 else
     "$ss_mamba" --no-rc create -y --root-prefix "$ss_deps/mamba" \
-        --prefix "$ss_deps/toolchain" --file "$ss_root/third_party/gem5/runtime/defaults/conda-linux-64.lock" "${offline_args[@]}"
+        --prefix "$ss_deps/toolchain" --file "$ss_root/../common/toolchain/conda-linux-64.lock" "${offline_args[@]}"
 fi
 source "$ss_root/third_party/gem5/runtime/environment.sh"
 "$AXI_PYTHON" "$SS_ROOT/third_party/gem5/runtime/setup_sources.py"

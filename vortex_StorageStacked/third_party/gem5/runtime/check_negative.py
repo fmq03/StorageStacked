@@ -8,6 +8,15 @@ from verify_host import check_execution,verify as verify_host
 
 
 def check(smoke=None,llm=None):
+    from contextlib import ExitStack
+    from result_layout import working_result
+    with ExitStack() as contexts:
+        for root in (smoke,llm):
+            if root is not None: contexts.enter_context(working_result(root))
+        return _check(smoke,llm)
+
+
+def _check(smoke=None,llm=None):
     result={}
     def reject(name,fn):
         try:fn()

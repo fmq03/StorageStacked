@@ -81,7 +81,9 @@ def validate(c):
     if m['standard'] not in ('hbm3','hbm4','lpddr5','lpddr6'):raise ValueError('unsupported memory standard')
     for k in ('channels','scale','queue','slots'):integer(m[k],1,1023 if k=='slots' else 1024,'memsim.'+k)
     integer(m['response_hold'],0,1000000,'memsim.response_hold')
-    keys(c['simulation'],'max_ticks','simulation');integer(c['simulation']['max_ticks'],1,10**17,'max_ticks')
+    if c['simulation'].get('trace_level','full') not in ('full','light'):
+        raise ValueError('simulation.trace_level must be full or light')
+    keys({k:v for k,v in c['simulation'].items() if k!='trace_level'},'max_ticks','simulation');integer(c['simulation']['max_ticks'],1,10**17,'max_ticks')
     b=c['program'];kind=b.get('type')
     if kind=='smoke':
         keys(b,'type input workers','program');integer(b['input'],0,0xffffffff,'input');integer(b['workers'],1,256,'workers')
@@ -106,6 +108,7 @@ def validate(c):
 def load_config(path):return validate(json.loads(Path(path).read_text()))
 def resolved_parts(c):
     a={'device_clock_mhz':c['gpu']['clock_mhz'],'simx':{k:c['gpu'][k] for k in ('cores','warps','threads')},'gpu':{**c['gpu'],**gpu_cache(c['gpu'])},'host':c['host'],'axi':c['axi'],'memory':c['memsim'],'ucie':c['ucie'],'max_ticks':c['simulation']['max_ticks']}
+    if 'trace_level' in c['simulation']: a['trace_level']=c['simulation']['trace_level']
     return a,{'name':c['program']['type'],**{k:v for k,v in c['program'].items() if k!='type'}}
 def address_map(a=None):
     m=json.loads((RUNTIME/'defaults/addrmap.json').read_text())

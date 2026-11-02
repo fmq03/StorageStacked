@@ -59,7 +59,7 @@ finish() {
     trap - EXIT
     if ! "$AXI_PYTHON" "$runtime/session.py" finish "$result_dir" "$stage" "$code"; then code=1; fi
     if [[ $code == 0 ]]; then
-        printf 'PASS: %s/%s/report.md\n' "$project" "$output"
+        printf 'DONE: %s/%s/report.md\n' "$project" "$output"
     else
         printf 'FAIL: %s/%s/report.md\n' "$project" "$output" >&2
     fi
