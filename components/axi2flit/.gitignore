@@ -30,6 +30,7 @@ systemc/sim/boundary_*
 systemc/sim/adapter*
 systemc/sim/full_link*
 systemc/obj/
+systemc/build/
 
 # 波形与日志：每次仿真重新生成，且体积大
 *.vcd

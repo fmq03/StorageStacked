@@ -52,7 +52,7 @@ $(BUILD_DIR)/%.o: src/%.cpp $(BUILD_CONFIG) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 # sequence_tests 直接链接控制器库对象，用 C++ assert-style 测试检查协议序列。
-$(SEQUENCE_TEST): $(LIB_OBJS) tests/sequence_tests.cpp tests/spec_fixture.hpp $(BUILD_CONFIG) | $(BUILD_DIR)
+$(SEQUENCE_TEST): $(LIB_OBJS) tests/sequence_tests.cpp tests/spec_fixture.hpp tests/temp_path.hpp $(BUILD_CONFIG) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $(LIB_OBJS) tests/sequence_tests.cpp $(LDLIBS) -o $@
 
 $(TIMING_BOUNDARY_TEST): $(LIB_OBJS) tests/timing_boundary_tests.cpp tests/spec_fixture.hpp $(BUILD_CONFIG) | $(BUILD_DIR)
@@ -127,7 +127,7 @@ config-test: $(CONFIG_TEST) $(MODEL_CONFIG_TEST)
 scheduler-contract-test: $(SCHEDULER_CONTRACT_TEST)
 	./$(SCHEDULER_CONTRACT_TEST)
 
-$(RESULT_VALUE_TEST): $(LIB_OBJS) tests/result_value_tests.cpp $(BUILD_CONFIG) | $(BUILD_DIR)
+$(RESULT_VALUE_TEST): $(LIB_OBJS) tests/result_value_tests.cpp tests/temp_path.hpp $(BUILD_CONFIG) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) $(LIB_OBJS) tests/result_value_tests.cpp $(LDLIBS) -o $@
 
 result-test: $(TARGET) $(RESULT_VALUE_TEST)

@@ -45,9 +45,15 @@ case "$command" in
             ln -sfn "$(realpath "$build/libstorage_systemc.a")" "$selected/lib/libsystemc.a"
         fi
         printf '%s\n' "$(cd "$selected" && pwd)" ;;
+    link-test)
+        source "$repo/common/toolchain/env.sh"
+        systemc=${SYSTEMC_HOME:-$HOME/.local/systemc-2.3.4-cxx17}
+        [[ -f "$systemc/include/systemc" ]] || { echo '请用 SYSTEMC_HOME 指定兼容 SystemC 的安装目录' >&2; exit 2; }
+        [[ $# -gt 0 ]] || set -- preflight
+        exec make -C "$root/tests/link" CXX="$CXX" SYSTEMC_HOME="$systemc" SYSTEMC_CXX_STANDARD="${SYSTEMC_CXX_STANDARD:-17}" "$@" ;;
     run|test|smoke)
         source "$repo/common/toolchain/env.sh"
         export PYTHONPATH="$("$SS_PYTHON" "$root/scripts/storage_manifest.py" --pythonpath)${PYTHONPATH:+:$PYTHONPATH}"
         exec "$SS_PYTHON" "$root/scripts/$command.py" "$@" ;;
-    *) echo 'Usage: ./run.sh {setup|build|systemc-prefix|run|test|smoke} [arguments]' >&2; exit 2 ;;
+    *) echo 'Usage: ./run.sh {setup|build|systemc-prefix|run|test|smoke|link-test} [arguments]' >&2; exit 2 ;;
 esac

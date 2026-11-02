@@ -3,6 +3,8 @@
 # command trace validation 和 timing table dump。精确协议断言放在
 # tests/sequence_tests.cpp 中，这里保持快速、稳定、低维护成本。
 set -euo pipefail
+export TMPDIR="${TMPDIR:-$(pwd)/build/test-tmp}"
+mkdir -p "$TMPDIR"
 
 cd "$(dirname "$0")/.."
 if [[ -z "${HBM_SIM_BIN:-}" ]]; then
@@ -264,19 +266,19 @@ rm -f "$bounded_random_out"
 invalid_trace="$(mktemp)"
 printf '0 M REFab 0x0 stack=-1\n' >"$invalid_trace"
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --trace "$invalid_trace" --requests 0 \
-    >/tmp/hbm_sim_bad_trace.out 2>&1; then
+    >"${TMPDIR}/hbm_sim_bad_trace.out" 2>&1; then
   echo "expected a negative maintenance stack id to fail" >&2
   exit 1
 fi
-grep -F "has invalid stack id: -1" /tmp/hbm_sim_bad_trace.out >/dev/null
+grep -F "has invalid stack id: -1" "${TMPDIR}/hbm_sim_bad_trace.out" >/dev/null
 printf '0 BR 0x0 len=64garbage\n' >"$invalid_trace"
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --trace "$invalid_trace" --requests 0 \
-    >/tmp/hbm_sim_bad_trace.out 2>&1; then
+    >"${TMPDIR}/hbm_sim_bad_trace.out" 2>&1; then
   echo "expected a malformed burst length to fail" >&2
   exit 1
 fi
-grep -F "has invalid burst length: 64garbage" /tmp/hbm_sim_bad_trace.out >/dev/null
-rm -f "$invalid_trace" /tmp/hbm_sim_bad_trace.out
+grep -F "has invalid burst length: 64garbage" "${TMPDIR}/hbm_sim_bad_trace.out" >/dev/null
+rm -f "$invalid_trace" "${TMPDIR}/hbm_sim_bad_trace.out"
 "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --requests 2 \
   --cmd-trace "$auto_output_root/nested/commands.csv" \
   --dfi-trace "$auto_output_root/nested/dfi.csv" \
@@ -286,7 +288,7 @@ rm -f "$invalid_trace" /tmp/hbm_sim_bad_trace.out
 [[ -s "$auto_output_root/nested/timing.csv" ]]
 rm -rf "$auto_output_root"
 
-memory_bin="$(mktemp /tmp/hbm_sim_memory.XXXXXX.bin)"
+memory_bin="$(mktemp "${TMPDIR}/hbm_sim_memory.XXXXXX.bin")"
 golden_ok="$(mktemp)"
 "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --trace examples/data_check.trace \
   --requests 0 --max-cycles 4000 --dump-memory-image "$memory_bin" >/dev/null
@@ -298,7 +300,7 @@ grep -Eq "^golden_uninitialized_lines[[:space:]]*:" "$golden_ok"
 grep -Eq "^golden_actual_uninitialized_lines[[:space:]]*:" "$golden_ok"
 
 partial_zero_trace="$(mktemp)"
-partial_zero_bin="$(mktemp /tmp/hbm_sim_partial_zero.XXXXXX.bin)"
+partial_zero_bin="$(mktemp "${TMPDIR}/hbm_sim_partial_zero.XXXXXX.bin")"
 golden_bad_out="$(mktemp)"
 golden_bad_err="$(mktemp)"
 printf 'W 0x1000 data=00000000\n' >"$partial_zero_trace"
@@ -323,36 +325,36 @@ run_and_check hbm4_storage_model_cli "$HBM_SIM_BIN" --stats-view diagnostic --st
   --thermal-coupling true --thermal-tsvs-per-grid 8 \
   --subarrays-per-bank 8 --mats-per-subarray-x 2 --mats-per-subarray-y 2 \
   --microbumps-x 4 --microbumps-y 4 --ecc-inject-period 0
-if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --requests 1 --power-scale -1 >/tmp/hbm_sim_bad_power_scale.out 2>&1; then
-  cat /tmp/hbm_sim_bad_power_scale.out
+if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --requests 1 --power-scale -1 >"${TMPDIR}/hbm_sim_bad_power_scale.out" 2>&1; then
+  cat "${TMPDIR}/hbm_sim_bad_power_scale.out"
   echo "expected negative power scale to fail" >&2
   exit 1
 fi
-grep -Eq "power_scale must be >= 0" /tmp/hbm_sim_bad_power_scale.out
-rm -f /tmp/hbm_sim_bad_power_scale.out
+grep -Eq "power_scale must be >= 0" "${TMPDIR}/hbm_sim_bad_power_scale.out"
+rm -f "${TMPDIR}/hbm_sim_bad_power_scale.out"
 
 # 无符号选项不能把 -1 包装成 UINT64_MAX；整数/浮点参数也必须完整消费
 # 输入 token，且拒绝 NaN/Inf，避免错误配置生成貌似正常的统计。
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --requests -1 --check-config \
-    >/tmp/hbm_sim_bad_unsigned.out 2>&1; then
+    >"${TMPDIR}/hbm_sim_bad_unsigned.out" 2>&1; then
   echo "expected a negative unsigned option to fail" >&2
   exit 1
 fi
-grep -F "invalid non-negative integer: -1" /tmp/hbm_sim_bad_unsigned.out >/dev/null
+grep -F "invalid non-negative integer: -1" "${TMPDIR}/hbm_sim_bad_unsigned.out" >/dev/null
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --read-ratio 50garbage --check-config \
-    >/tmp/hbm_sim_bad_integer.out 2>&1; then
+    >"${TMPDIR}/hbm_sim_bad_integer.out" 2>&1; then
   echo "expected an integer with a trailing suffix to fail" >&2
   exit 1
 fi
-grep -F "invalid integer: 50garbage" /tmp/hbm_sim_bad_integer.out >/dev/null
+grep -F "invalid integer: 50garbage" "${TMPDIR}/hbm_sim_bad_integer.out" >/dev/null
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --power-scale nan --check-config \
-    >/tmp/hbm_sim_bad_float.out 2>&1; then
+    >"${TMPDIR}/hbm_sim_bad_float.out" 2>&1; then
   echo "expected a non-finite floating-point option to fail" >&2
   exit 1
 fi
-grep -F "invalid finite number: nan" /tmp/hbm_sim_bad_float.out >/dev/null
-rm -f /tmp/hbm_sim_bad_unsigned.out /tmp/hbm_sim_bad_integer.out \
-  /tmp/hbm_sim_bad_float.out
+grep -F "invalid finite number: nan" "${TMPDIR}/hbm_sim_bad_float.out" >/dev/null
+rm -f "${TMPDIR}/hbm_sim_bad_unsigned.out" "${TMPDIR}/hbm_sim_bad_integer.out" \
+  "${TMPDIR}/hbm_sim_bad_float.out"
 run_and_check lpddr6_efficiency "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 128 \
   --lpddr-efficiency static --metadata-bits-per-request 16
 run_and_check lpddr6_link_cli "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 32 \
@@ -504,14 +506,14 @@ run_and_check hbm4_dramsim3_idd_grid "$HBM_SIM_BIN" --stats-view diagnostic --co
   --thermal-grid-cols-per-tile 4 --thermal-grid-rows-per-tile 4
 if "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --requests 1 \
   --power-source dramsim3_idd --idd-devices-per-rank 0 \
-  >/tmp/hbm_sim_bad_idd_devices.out 2>&1; then
-  cat /tmp/hbm_sim_bad_idd_devices.out
+  >"${TMPDIR}/hbm_sim_bad_idd_devices.out" 2>&1; then
+  cat "${TMPDIR}/hbm_sim_bad_idd_devices.out"
   echo "expected zero IDD devices_per_rank to fail" >&2
   exit 1
 fi
 grep -Eq "idd_devices_per_rank must be > 0 for IDD power mode" \
-  /tmp/hbm_sim_bad_idd_devices.out
-rm -f /tmp/hbm_sim_bad_idd_devices.out
+  "${TMPDIR}/hbm_sim_bad_idd_devices.out"
+rm -f "${TMPDIR}/hbm_sim_bad_idd_devices.out"
 run_and_check hbm3_config "$HBM_SIM_BIN" --stats-view diagnostic --config configs/hbm.cfg --standard hbm3 --requests 128
 run_and_check lpddr5_config "$HBM_SIM_BIN" --stats-view diagnostic --config configs/lpddr.cfg --standard lpddr5 --requests 128
 run_and_check lpddr6_config "$HBM_SIM_BIN" --stats-view diagnostic --config configs/lpddr.cfg --standard lpddr6 --requests 128
@@ -531,22 +533,22 @@ run_and_check lpddr6_lowdvfs "$HBM_SIM_BIN" --stats-view diagnostic --config con
   --standard lpddr6 --preset low_rate_4267 --requests 32
 if "$HBM_SIM_BIN" --stats-view diagnostic --config configs/lpddr.cfg --standard lpddr6 \
     --validation-mode standard --lpddr-link-protection true --lpddr-link-ecc true \
-    --lpddr-dbi true --requests 1 >/tmp/hbm_sim_bad_lpddr_meta.out 2>&1; then
-  cat /tmp/hbm_sim_bad_lpddr_meta.out
+    --lpddr-dbi true --requests 1 >"${TMPDIR}/hbm_sim_bad_lpddr_meta.out" 2>&1; then
+  cat "${TMPDIR}/hbm_sim_bad_lpddr_meta.out"
   echo "expected LPDDR6 link-protection + DBI to fail in standard mode" >&2
   exit 1
 fi
-grep -Eq "DBI are mutually exclusive|prohibited setting" /tmp/hbm_sim_bad_lpddr_meta.out
-rm -f /tmp/hbm_sim_bad_lpddr_meta.out
+grep -Eq "DBI are mutually exclusive|prohibited setting" "${TMPDIR}/hbm_sim_bad_lpddr_meta.out"
+rm -f "${TMPDIR}/hbm_sim_bad_lpddr_meta.out"
 run_and_check lpddr6_ca_parity "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 32 \
   --lpddr-wck always_on --lpddr-ca-parity true --validate-cmd-trace
-if "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 1 --lpddr-ca-parity true >/tmp/hbm_sim_bad_ca_parity.out 2>&1; then
-  cat /tmp/hbm_sim_bad_ca_parity.out
+if "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 1 --lpddr-ca-parity true >"${TMPDIR}/hbm_sim_bad_ca_parity.out" 2>&1; then
+  cat "${TMPDIR}/hbm_sim_bad_ca_parity.out"
   echo "expected lpddr ca parity without WCK always_on to fail" >&2
   exit 1
 fi
-grep -Eq "CA parity requires lpddr_wck_mode=always_on" /tmp/hbm_sim_bad_ca_parity.out
-rm -f /tmp/hbm_sim_bad_ca_parity.out
+grep -Eq "CA parity requires lpddr_wck_mode=always_on" "${TMPDIR}/hbm_sim_bad_ca_parity.out"
+rm -f "${TMPDIR}/hbm_sim_bad_ca_parity.out"
 run_and_check hbm4_init_sequence "$HBM_SIM_BIN" --stats-view diagnostic --standard hbm4 --requests 16 \
   --init-sequence hbm4 --hbm-link-retry true --validate-cmd-trace
 run_and_check lpddr6_full_init_sequence "$HBM_SIM_BIN" --stats-view diagnostic --standard lpddr6 --requests 16 \

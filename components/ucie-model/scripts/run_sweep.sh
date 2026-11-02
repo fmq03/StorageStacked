@@ -4,10 +4,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${ROOT_DIR}/build/ucie_sc_sim"
-OUT="${ROOT_DIR}/results/sweep"
+OUT="${OUT:-${ROOT_DIR}/build/validation}/sweep"
 mkdir -p "${OUT}"
 
 [[ -x "${BIN}" ]] || make -C "${ROOT_DIR}"
+
+read -r -a case_runner <<< "${CASE_RUNNER:-python3 ${ROOT_DIR}/../../common/verif/summary.py}"
+run_point() {
+  local csv="$1"; shift
+  "${case_runner[@]}" run --directory "${SUMMARY_DIR:-${ROOT_DIR}/build/validation}" \
+    --name "$(basename "${csv}" .csv)" --counts '^SIM_PASS=([0-9]+) SIM_FAIL=([0-9]+)$' \
+    -- "${BIN}" "$@" --csv "${csv}"
+}
 
 metric() { awk -F, -v k="$2" '$1==k{print $2}' "$1"; }
 
@@ -21,39 +29,39 @@ row() {
 }
 
 # Rate x noise sweep (PAM4, 16 lanes)
-for rate in 24 32 48; do
-  for sigma in 0.00 0.05 0.10 0.15 0.18 0.20; do
+for rate in ${SWEEP_RATES:-24 32 48}; do
+  for sigma in ${SWEEP_NOISE:-0.00 0.05 0.10 0.15 0.18 0.20}; do
     csv="${OUT}/pam4_r${rate}_s${sigma}.csv"
-    "${BIN}" --flits 3000 --rate-gtps "${rate}" --lanes 16 --sigma "${sigma}" \
-      --csv "${csv}" > "${OUT}/pam4_r${rate}_s${sigma}.log" 2>&1 || true
+    run_point "${csv}" --flits 3000 --rate-gtps "${rate}" --lanes 16 --sigma "${sigma}" \
+      > "${OUT}/pam4_r${rate}_s${sigma}.log" 2>&1
     row "${csv}" "${rate}" 16 pam4 "${sigma}"
   done
 done
 
 # Jitter x random-seed sweep at the minimum required 24 GT/s point.
-for jitter in 0.00 0.01 0.03 0.05; do
-  for seed in 7 11 29; do
+for jitter in ${SWEEP_JITTER:-0.00 0.01 0.03 0.05}; do
+  for seed in ${SWEEP_SEEDS:-7 11 29}; do
     csv="${OUT}/jitter_${jitter}_seed_${seed}.csv"
-    "${BIN}" --flits 1500 --rate-gtps 24 --lanes 16 --sigma 0.10 \
-      --jitter "${jitter}" --seed "${seed}" --csv "${csv}" \
-      > "${OUT}/jitter_${jitter}_seed_${seed}.log" 2>&1 || true
+    run_point "${csv}" --flits 1500 --rate-gtps 24 --lanes 16 --sigma 0.10 \
+      --jitter "${jitter}" --seed "${seed}" \
+      > "${OUT}/jitter_${jitter}_seed_${seed}.log" 2>&1
     row "${csv}" 24 16 pam4 0.10 "${jitter}" "${seed}"
   done
 done
 
 # Lane sweep at 24 GT/s, low noise
-for lanes in 8 16 32 64; do
+for lanes in ${SWEEP_LANES:-8 16 32 64}; do
   csv="${OUT}/lanes_${lanes}.csv"
-  "${BIN}" --flits 3000 --rate-gtps 24 --lanes "${lanes}" --sigma 0.05 \
-    --csv "${csv}" > "${OUT}/lanes_${lanes}.log" 2>&1 || true
+  run_point "${csv}" --flits 3000 --rate-gtps 24 --lanes "${lanes}" --sigma 0.05 \
+    > "${OUT}/lanes_${lanes}.log" 2>&1
   row "${csv}" 24 "${lanes}" pam4 0.05
 done
 
 # NRZ reference points (real UCIe mainband signaling)
-for rate in 24 32; do
+for rate in ${NRZ_RATES:-24 32}; do
   csv="${OUT}/nrz_r${rate}.csv"
-  "${BIN}" --flits 3000 --rate-gtps "${rate}" --lanes 16 --mod nrz --sigma 0.15 \
-    --csv "${csv}" > "${OUT}/nrz_r${rate}.log" 2>&1 || true
+  run_point "${csv}" --flits 3000 --rate-gtps "${rate}" --lanes 16 --mod nrz --sigma 0.15 \
+    > "${OUT}/nrz_r${rate}.log" 2>&1
   row "${csv}" "${rate}" 16 nrz 0.15
 done
 

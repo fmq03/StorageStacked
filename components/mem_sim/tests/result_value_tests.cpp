@@ -1,3 +1,4 @@
+#include "temp_path.hpp"
 #include "hbm_sim/stats/result.hpp"
 #include <cstdlib>
 #include <filesystem>
@@ -19,8 +20,8 @@ std::string read(const std::filesystem::path& path) {
 
 int main() {
   try {
-    char pattern[] = "/tmp/hbm_result_values_XXXXXX";
-    const char* created = ::mkdtemp(pattern);
+    auto pattern = test_temp_path("hbm_result_values_XXXXXX");
+    const char* created = ::mkdtemp(pattern.data());
     if (!created) throw std::runtime_error("mkdtemp failed");
     const auto directory = std::filesystem::path(created);
     const auto path = directory / "result.json";

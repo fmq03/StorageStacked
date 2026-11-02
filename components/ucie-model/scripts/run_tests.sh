@@ -4,7 +4,7 @@ set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${ROOT_DIR}/build/ucie_sc_sim"
-OUT="${ROOT_DIR}/results/tests"
+OUT="${OUT:-${ROOT_DIR}/build/validation}/tests"
 mkdir -p "${OUT}"
 
 [[ -x "${BIN}" ]] || make -C "${ROOT_DIR}"

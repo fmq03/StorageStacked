@@ -1,3 +1,4 @@
+#include "temp_path.hpp"
 #include "spec_fixture.hpp"
 #include "hbm_sim/config/model.hpp"
 // 轻量序列测试入口。项目保持零外部测试依赖，因此这里用 require()
@@ -764,7 +765,7 @@ void test_dfi_trace_generation() {
   require(!hbm_sim::validate_dfi_trace(spec, commands, orphan_data).ok(),
           "DFI validator missed orphan data indexed to no issued command");
 
-  const std::string signal_path = "/tmp/hbm_sim_dfi_signal_trace.csv";
+  const std::string signal_path = test_temp_path("hbm_sim_dfi_signal_trace.csv");
   hbm_sim::write_dfi_signal_trace_csv(signal_path, events);
   {
     std::ifstream in(signal_path);
@@ -2485,7 +2486,7 @@ void test_hbm4_host_line_transaction_split() {
   require(read_beats == 4,
           "one 64B host read should produce four DFI data beats in total");
 
-  const std::string trace_path = "/tmp/hbm4_64b_split_roundtrip.trace";
+  const std::string trace_path = test_temp_path("hbm4_64b_split_roundtrip.trace");
   const std::string payload = "00112233445566778899aabbccddeeff"
                               "102132435465768798a9bacbdcedfe0f"
                               "2031425364758697a8b9cadbecfd0e1f"
@@ -3380,8 +3381,8 @@ void test_passive_multistack_memory_model_isolation() {
 }
 
 void test_thermal_neighbor_state_and_coordinates() {
-  char directory[] = "/tmp/hbm_thermal_contract_XXXXXX";
-  require(mkdtemp(directory) != nullptr, "cannot create thermal test directory");
+  auto directory = test_temp_path("hbm_thermal_contract_XXXXXX");
+  require(mkdtemp(directory.data()) != nullptr, "cannot create thermal test directory");
   const std::string path = std::string(directory) + "/map.txt";
   using Row = std::map<std::string, std::string>;
   auto read_map = [&]() {
@@ -3483,11 +3484,11 @@ void test_thermal_neighbor_state_and_coordinates() {
     }
   }
   std::remove(path.c_str());
-  std::remove(directory);
+  std::remove(directory.c_str());
 }
 
 void test_floorplan_power_and_thermal_model() {
-  const std::string thermal_path = "/tmp/hbm_sim_thermal_map.txt";
+  const std::string thermal_path = test_temp_path("hbm_sim_thermal_map.txt");
   DramSpec spec = hbm_sim::make_spec("hbm4");
   spec.org.channels = 2;
   spec.org.pseudo_channels = 2;
@@ -3990,9 +3991,9 @@ void test_physical_storage_multichannel_memory_system() {
 }
 
 void test_memory_image_text_checkpoint_and_mismatch_report() {
-  const std::string image_path = "/tmp/hbm_sim_memory_image.txt";
-  const std::string dump_path = "/tmp/hbm_sim_final_memory.txt";
-  const std::string report_path = "/tmp/hbm_sim_mismatch_report.txt";
+  const std::string image_path = test_temp_path("hbm_sim_memory_image.txt");
+  const std::string dump_path = test_temp_path("hbm_sim_final_memory.txt");
+  const std::string report_path = test_temp_path("hbm_sim_mismatch_report.txt");
   {
     std::ofstream out(image_path);
     out << "# address with explicit decoded storage coordinate\n";
@@ -4067,7 +4068,7 @@ void test_memory_image_text_checkpoint_and_mismatch_report() {
   }
 
   const std::string invalid_coordinate_path =
-      "/tmp/hbm_sim_invalid_coordinate_image.txt";
+      test_temp_path("hbm_sim_invalid_coordinate_image.txt");
   {
     std::ofstream out(invalid_coordinate_path);
     out << "0x2000 ch=" << spec.org.channels
@@ -4085,7 +4086,7 @@ void test_memory_image_text_checkpoint_and_mismatch_report() {
 }
 
 void test_data_trace_payload_parsing() {
-  const std::string path = "/tmp/hbm_sim_data_trace.trace";
+  const std::string path = test_temp_path("hbm_sim_data_trace.trace");
   {
     std::ofstream out(path);
     out << "W 0x4000 data=01020304\n";
@@ -4122,7 +4123,7 @@ void test_data_trace_payload_parsing() {
           "data trace parser did not resolve generated last_write expectation");
 
   const std::string multistack_path =
-      "/tmp/hbm_sim_multistack_last_write.trace";
+      test_temp_path("hbm_sim_multistack_last_write.trace");
   {
     std::ofstream out(multistack_path);
     out << "W 0x7000 stack=0 data=0102\n";
@@ -4183,7 +4184,7 @@ void test_data_address_range_overflow_is_rejected() {
   require(capacity_write_rejected,
           "MemoryImage accepted a write that crossed configured capacity");
 
-  const std::string path = "/tmp/hbm_sim_overflow_burst.trace";
+  const std::string path = test_temp_path("hbm_sim_overflow_burst.trace");
   {
     std::ofstream out(path);
     out << "BR 0xffffffffffffffe0 len=64\n";
@@ -4291,7 +4292,7 @@ void test_streaming_traffic_source() {
 
 void test_file_backed_memory_backend(hbm_sim::MemoryBackendKind kind,
                                      const std::string &suffix) {
-  const std::string path = "/tmp/hbm_sim_backend_" + suffix + ".bin";
+  const std::string path = test_temp_path("hbm_sim_backend_") + suffix + ".bin";
   remove_backend_files(path);
 
   DramSpec spec = hbm_sim::make_spec("hbm4");

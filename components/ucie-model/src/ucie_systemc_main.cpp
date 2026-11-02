@@ -663,12 +663,15 @@ int sc_main(int argc, char* argv[]) {
 
         if (stats.delivered_flits < workload.size()) {
             std::cerr << "WARNING: not all business responses were delivered.\n";
+            std::cout << "SIM_PASS=0 SIM_FAIL=1\n";
             return 2;
         }
         if (stats.integrity_errors != 0U) {
             std::cerr << "ERROR: end-to-end payload or ordering error observed.\n";
+            std::cout << "SIM_PASS=0 SIM_FAIL=1\n";
             return 3;
         }
+        std::cout << "SIM_PASS=1 SIM_FAIL=0\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "ERROR: " << error.what() << "\n";
