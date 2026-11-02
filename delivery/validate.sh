@@ -40,7 +40,10 @@ arm_pid=
 python3 - "$here" "$run_results" "$validation" <<'PY'
 import json,re,sys
 from pathlib import Path
-here=Path(sys.argv[1]); result_root=Path(sys.argv[2]); validation=Path(sys.argv[3]); summaries=[]
+here=Path(sys.argv[1])
+sys.path.insert(0,str(here.parent/'common/verif'))
+from result_core import Layout
+artifact=Layout({}).artifact; result_root=Path(sys.argv[2]); validation=Path(sys.argv[3]); summaries=[]
 for p in result_root.glob('*/summary.json'):
     s=json.loads(p.read_text())
     if s['command'] == 'test':
@@ -51,13 +54,13 @@ arm_paths=list((result_root/'arm-cache').glob('*/summary.json'));assert len(arm_
 arm=json.loads(arm_paths[0].read_text());assert arm['passed'] is True
 arm_case=arm_paths[0].parent/arm['cases']['vortex/smoke']['summary']
 device=json.loads(arm_case.read_text());assert device['passed'] and device['smoke']['output']==42
-config=json.loads((arm_case.parent/'input.json').read_text());assert config['host']['isa']=='aarch64'
+config=json.loads(artifact(arm_case.parent,'input.json').read_text());assert config['host']['isa']=='aarch64'
 assert {k:config['gpu'][k] for k in ('l1i_ways','l1d_ways','l1i_latency_cycles','l1d_latency_cycles','l2_enabled','l2_ways','l2_latency_cycles')}==dict(l1i_ways=2,l1d_ways=2,l1i_latency_cycles=3,l1d_latency_cycles=3,l2_enabled=True,l2_ways=8,l2_latency_cycles=6)
 full=json.loads((here/summaries[0]['path']).read_text());assert arm['source_versions']==full['source_versions']
 elf=(arm_case.parent/'build/host.elf').read_bytes()
 assert elf[:4]==b'\x7fELF' and elf[5]==1 and int.from_bytes(elf[18:20],'little')==183
 assert device['host_execution']['active_cpus']==config['host']['num_cpus']
-prefetches=sum(map(int,re.findall(r'\.mmu\.prefetchFaults\s+(\d+)',(arm_case.parent/'stats.txt').read_text())))
+prefetches=sum(map(int,re.findall(r'\.mmu\.prefetchFaults\s+(\d+)',artifact(arm_case.parent,'stats.txt').read_text())))
 assert prefetches>0,'ARM fixture did not exercise device prefetch rejection'
 variant={'passed':True,'path':str(arm_paths[0].relative_to(here)),
          'device_summary':str(arm_case.relative_to(here)),

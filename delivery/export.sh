@@ -49,6 +49,9 @@ python3 - "$here" "$destination" "$image" "$validation" "$customer_results" <<'P
 import datetime,json,subprocess,sys
 from pathlib import Path
 here,dest=map(Path,sys.argv[1:3]);image=sys.argv[3]
+sys.path.insert(0,str(here.parent/'common/verif'))
+from result_core import Layout
+artifact=Layout({}).artifact
 validation=Path(sys.argv[4]);customer_results=Path(sys.argv[5])
 summaries=list(customer_results.glob('*/summary.json'))
 assert len(summaries)==1
@@ -83,7 +86,8 @@ for device in ('vortex','coralnpu'):
     assert llm['passed'] is True
     execution[device]=llm['execution']
     if device=='vortex':
-        vortex_config=json.loads((llm_paths[0].parent/'input.json').read_text())['gpu']
+        case=llm_paths[0].parent.parent if llm_paths[0].parent.name=='checks' else llm_paths[0].parent
+        vortex_config=json.loads(artifact(case,'input.json').read_text())['gpu']
         vortex_model=llm['architecture']
 assert execution['coralnpu']['core']=='RvvCoreMiniAxi'
 assert execution['coralnpu']['linear']=='RVV FP32'

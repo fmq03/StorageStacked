@@ -66,6 +66,7 @@ def run_axi(session, args, acceptance=False):
     # Isolate the private C++ runtime without loading it into the device drivers.
     env = dict(os.environ)
     prefix = ROOT/'vortex_StorageStacked/third_party/.cache/tools/toolchain'
+    env['SS_TOOLCHAIN_PREFIX'] = str(prefix)
     env['PATH'] = str(prefix/'bin')+':'+env['PATH']
     env['LD_LIBRARY_PATH'] = str(prefix/'lib')
     command = ['bash', ROOT/'axi_StorageStacked/run.sh', 'test' if acceptance else 'run',

@@ -15,13 +15,13 @@
 手动下载全部分块时，还须把 Release 中的 `run.sh`、`docker-compat-entrypoint.py`、
 `run-seccomp-check.sh`、`DOCKER_COMPATIBILITY.md` 与 `extract.sh` 放在同一目录。
 
-已经解包：从 [当前源码仓库](https://github.com/fmq03/StorageStacked/tree/project-update-20261022) 的 `offline/`
+已经解包：从 [当前源码仓库](https://github.com/fmq03/StorageStacked/tree/project-update-20261022) 的 `delivery/`
 或 [当前 Release](https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022)
 取得这四个补丁文件，覆盖离线包目录中的对应文件。无需重新下载镜像。
 例如在发布仓库目录内执行（目标按实际解压位置替换）：
 
 ```bash
-cp offline/run.sh offline/docker-compat-entrypoint.py offline/run-seccomp-check.sh offline/DOCKER_COMPATIBILITY.md downloads/zhongxing-storagestacked-offline-20261022/
+cp delivery/run.sh delivery/docker-compat-entrypoint.py delivery/run-seccomp-check.sh delivery/DOCKER_COMPATIBILITY.md downloads/zhongxing-storagestacked-offline-20261022/
 cd downloads/zhongxing-storagestacked-offline-20261022
 sudo bash run.sh vortex smoke
 ```
@@ -66,7 +66,7 @@ clang++: fatal error: unable to execute command: posix_spawn failed: Operation n
 这是通过自定义策略模拟旧 Docker 的拒绝行为，没有在真实 Docker 20.10.0 服务端上运行。
 正式启动脚本在该模拟策略下完成新的 Vortex SMOKE（`20261010-020026-64dca28f`），
 41 → 42，计算、存储链路与波形校验均通过；默认策略下新的 CoralNPU SMOKE 与 AXI 也通过。证据见
-[DOCKER_FIX_VALIDATION.json](https://github.com/hy2581/zhongxing-storagestacked-offline/blob/main/DOCKER_FIX_VALIDATION.json)。
+[DOCKER_FIX_VALIDATION.json](https://github.com/hy2581/zhongxing-storagestacked-delivery/blob/main/DOCKER_FIX_VALIDATION.json)。
 
 此前同一镜像在 Docker 29.1.3 默认策略下的新运行
 `20261010-010948-42c1906b` 已完成 AXI、Vortex SMOKE/LLM、CoralNPU SMOKE/LLM 五项，

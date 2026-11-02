@@ -13,7 +13,7 @@ for device in vortex coralnpu; do
   fi
   (
     source "$platform/$runtime/environment.sh"
-    cmake -S "$root/axi_StorageStacked/mem_sim" -B "$platform/$build" \
+    cmake -S "$("$AXI_PYTHON" "$root/axi_StorageStacked/scripts/storage_manifest.py" --field memsim_source)" -B "$platform/$build" \
       -DPython3_EXECUTABLE="$AXI_PYTHON"
   )
 done

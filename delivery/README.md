@@ -1,3 +1,5 @@
+> 开发入口见 [原生开发文档](../docs/development.md)。本文的历史发布标签保持原样；历史验收记录见 `records/`，新镜像须独立验收。
+
 # 三项目离线 Docker 交付
 
 沿用原 `hy2581/zhongxing-storagestacked-offline` 的交付方式，将镜像、源码与制作入口更新到
@@ -12,15 +14,15 @@
 ```bash
 git clone --branch project-update-20261022 https://github.com/fmq03/StorageStacked.git
 cd StorageStacked
-bash download.sh
-bash run.sh
+bash delivery/clone/download.sh
+bash delivery/clone/run.sh
 ```
 
 下载入口为 [offline-20261022 Release](https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022)。
 `download.sh` 下载分块和启动文件，按 `PARTS.tsv` 中的文件名、大小和顺序核对并解包到
 `downloads/zhongxing-storagestacked-offline-20261022/`。默认单连接，支持续传，每 5 秒显示进度；
 停滞 60 秒或单次请求超过 900 秒会重试。每个文件最多尝试 6 次，Ctrl+C 后保留已下载文件。
-`STORAGE_DOWNLOAD_JOBS=2 bash download.sh` 可增加并发。代理必须允许 GitHub Release 的下载跳转。
+`STORAGE_DOWNLOAD_JOBS=2 bash delivery/clone/download.sh` 可增加并发。代理必须允许 GitHub Release 的下载跳转。
 
 `run.sh` 在新镜像标签不存在时自动导入归档，随后执行 AXI 完整验收、Vortex SMOKE/TinyLLM、
 CoralNPU SMOKE/TinyLLM 五项。SMOKE 输出 `42`，TinyLLM 输出 `blu`；完整通过还要求数值、
@@ -75,11 +77,11 @@ NPU 每个场景顶层保留 `report.md`、`summary.json`，内容按 `config/`�
 Docker 制作脚本不承担下载依赖的职责。使用本地 `ubuntu:20.04` 或 `STORAGE_BASE_IMAGE` 指定的本地镜像。
 
 ```bash
-bash offline/build.sh
-bash offline/validate.sh
-bash offline/export.sh
-bash offline/split-release.sh
-python3 offline/verify-split.py offline/dist/zhongxing-storagestacked-offline-20261022-25MB --output offline/results/split-restored-20261022
+bash delivery/build.sh
+bash delivery/validate.sh
+bash delivery/export.sh
+bash delivery/split-release.sh
+python3 delivery/verify-split.py delivery/dist/zhongxing-storagestacked-offline-20261022-25MB --output delivery/results/split-restored-20261022
 ```
 
 构建阶段同样关闭网络；从当前工作区复制源码、工具和可复用缓存，在镜像内重新编译 AXI、
@@ -89,7 +91,7 @@ Vortex 工具环境限制在子进程内，NPU 构建使用与容器运行时一
 
 `validate.sh` 用新镜像执行 `check` 和一次 `test`，并行验证 ARM 主机与自定义 GPU 缓存的 SMOKE，检查 AArch64 ELF、实际参与 CPU、输出及实际发生的不可缓存设备预取拒绝；`export.sh` 保存归档，移除交付标签后通过用户
 `run.sh` 自动重新导入，再执行默认五项。只有这些检查全部通过才生成 `DELIVERY.json` 和 `VALIDATION.json`。
-新导出目录为 `offline/dist/zhongxing-storagestacked-offline-20261022/`。已存在的交付包拒绝覆盖。
+新导出目录为 `delivery/dist/zhongxing-storagestacked-offline-20261022/`。已存在的交付包拒绝覆盖。
 `split-release.sh` 将整个目录打成连续 tar 分块，每块 25,000,000 字节；最后一块较小。
 
 核对使用源码提交号、文件名与精确字节数、实际解包、Docker 导入和新生成的验收结果。

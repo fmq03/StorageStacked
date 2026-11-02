@@ -2,7 +2,7 @@
 
 本轮镜像运行源码冻结在 `fea1810797a570ae10515916f806bf66d44c3ffe`，制作快照为 `fa821376`，后续运行源码改动见镜像内 `SOURCE_VERSIONS.json`。分支后续提交更新发布脚本、说明和验收记录。
 镜像 `zhongxing-storagestacked:offline-20261022` 为 Linux amd64；实际制作方 Docker 为 `29.1.3`。
-[发布下载](https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022)；[下载与运行方法](README.md)。
+[发布下载](https://github.com/fmq03/StorageStacked/releases/tag/offline-20261022)；[下载与运行方法](../README.md)。
 
 ## Benchmark 结果
 

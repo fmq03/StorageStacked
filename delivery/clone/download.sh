@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-exec bash "$root/offline/download-release.sh" "${@:-$root/downloads}"
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+exec bash "$root/delivery/download-release.sh" "${@:-$root/downloads}"
