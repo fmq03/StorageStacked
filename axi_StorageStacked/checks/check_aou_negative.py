@@ -5,6 +5,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from result_layout import artifact
 import sys
 from check_aou import check
 
@@ -13,9 +14,9 @@ results={}
 for fault in ('wide_wdata','wide_wstrb','endpoint_count'):
     with tempfile.TemporaryDirectory(prefix='aou-negative-') as temp:
         target=Path(temp)
-        for p in source.iterdir():
+        for p in source.rglob('*'):
             if p.suffix in ('.csv','.json'): shutil.copy2(p,target/p.name)
-        (target/'axi_wave.vcd').symlink_to(source/'axi_wave.vcd')
+        (target/'axi_wave.vcd').symlink_to(artifact(source,'axi_wave.vcd'))
         if fault=='endpoint_count':
             p=target/'aou_summary.json'; data=json.loads(p.read_text())
             data['memory_completed']+=1; p.write_text(json.dumps(data))

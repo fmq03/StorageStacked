@@ -1,0 +1,20 @@
+{
+  "axi_events.csv": "traces/axi/axi_events.csv",
+  "axi256_handshakes.csv": "traces/axi/axi256_handshakes.csv",
+  "axi_first_200ns_cycles.csv": "traces/axi/axi_first_200ns_cycles.csv",
+  "axi_wave.vcd": "traces/axi/axi_wave.vcd",
+  "responses.json": "traces/axi/responses.json",
+  "aou_events.csv": "traces/flit/aou_events.csv",
+  "aou_messages.csv": "traces/flit/aou_messages.csv",
+  "axi_flit_path.csv": "traces/flit/axi_flit_path.csv",
+  "flit_pairs.csv": "traces/flit/flit_pairs.csv",
+  "ucie_flits.csv": "traces/ucie/ucie_flits.csv",
+  "ucie_mem.csv": "traces/ucie/ucie_mem.csv",
+  "ucie_soc.csv": "traces/ucie/ucie_soc.csv",
+  "memsim_bridge.csv": "traces/memsim/memsim_bridge.csv",
+  "memsim_commands.csv": "traces/memsim/memsim_commands.csv",
+  "memsim_dfi.csv": "traces/memsim/memsim_dfi.csv",
+  "memsim_dfi_signals.csv": "traces/memsim/memsim_dfi_signals.csv",
+  "memsim_image.csv": "traces/memsim/memsim_image.csv",
+  "memsim_stats.txt": "traces/memsim/memsim_stats.txt"
+}

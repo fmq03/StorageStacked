@@ -57,20 +57,22 @@ struct AouBackend::Fabric : sc_module {
         target("target", cfg, planes),
         log(p.trace_dir + "/aou_events.csv") {
         g_aou_verbose = false;
-        flit_log.open(p.trace_dir + "/ucie_flits.csv");
-        soc_log.open(p.trace_dir + "/ucie_soc.csv");
-        mem_log.open(p.trace_dir + "/ucie_mem.csv");
-        if (!flit_log || !soc_log || !mem_log) throw std::runtime_error("cannot open UCIe logs");
-        const char* header = "record,tick_fs,time_ns,delta,endpoint,direction,event,seq,seq8,flit_id,attempt,replay,status,bytes,hex\n";
-        flit_log << header; soc_log << header; mem_log << header;
-        stats.forward.observer = [this](const char* e,uint64_t seq,uint64_t id,bool replay,
-                                        const std::vector<uint8_t>& bytes,const char* status) {
-            observe("FWD",e,seq,id,replay,bytes,status);
-        };
-        stats.reverse.observer = [this](const char* e,uint64_t seq,uint64_t id,bool replay,
-                                        const std::vector<uint8_t>& bytes,const char* status) {
-            observe("REV",e,seq,id,replay,bytes,status);
-        };
+        if (p.trace_level == "full") {
+            flit_log.open(p.trace_dir + "/ucie_flits.csv");
+            soc_log.open(p.trace_dir + "/ucie_soc.csv");
+            mem_log.open(p.trace_dir + "/ucie_mem.csv");
+            if (!flit_log || !soc_log || !mem_log) throw std::runtime_error("cannot open UCIe logs");
+            const char* header = "record,tick_fs,time_ns,delta,endpoint,direction,event,seq,seq8,flit_id,attempt,replay,status,bytes,hex\n";
+            flit_log << header; soc_log << header; mem_log << header;
+            stats.forward.observer = [this](const char* e,uint64_t seq,uint64_t id,bool replay,
+                                            const std::vector<uint8_t>& bytes,const char* status) {
+                observe("FWD",e,seq,id,replay,bytes,status);
+            };
+            stats.reverse.observer = [this](const char* e,uint64_t seq,uint64_t id,bool replay,
+                                            const std::vector<uint8_t>& bytes,const char* status) {
+                observe("REV",e,seq,id,replay,bytes,status);
+            };
+        }
         bridge.clk(o.clk); bridge.rst_n(o.resetn);
         bridge.aw_valid(av); bridge.aw_ready(ar); bridge.aw_ch(aw);
         bridge.w_valid(wv); bridge.w_ready(wr); bridge.w_ch(w);
@@ -214,6 +216,8 @@ static const StorageConfig& checkedConfig(const StorageConfig& p) {
     if (p.planes < 1 || p.planes > 4 || !p.memsim_slots || p.memsim_slots > 1023 ||
         !p.size || p.base > UINT64_MAX-p.size || p.trace_dir.empty())
         throw std::invalid_argument("invalid storage planes, slots, memory window or trace directory");
+    if (p.trace_level != "full" && p.trace_level != "light")
+        throw std::invalid_argument("trace_level must be full or light");
     return p;
 }
 AouBackend::AouBackend(sc_module_name n, const StorageConfig& p)

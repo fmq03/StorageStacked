@@ -10,5 +10,6 @@ struct StorageConfig {
     unsigned memsim_queue=4, memsim_response_hold=0;
     std::string memory_backend="memsim", memsim_standard="hbm4";
     std::string trace_dir;
+    std::string trace_level="full";
 };
 }

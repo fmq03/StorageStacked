@@ -5,15 +5,18 @@ import collections
 import csv
 import json
 from pathlib import Path
+from result_layout import artifact
 from audit_wave import vcd_groups
 
 
 def check(directory, replay=False):
+    from trace_policy import require_full
+    require_full(directory)
     def rows(name):
-        with (directory / name).open() as f:
+        with (artifact(directory, name)).open() as f:
             return list(csv.DictReader(f))
     narrow = rows('axi_events.csv')
-    data_bits = json.loads((directory/'protocol_summary.json').read_text()).get('axi_data_bits',64)
+    data_bits = json.loads((artifact(directory, 'protocol_summary.json')).read_text()).get('axi_data_bits',64)
     assert data_bits in (64,256)
     wide = rows('aou_events.csv')
     bus = [r for r in wide if r['channel'] in ('AW','W','B','AR','R')]
@@ -51,7 +54,7 @@ def check(directory, replay=False):
         else:
             assert lo['id'] == hi['id'] and lo['resp'] == hi['resp']
     assert not writes and not reads
-    s = json.loads((directory/'aou_summary.json').read_text())
+    s = json.loads((artifact(directory, 'aou_summary.json')).read_text())
     assert s['memory_completed'] == wide_channels['AW']+wide_channels['AR']
     assert s['target_reads'] == wide_channels['AR']
     assert s['target_writes'] == wide_channels['AW']
@@ -66,7 +69,7 @@ def check(directory, replay=False):
     # Independently recover wide W/R data from the VCD's pre-edge snapshot.
     values, recovered, flits = {}, [], collections.Counter()
     held = {}
-    for tick, changes in vcd_groups(directory/'axi_wave.vcd'):
+    for tick, changes in vcd_groups(artifact(directory, 'axi_wave.vcd')):
         before = values.copy(); values.update(changes)
         edge = values.get('ACLK')==1 and before.get('ACLK')!=1
         if not edge or not before.get('ARESETn'): continue
@@ -92,13 +95,13 @@ def check(directory, replay=False):
     assert recovered==expected, 'wide VCD/CSV mismatch'
     assert flits['TX']==s['tx_flits'] and flits['RX']==s['rx_flits']
     result=dict(passed=True, master_data_bits=data_bits, wide_handshakes=len(bus), wide_vcd_data_beats=len(recovered), **s)
-    (directory/'aou_check_summary.json').write_text(json.dumps(result,indent=2)+'\n')
+    (artifact(directory, 'aou_check_summary.json')).write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(); p.add_argument('directory',type=Path); p.add_argument('--replay',action='store_true',default=None)
     a=p.parse_args()
     if a.replay is None:
-        resolved=a.directory/'resolved.json'
+        resolved=artifact(a.directory, 'resolved.json')
         a.replay=json.loads(resolved.read_text())['architecture']['axi']['replay'] if resolved.is_file() else False
     check(a.directory,a.replay)

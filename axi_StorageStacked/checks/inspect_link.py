@@ -6,6 +6,7 @@ import collections
 import csv
 import json
 from pathlib import Path
+from result_layout import artifact
 from audit_wave import vcd_groups, CHANNELS
 
 
@@ -76,7 +77,7 @@ def audit_wave(d):
     for ch in ('AW','AR'):
         payloads[ch]+=tuple('axi256.'+ch.lower()+n for n in ('lock','cache','prot','qos','user'))
     for ch in ('W','B','R'): payloads[ch]+=('axi256.'+ch.lower()+'user',)
-    for tick,changes in vcd_groups(d/'axi_wave.vcd'):
+    for tick,changes in vcd_groups(artifact(d, 'axi_wave.vcd')):
         before=state.copy(); state.update(changes)
         edge=state.get('ACLK')==1 and before.get('ACLK')!=1
         if not before.get('ARESETn'): continue
@@ -94,10 +95,10 @@ def audit_wave(d):
                 actual.append(r)
             if edge and (v or ready) and tick<=200000000:
                 cycles.append(dict(tick_fs=tick,channel=ch,valid=v,ready=ready,handshake=int(v and ready),payload=' '.join(n.split('.')[-1]+'='+hex(before[n]) for n in names)))
-    write_csv(d/'axi256_handshakes.csv',actual)
-    write_csv(d/'axi_first_200ns_cycles.csv',cycles,fields=['tick_fs','channel','valid','ready','handshake','payload'])
+    write_csv(artifact(d, 'axi256_handshakes.csv'),actual)
+    write_csv(artifact(d, 'axi_first_200ns_cycles.csv'),cycles,fields=['tick_fs','channel','valid','ready','handshake','payload'])
     # Exact comparison with the separately sampled SystemC monitor.
-    expected=[r for r in read_csv(d/'aou_events.csv') if r['channel'] in CHANNELS]
+    expected=[r for r in read_csv(artifact(d, 'aou_events.csv')) if r['channel'] in CHANNELS]
     key=lambda r:(int(r.get('tick_fs',r.get('tick'))),r['channel'])
     for a,b in zip(sorted(actual,key=key),sorted(expected,key=key)):
         assert int(b['tick'])==a['tick_fs'] and b['channel']==a['channel']
@@ -110,7 +111,9 @@ def audit_wave(d):
 
 
 def inspect(d):
-    rows=read_csv(d/'ucie_flits.csv'); bykey=collections.defaultdict(dict); expected_seq=collections.Counter(); rx_seen=set()
+    from trace_policy import require_full
+    require_full(d)
+    rows=read_csv(artifact(d, 'ucie_flits.csv')); bykey=collections.defaultdict(dict); expected_seq=collections.Counter(); rx_seen=set()
     decoders={}; messages=[]; counts=collections.Counter(); physical=collections.Counter()
     for i,r in enumerate(rows,1):
         assert int(r['record'])==i
@@ -148,7 +151,7 @@ def inspect(d):
             for msg in decoder.feed(r):
                 msg.update(direction=direction,event=event); messages.append(msg)
     for endpoint in ('SOC','MEM'):
-        assert read_csv(d/('ucie_'+endpoint.lower()+'.csv'))==[r for r in rows if r['endpoint']==endpoint]
+        assert read_csv(artifact(d,'ucie_'+endpoint.lower()+'.csv'))==[r for r in rows if r['endpoint']==endpoint]
     paired=[]
     for (direction,seq),x in bykey.items():
         tx=x['tx']; rx=x.get('rx'); last=x['received'][-1] if x['received'] else None
@@ -164,18 +167,18 @@ def inspect(d):
             pair['content']='credit_or_empty'
         else: pair['content']='see_aou_messages'
     assert all(decoder.carry is None for decoder in decoders.values()), 'unfinished decoded message'
-    write_csv(d/'flit_pairs.csv',paired)
-    write_csv(d/'aou_messages.csv',messages)
+    write_csv(artifact(d, 'flit_pairs.csv'),paired)
+    write_csv(artifact(d, 'aou_messages.csv'),messages)
     axi=audit_wave(d)
     correlate(d,axi,messages,bykey)
-    stats=json.loads((d/'aou_summary.json').read_text())
+    stats=json.loads((artifact(d, 'aou_summary.json')).read_text())
     assert physical['crc_error']==stats['crc_errors']
     assert sum(len(x['attempts'])-1 for (direction,seq),x in bykey.items() if direction=='FWD')==stats['forward_replays']
     assert sum(len(x['attempts'])-1 for (direction,seq),x in bykey.items() if direction=='REV')==stats['reverse_replays']
     result=dict(passed=True,records=len(rows),events=dict(counts),rx_status=dict(physical),
                 fdi_delivered=len(rx_seen),fdi_in_flight_at_exit=len(bykey)-len(rx_seen),axi_handshakes=len(axi),
                 business_messages=sum(m['type']!='Credit' and m['event']=='TX_FDI' for m in messages))
-    (d/'link_check_summary.json').write_text(json.dumps(result,indent=2)+'\n')
+    (artifact(d, 'link_check_summary.json')).write_text(json.dumps(result,indent=2)+'\n')
     print(d.name,'UCIe/AXI trace PASS',result)
 
 
@@ -231,7 +234,7 @@ def correlate(d,axi,messages,flits):
             tx_first_tick_fs=m['start_tick'],tx_last_tick_fs=m['end_tick'],
             rx_first_tick_fs=rxfirst['tick_fs'],rx_last_tick_fs=rxlast['tick_fs']))
     assert all(not q for q in request_lists.values()) and all(not q for q in responses.values()) and all(not q for q in pending_w.values())
-    write_csv(d/'axi_flit_path.csv',path)
+    write_csv(artifact(d, 'axi_flit_path.csv'),path)
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('directories',nargs='+',type=Path)

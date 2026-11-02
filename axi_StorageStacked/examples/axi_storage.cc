@@ -115,6 +115,7 @@ int sc_main(int argc,char** argv) {
         sc_set_time_resolution(1,SC_FS);
         ptree input; boost::property_tree::read_json(argv[1],input);
         StorageConfig p;
+        p.trace_level=input.get<std::string>("config.trace_level", "full");
         p.trace_dir=argv[2];p.base=input.get<uint64_t>("config.base");p.size=input.get<uint64_t>("config.size");
         p.planes=input.get<unsigned>("config.planes");p.replay=input.get<bool>("config.replay");
         p.memsim_standard=input.get<std::string>("config.standard");
@@ -141,9 +142,12 @@ int sc_main(int argc,char** argv) {
         memory.clk(clock);memory.resetn(resetn);memory.axi.bind(wires);
         master.clk(clock);master.resetn(resetn);master.axi.bind(wires);
         monitor.clk(clock);monitor.resetn(resetn);
-        auto* vcd=sc_create_vcd_trace_file((p.trace_dir+"/axi_wave").c_str());
-        vcd->set_time_unit(1,SC_FS);sc_trace(vcd,clock,"ACLK");sc_trace(vcd,resetn,"ARESETn");
-        wires.trace(vcd);memory.trace(vcd);
+        sc_trace_file* vcd=nullptr;
+        if(p.trace_level=="full") {
+            vcd=sc_create_vcd_trace_file((p.trace_dir+"/axi_wave").c_str());
+            vcd->set_time_unit(1,SC_FS);sc_trace(vcd,clock,"ACLK");sc_trace(vcd,resetn,"ARESETn");
+            wires.trace(vcd);memory.trace(vcd);
+        }
         resetn=false;
         sc_start(sc_time::from_value(period*3+period/2));
         while(!memory.ready() && sc_time_stamp().value()<limit) sc_start(sc_time::from_value(period));
@@ -152,7 +156,7 @@ int sc_main(int argc,char** argv) {
         while(!master.done && sc_time_stamp().value()<limit) sc_start(sc_time::from_value(period));
         if(!master.done) throw std::runtime_error("AXI transaction watchdog timeout");
         sc_start(sc_time::from_value(period*2));
-        memory.finish(p.trace_dir);monitor.finish(period);sc_close_vcd_trace_file(vcd);
+        memory.finish(p.trace_dir);monitor.finish(period);if(vcd) sc_close_vcd_trace_file(vcd);
         std::cout<<"AXI input/output completed at "<<sc_time_stamp()<<'\n';return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

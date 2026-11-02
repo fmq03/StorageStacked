@@ -5,6 +5,7 @@ import csv
 import datetime
 import json
 from pathlib import Path
+from result_layout import artifact, organize
 
 from run import ROOT, run_case
 
@@ -18,16 +19,18 @@ def run_smoke(output):
         raise FileExistsError('Use a new SMOKE output directory: ' + str(output))
 
     def dump(name, value):
-        (output / name).write_text(json.dumps(value, indent=2) + '\n')
+        artifact(output, name).write_text(json.dumps(value, indent=2) + '\n')
 
     try:
         request = json.loads((ROOT / 'examples/smoke.json').read_text())
+        if request.get('config',{}).get('trace_level','full') != 'full':
+            raise ValueError('SMOKE acceptance requires trace_level=full')
         result = run_case(request, output)
-        replies = json.loads((output / 'responses.json').read_text())
-        memory = json.loads((output / 'memsim_check.json').read_text())
-        core = json.loads((output / 'memsim_core.json').read_text())
-        aou = json.loads((output / 'aou_check_summary.json').read_text())
-        with (output / 'axi_events.csv').open() as stream:
+        replies = json.loads(artifact(output,'responses.json').read_text())
+        memory = json.loads(artifact(output,'memsim_check.json').read_text())
+        core = json.loads(artifact(output,'memsim_core.json').read_text())
+        aou = json.loads(artifact(output,'aou_check_summary.json').read_text())
+        with artifact(output,'axi_events.csv').open() as stream:
             writes = [row for row in csv.DictReader(stream) if row['channel'] == 'W']
         counts = dict(AW=2, W=3, B=2, AR=4, R=7)
         assert result['transactions'] == 6, 'SMOKE requires all six transactions'

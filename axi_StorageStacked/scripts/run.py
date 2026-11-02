@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from environment import describe
 from storage_manifest import load
+from result_layout import artifact, organize
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = Path(os.environ.get('STORAGE_BUILD_DIR', ROOT/'build')).resolve()
@@ -29,9 +31,11 @@ def normalize(value):
     if not isinstance(value, dict) or set(value) - {'config', 'transactions'}:
         raise ValueError('Input must contain config and transactions only')
     config = value.get('config', {})
-    if not isinstance(config, dict) or set(config) - DEFAULTS.keys():
+    if not isinstance(config, dict) or set(config) - (DEFAULTS.keys() | {'trace_level'}):
         raise ValueError('Unknown configuration field')
     c = dict(DEFAULTS, **config)
+    if c.get('trace_level','full') not in ('full','light'):
+        raise ValueError('trace_level must be full or light')
     ranges = dict(base=(0, 2**64-1), size=(1, 2**64-1), planes=(1, 4),
                   slots=(1, 1023), channels=(1, 64), scale=(1, 1024), queue=(1, 1024),
                   response_hold=(0, 1000000), period_fs=(2, 10**9),
@@ -89,7 +93,7 @@ def normalize(value):
 
 
 def verify_responses(request, output):
-    responses = json.loads((output / 'responses.json').read_text())
+    responses = json.loads(artifact(output,'responses.json').read_text())
     assert len(responses) == len(request['transactions']), 'Missing responses'
     memory = {}
     previous = 0
@@ -114,7 +118,7 @@ def verify_responses(request, output):
                 assert r['data'] == expected, 'Returned memory bytes differ from independent byte model'
             if 'expected' in t:
                 assert r['data'] == t['expected'], 'Returned bytes differ from explicit expected input'
-    with (output / 'axi_events.csv').open() as f:
+    with artifact(output,'axi_events.csv').open() as f:
         events = list(csv.DictReader(f))
     for channel, command in [('AW', 'write'), ('B', 'write'), ('AR', 'read')]:
         assert sum(e['channel'] == channel for e in events) == sum(t['command'] == command for t in request['transactions'])
@@ -137,6 +141,13 @@ def run_case(request, output):
                 subprocess.run(list(map(str, command)), stdout=stream, stderr=subprocess.STDOUT, check=True)
         invoke([BUILD / 'axi_storage', output / 'input.json', output])
         responses = verify_responses(request, output)
+        dump('environment.json', describe(cache=BUILD/'CMakeCache.txt', bundled=ROOT/'third_party/systemc/src'))
+        if request['config'].get('trace_level','full') != 'full':
+            result = dict(passed=False, link_verified=False, trace_level='light',
+                          data_verified=True, transactions=len(responses),
+                          end_tick_fs=responses[-1]['end_tick_fs'], stage='diagnostic simulation complete')
+            dump('summary.json', result)
+            return result
         # Decode the actual wire data independently, all the way to physical memory commands.
         for name in ('check_aou', 'inspect_link', 'check_memsim'):
             flags = ['--replay'] if name == 'check_aou' and request['config']['replay'] else []
@@ -154,6 +165,8 @@ def run_case(request, output):
     except Exception as error:
         dump('summary.json', dict(passed=False, error=str(error)))
         raise
+    finally:
+        organize(output)
 
 
 def main():
@@ -170,8 +183,8 @@ def main():
     if a.replay:
         config['replay'] = True
     output = (a.output or ROOT/'results'/datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')).resolve()
-    run_case(request, output)
-    print('PASS: ' + str(output/'summary.json'))
+    result = run_case(request, output)
+    print(('PASS: ' if result['passed'] else 'UNVERIFIED: ') + str(output/'summary.json'))
 
 
 if __name__ == '__main__':

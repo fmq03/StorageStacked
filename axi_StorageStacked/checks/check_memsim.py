@@ -9,6 +9,7 @@ from collections import defaultdict, deque, Counter
 import csv
 import json
 from pathlib import Path
+from result_layout import artifact
 
 
 def rows(path):
@@ -17,19 +18,21 @@ def rows(path):
 
 
 def check(directory):
-    cfg = json.loads((directory/'memsim_config.json').read_text())
-    core = json.loads((directory/'memsim_core.json').read_text())
-    bridge = json.loads((directory/'memsim_bridge_summary.json').read_text())
+    from trace_policy import require_full
+    require_full(directory)
+    cfg = json.loads((artifact(directory, 'memsim_config.json')).read_text())
+    core = json.loads((artifact(directory, 'memsim_core.json')).read_text())
+    bridge = json.loads((artifact(directory, 'memsim_bridge_summary.json')).read_text())
     period, granule, size = cfg['period_fs'], cfg['transaction_bytes'], cfg['window_bytes']
-    config = json.loads((directory/'config.json').read_text())
+    config = json.loads((artifact(directory, 'config.json')).read_text())
     config = config['systemc_kernel']['system']['axi'] if 'systemc_kernel' in config else config['axi']
     base = int(config['base'])
     assert cfg['phy'] == 'behavioral' and core['passed'] and bridge['passed']
     assert core['command_errors'] == core['dfi_errors'] == 0
     assert bridge['period_fs'] == period
     paths = {(r['channel'], r['axi_id'], r['axi_tick_fs']): r
-             for r in rows(directory/'axi_flit_path.csv')}
-    bus = rows(directory/'aou_events.csv')
+             for r in rows(artifact(directory, 'axi_flit_path.csv'))}
+    bus = rows(artifact(directory, 'aou_events.csv'))
     by_ch = {ch: [r for r in bus if r['channel'] == ch] for ch in ('AW','W','B','AR','R')}
     replies = {ch: defaultdict(deque) for ch in ('B','R')}
     for ch in replies:
@@ -62,7 +65,7 @@ def check(directory):
                                      returned=returned.hex(), status=int(r['resp']),
                                      forward=forward, reverse=reverse))
     assert next(ws,None) is None and all(not q for c in replies.values() for q in c.values())
-    events = rows(directory/'memsim_bridge.csv')
+    events = rows(artifact(directory, 'memsim_bridge.csv'))
     groups, children, completions = defaultdict(list), {}, {}
     for r in events:
         assert int(r['tick']) % period == 0
@@ -75,13 +78,13 @@ def check(directory):
     assert len(children) == core['submitted'] == core['returned'] == bridge['children']
     assert len(groups) == bridge['bursts']
     assert sum(r['event']=='submit_stall' for r in events) == core['submit_stalls'] == bridge['submit_stalls']
-    commands = rows(directory/'memsim_commands.csv')
+    commands = rows(artifact(directory, 'memsim_commands.csv'))
     physical = defaultdict(list)
     for c in commands:
         if c['command'] in ('RD','WR'):
             physical[c['request_id']].append(c)
     assert physical.keys() == children.keys(), 'unaccounted physical transaction'
-    dfi = rows(directory/'memsim_dfi_signals.csv')
+    dfi = rows(artifact(directory, 'memsim_dfi_signals.csv'))
     signals = defaultdict(list)
     for r in dfi:
         if r['kind'] in ('WRITE_DATA','READ_DATA'):
@@ -159,7 +162,7 @@ def check(directory):
     assert errors == bridge['errors']
     assert all(not q for q in requests.values()), 'AXI burst not delivered to memory'
     actual, covered = {}, set()
-    for r in rows(directory/'memsim_image.csv'):
+    for r in rows(artifact(directory, 'memsim_image.csv')):
         addr, data = int(r['address'],0), bytes.fromhex(r['data'])
         assert 0 <= addr and addr+len(data) <= size
         assert bytes.fromhex(r['init']) == b'\xff'*len(data)
@@ -171,8 +174,8 @@ def check(directory):
                   image_bytes=len(covered),window_bytes=size,period_fs=period,commands=dict(Counter(c['command'] for c in commands)),
                   dfi_data_events=sum(map(len,signals.values())),submit_stalls=bridge['submit_stalls'],
                   response_stalls=bridge['response_stalls'])
-    (directory/'memsim_check.json').write_text(json.dumps(result,indent=2)+'\n')
-    (directory/'memsim_journeys.json').write_text(json.dumps(journeys,indent=2)+'\n')
+    (artifact(directory, 'memsim_check.json')).write_text(json.dumps(result,indent=2)+'\n')
+    (artifact(directory, 'memsim_journeys.json')).write_text(json.dumps(journeys,indent=2)+'\n')
     return result
 
 

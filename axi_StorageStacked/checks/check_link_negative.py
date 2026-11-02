@@ -2,15 +2,16 @@
 """Ensure the passive-log checker rejects raw-frame/payload/timing corruption."""
 import csv,json,shutil,sys,tempfile
 from pathlib import Path
+from result_layout import artifact
 from inspect_link import inspect
 source=Path(sys.argv[1]).resolve();result={}
 for fault in ('physical_frame','delivered_payload','rx_timestamp'):
     with tempfile.TemporaryDirectory(prefix='link-negative-') as name:
         d=Path(name)
-        for p in source.iterdir():
+        for p in source.rglob('*'):
             if p.suffix in ('.csv','.json'):shutil.copy2(p,d/p.name)
-        (d/'axi_wave.vcd').symlink_to(source/'axi_wave.vcd')
-        with (d/'ucie_flits.csv').open() as f:
+        (artifact(d, 'axi_wave.vcd')).symlink_to(artifact(source,'axi_wave.vcd'))
+        with (artifact(d, 'ucie_flits.csv')).open() as f:
             reader=csv.DictReader(f);fields=reader.fieldnames;rows=list(reader)
         event={'physical_frame':'TX_FRAME','delivered_payload':'RX_FDI','rx_timestamp':'RX_FRAME'}[fault]
         r=next(r for r in rows if r['event']==event)

@@ -5,6 +5,7 @@ import copy
 import datetime
 import json
 from pathlib import Path
+from result_layout import artifact, organize
 import subprocess
 import sys
 import tempfile
@@ -33,13 +34,13 @@ try:
                       ('backpressure',{'slots':1,'queue':1,'response_hold':30,'response_stall_cycles':10})]:
         request = copy.deepcopy(example);request['config'].update(cfg)
         cases[name] = run_case(request,output/name)
-    first_responses = [json.loads((output/name/'responses.json').read_text())[0]
+    first_responses = [json.loads(artifact(output/name,'responses.json').read_text())[0]
                        for name in ('default', 'slow')]
     latency = [r['end_tick_fs']-r['begin_tick_fs'] for r in first_responses]
     # Compare the identical first request: later requests can cross different
     # periodic refresh windows, so whole-run time need not be monotonic.
     assert latency[1] > latency[0]
-    periods = [json.loads((output/name/'memsim_config.json').read_text())['period_fs']
+    periods = [json.loads(artifact(output/name,'memsim_config.json').read_text())['period_fs']
                for name in ('default','slow')]
     assert periods[1] == 4*periods[0]
     assert cases['backpressure']['wave']['stalled_edges']['B'] > 0
@@ -70,7 +71,7 @@ try:
     # A changed returned byte must fail even if the simulator exited normally.
     with tempfile.TemporaryDirectory() as td:
         target = Path(td)
-        replies = json.loads((output/'default/responses.json').read_text())
+        replies = json.loads(artifact(output/'default','responses.json').read_text())
         reply = next(r for r in replies if r['command']=='read')
         reply['data'][0] = 'ff' + reply['data'][0][2:]
         (target/'responses.json').write_text(json.dumps(replies))

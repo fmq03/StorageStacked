@@ -10,6 +10,7 @@ import collections
 import csv
 import json
 from pathlib import Path
+from result_layout import artifact
 from xml.sax.saxutils import escape
 
 CHANNELS = {
@@ -67,6 +68,8 @@ def row(tick, cycle, channel, s):
 
 
 def audit(directory, output):
+    from trace_policy import require_full
+    require_full(directory)
     state, actual, cycle = {}, [], 0
     held = collections.Counter()
     changes_count = collections.Counter()
@@ -78,7 +81,7 @@ def audit(directory, output):
     reads = collections.defaultdict(collections.deque)
     fields = sorted({n for c, fs in CHANNELS.items()
                      for n in fs + (c.lower()+"valid", c.lower()+"ready")})
-    for tick, changes in vcd_groups(directory / "axi_wave.vcd"):
+    for tick, changes in vcd_groups(artifact(directory, "axi_wave.vcd")):
         before = state.copy()
         state.update(changes)
         edge = state.get("ACLK") == 1 and before.get("ACLK") != 1
@@ -152,11 +155,11 @@ def audit(directory, output):
             assert reads[state["rid"]], ("early RVALID", tick, state["rid"])
     assert not writes and not beats
     assert not any(completed.values()) and not any(reads.values())
-    with (directory / "axi_events.csv").open() as f:
+    with (artifact(directory, "axi_events.csv")).open() as f:
         expected = [{k: v if k == "channel" else int(v) for k, v in r.items()}
                     for r in csv.DictReader(f)]
     assert actual == expected, "VCD handshakes differ from C++ monitor CSV"
-    summary = json.loads((directory / "protocol_summary.json").read_text())
+    summary = json.loads((artifact(directory, "protocol_summary.json")).read_text())
     counts = collections.Counter(r["channel"] for r in actual)
     for c in CHANNELS:
         assert summary["channels"][c]["handshakes"] == counts[c]

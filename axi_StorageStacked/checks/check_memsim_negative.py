@@ -3,6 +3,7 @@
 import csv
 import json
 from pathlib import Path
+from result_layout import artifact
 import shutil
 import sys
 import tempfile
@@ -32,7 +33,7 @@ result={}
 with tempfile.TemporaryDirectory(prefix='memsim-negative-') as tmp:
     dst=Path(tmp)
     for name,file,pred,field,value in cases:
-        for f in files: shutil.copyfile(source/f,dst/f)
+        for f in files: shutil.copyfile(artifact(source,f),dst/f)
         edit(dst/file,pred,field,value)
         try: check(dst)
         except (AssertionError,KeyError,IndexError) as e: result[name]={'rejected':True,'reason':str(e)}

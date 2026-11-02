@@ -2,6 +2,8 @@
 """Generate an offline trace browser, a waveform overview, and a GTKWave signal list."""
 import csv,json,sys
 from pathlib import Path
+from result_layout import artifact, grouped, working_result
+from contextlib import nullcontext
 from html import escape
 from audit_wave import vcd_groups
 from view_assets import chunks, compact
@@ -10,15 +12,15 @@ def read(p):
     with p.open() as f:return list(csv.DictReader(f))
 
 def build(d):
-    paths=read(d/'axi_flit_path.csv'); records=read(d/'ucie_flits.csv')
-    (d/'axi_view.gtkw').write_text('[dumpfile] "axi_wave.vcd"\n[timestart] 0\n@28\nSystemC.ACLK\nSystemC.ARESETn\n'+''.join(
+    paths=read(artifact(d, 'axi_flit_path.csv')); records=read(artifact(d, 'ucie_flits.csv'))
+    (artifact(d, 'axi_view.gtkw')).write_text('[dumpfile] "axi_wave.vcd"\n[timestart] 0\n@28\nSystemC.ACLK\nSystemC.ARESETn\n'+''.join(
         '@28\nSystemC.axi256.'+ch+'valid\nSystemC.axi256.'+ch+'ready\n@22\n'+''.join('SystemC.axi256.'+ch+s+'\n' for s in fields)
         for ch,fields in [('aw',['id','addr','len','size']),('w',['data','strb','last']),('b',['id','resp']),('ar',['id','addr','len','size']),('r',['id','data','last','resp'])]))
     # A representative early active window; every edge is from the actual VCD.
     start=max(0,min(int(p['axi_tick_fs']) for p in paths)-12000000); end=start+120000000
     names=['ACLK','ARESETn']+['axi256.'+ch+s for ch in ('aw','w','b','ar','r') for s in ('valid','ready')]
     points={n:[(start,0)] for n in names}
-    for t,delta in vcd_groups(d/'axi_wave.vcd'):
+    for t,delta in vcd_groups(artifact(d, 'axi_wave.vcd')):
         if t>end:break
         for n in names:
             if n in delta:
@@ -38,7 +40,7 @@ def build(d):
             if j==0:path=f'M{x} {yy}'
             else:path+=f'H{x}V{yy}'
         svg.append(f'<path d="{path}" fill="none" stroke="#176e9b" stroke-width="1.6"/>')
-    svg.append('</svg>');(d/'axi_overview.svg').write_text('\n'.join(svg))
+    svg.append('</svg>');(artifact(d, 'axi_overview.svg')).write_text('\n'.join(svg))
     path_index=chunks(d, 'trace_paths', paths, fields=('axi_id',))
     records.sort(key=lambda r:(r['direction'],int(r['seq']),int(r['tick_fs']),int(r['record'])))
     flit_index=chunks(d, 'trace_flits', records, fields=('direction','event','status'))
@@ -80,7 +82,10 @@ if(token!==rawVersion)return;let b=r.hex.match(/../g)||[],out='';for(let i=0;i<b
 $('id').oninput=pathTable;$('all').onclick=()=>{$('id').value='';pathTable()};for(let n of ['dir','seq','event'])$(n).oninput=()=>{range=null;errors=false;flitTable()};$('errors').onclick=()=>{range=null;errors=true;$('seq').value='';$('dir').value='ALL';$('event').value='ALL';flitTable()};$('reset').onclick=()=>{range=null;errors=false;$('seq').value='';$('dir').value='ALL';$('event').value='ALL';flitTable()};pathTable();flitTable();
 </script></html>'''
     text=template.replace('__CASE__',escape(d.name)).replace('__PATHS__',compact(path_index)).replace('__RECORDS__',compact(flit_index))
-    (d/'trace_view.html').write_text(text)
-    print('Trace viewer:',d/'trace_view.html')
+    (artifact(d, 'trace_view.html')).write_text(text)
+    print('Trace viewer:',artifact(d, 'trace_view.html'))
 if __name__=='__main__':
-    for arg in sys.argv[1:]:build(Path(arg))
+    for arg in sys.argv[1:]:
+        directory=Path(arg)
+        with working_result(directory) if grouped(directory) else nullcontext(directory):
+            build(directory)
