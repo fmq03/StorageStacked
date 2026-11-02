@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from run import ROOT, normalize, run_case, verify_responses
+from run import ROOT, BUILD, STORAGE_PATHS, normalize, run_case, verify_responses
 from smoke import run_smoke
 
 p = argparse.ArgumentParser(description=__doc__)
@@ -22,11 +22,11 @@ try:
     def invoke(cmd, name):
         with (output/name).open('w') as log:
             subprocess.run(list(map(str,cmd)), stdout=log, stderr=subprocess.STDOUT, check=True)
-    invoke(['ctest','--test-dir',ROOT/'build','--output-on-failure'], 'native-tests.log')
-    plan = json.loads(subprocess.check_output(['ctest','--test-dir',str(ROOT/'build'),'--show-only=json-v1'],text=True))
+    invoke(['ctest','--test-dir',BUILD,'--output-on-failure'], 'native-tests.log')
+    plan = json.loads(subprocess.check_output(['ctest','--test-dir',str(BUILD),'--show-only=json-v1'],text=True))
     assert len(plan['tests']) >= 19
-    invoke([sys.executable, ROOT/'mem_sim/integration/check_online.py',
-            ROOT/'build/mem_sim/libstoragestacked_memsim.so', output/'api'], 'api.log')
+    invoke([sys.executable, STORAGE_PATHS['memsim_online_check'],
+            BUILD/'mem_sim/libstoragestacked_memsim.so', output/'api'], 'api.log')
     example = json.loads((ROOT/'examples/roundtrip.json').read_text())
     cases = {'smoke': run_smoke(output/'smoke')}
     for name, cfg in [('default',{}), ('slow',{'scale':4}),

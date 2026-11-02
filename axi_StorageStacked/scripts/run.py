@@ -4,11 +4,15 @@ import argparse
 import csv
 import datetime
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+from storage_manifest import load
 
 ROOT = Path(__file__).resolve().parents[1]
+BUILD = Path(os.environ.get('STORAGE_BUILD_DIR', ROOT/'build')).resolve()
+STORAGE_PATHS = load(ROOT)
 DEFAULTS = dict(base=0x90000000, size=0x30000000, planes=2, replay=False,
                 standard='hbm4', slots=8, channels=2, scale=1, queue=4,
                 response_hold=0, period_fs=2000000, max_ticks=200000000000,
@@ -131,12 +135,12 @@ def run_case(request, output):
         def invoke(command):
             with (output / 'run.log').open('a') as stream:
                 subprocess.run(list(map(str, command)), stdout=stream, stderr=subprocess.STDOUT, check=True)
-        invoke([ROOT / 'build/axi_storage', output / 'input.json', output])
+        invoke([BUILD / 'axi_storage', output / 'input.json', output])
         responses = verify_responses(request, output)
         # Decode the actual wire data independently, all the way to physical memory commands.
         for name in ('check_aou', 'inspect_link', 'check_memsim'):
             flags = ['--replay'] if name == 'check_aou' and request['config']['replay'] else []
-            invoke([sys.executable, ROOT / 'scripts' / (name+'.py'), output, *flags])
+            invoke([sys.executable, STORAGE_PATHS['checks_dir'] / (name+'.py'), output, *flags])
         from audit_wave import audit
         wave, _, _ = audit(output, output / 'wave_audit')
         core = json.loads((output / 'memsim_core.json').read_text())
