@@ -46,5 +46,6 @@ if [[ ! -x "$SS_DEPS_ROOT/xpu-toolchains/llvm-vortex/bin/clang" ]]; then
 fi
 "$AXI_PYTHON" "$SS_ROOT/third_party/gem5/runtime/prepare_vortex_llvm.py"
 "$AXI_PYTHON" "$SS_ROOT/third_party/gem5/runtime/prepare_cmake_sources.py"
+"$AXI_PYTHON" "$SS_ROOT/third_party/gem5/runtime/prepare_softfloat.py"
 printf '%s\n' "$ss_root" >"$ss_root/third_party/.cache/location"
 echo "环境已就绪。下一步：./build.sh"

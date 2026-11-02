@@ -87,5 +87,10 @@
       "url": "https://github.com/p-ranav/argparse/archive/997da9255618311d1fcb0135ce86022729d1f1cb.tar.gz",
       "bytes": 103253
     }
-  ]
+  ],
+  "softfloat": {
+    "revision": "b51ef8f3201669b2288104c28546fc72532a1ea4",
+    "url": "https://codeload.github.com/ucb-bar/berkeley-softfloat-3/tar.gz/b51ef8f3201669b2288104c28546fc72532a1ea4",
+    "sha256": "94f62d78ac68d8591a1f14f601224a9e011c1459211028030f3200f9e214d568"
+  }
 }
