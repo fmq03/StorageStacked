@@ -2,20 +2,20 @@
 
 ## 1. 验证环境与入口
 
-测试使用 C++17、SystemC 和 2ns AXI 时钟。默认数据宽度 256 位，回归覆盖 256/512/1024 位。链路依赖和路径设置见[接入说明](../integration/README.md)。
+测试使用 C++17、SystemC 和 2ns AXI 时钟。默认数据宽度 256 位，回归覆盖 256/512/1024 位。链路依赖和路径设置见[接入说明](../../../../axi_StorageStacked/storage_axi/link/README.md)。
 
-本页描述现有测试的覆盖与判据，端口契约见[SoC 接口表](../../doc/SoC侧接口对接表.md)和[存储接口表](../../doc/存储侧接口对接表.md)。现有全链路命令固定使用 BFM 与简单内存，不能据此声称尚未接入的主机和存储模型已完成验收。
+本页描述现有测试的覆盖与判据，端口契约见[SoC 接口表](../SoC侧接口对接表.md)和[存储接口表](../存储侧接口对接表.md)。现有全链路命令固定使用 BFM 与简单内存，不能据此声称尚未接入的主机和存储模型已完成验收。
 
-在项目根目录执行：
+在 `components/axi2flit` 目录执行：
 
 ```bash
 make preflight
-make full-link-all
-make full-link-negative
 make -C systemc report
 ```
 
-`preflight` 包含桥功能、消息黄金向量、帧格式、边界、适配器、链路单元、参数化和桥性能回归。`full-link-all` 单独运行实际 UcieLink 与存储的联合测试。命令以非零退出码表示失败；单个用例通过不能代替最终汇总。
+依赖 UCIe 的适配器、链路单元和完整链路测试（`adapter`、`ucie-unit`、`full-link-*`）属于链路集成层，在 `axi_StorageStacked/` 下用 `./run.sh link-test` 运行，见[全链路使用说明](../../../../axi_StorageStacked/docs/UCIe全链路仿真计划与使用.md)。
+
+`preflight` 包含桥功能、消息黄金向量、帧格式、边界、参数化和桥性能回归。实际 UcieLink 与存储的联合测试在链路集成层单独运行。命令以非零退出码表示失败；单个用例通过不能代替最终汇总。
 
 ## 2. 套件与覆盖
 
@@ -25,12 +25,8 @@ make -C systemc report
 | `golden-all` | `tb_golden_vectors.cpp` | 每位宽 71 项；固定消息黄金字节，覆盖请求、数据、响应、credit及字段宽度 |
 | `wire-all` | `tb_aou_wire.cpp` | 三种位宽；PH 黄金字节、48 个起点位、16 个credit位、FDId、物理映射、续传及非法编码 |
 | `boundary-all` | `tb_preintegration.cpp` | 三位宽 × RP1/2/4；协调本地复位、96 条读请求随机背压、credit事件拥塞；每位宽 12 个非法 AXI 场景 |
-| `adapter` | `tb_ucie_adapter.cpp` | 250 字节长度、全部 2048 个物理位单错、深度 1 双向 FIFO、训练门控和握手时间 |
-| `ucie-unit` | 链路依赖的单元测试 | 编译链路主程序并运行 22 项独立单元检查 |
-| `config-check` | 适配器及边界测试 | x8、PAM4、48GB/s、TAT=80ns；参数匹配与桥功能 |
+| `config-check` | 边界测试 | x8、PAM4、48GB/s、TAT=80ns；参数匹配与桥功能 |
 | `perf-all` | `tb_axi2flit_perf.cpp` | 简化链路下的吞吐、载荷效率、延迟及credit环路预算 |
-| `full-link-all` | `tb_full_link.cpp` | 12 种配置，每配置 12 组用例，实际字节存储、错误重放和事务守恒 |
-| `full-link-negative` | `tb_full_link.cpp` | 破坏一处记分板期望，必须检出读数据不匹配且退出码为 1 |
 
 消息黄金向量直接使用固定期望值，未通过被测编码器生成。它们只检查项目消息格式；PH 和物理帧映射由独立套件检查。帧解析回归还覆盖七类消息的全部 48 个起点、4096 条固定种子混合消息、空粒度、纯credit帧、保留编码和重叠起点。
 
@@ -123,19 +119,20 @@ PERF-5 还要求往返增量与配置 TAT 的偏差不超过 2ns、读吞吐保�
 
 ## 5. 产物与波形判读
 
-`systemc/sim/perf_report.txt` 保存桥性能汇总。全链路每个配置生成独立的 `full_link_<位宽>_rp<数量>[_stress][_replay].csv/.vcd`；`full-link-all` 同时保存 `.log`。
+`systemc/sim/perf_report.txt` 保存桥性能汇总。全链路测试在 `axi_StorageStacked/tests/link/sim/` 为每个配置生成独立的 `full_link_<位宽>_rp<数量>[_stress][_replay].csv/.vcd`，`full-link-all` 同时保存 `.log`。
 
 ```bash
-make full-link-wave
-make WIDTH=1024 FULL_LINK_VCD=sim/full_link_1024_rp2_stress_replay.vcd full-link-wave
-gtkwave systemc/sim/full_link_256_rp1.vcd
+cd axi_StorageStacked
+./run.sh link-test full-link-wave
+./run.sh link-test WIDTH=1024 FULL_LINK_VCD=sim/full_link_1024_rp2_stress_replay.vcd full-link-wave
+gtkwave tests/link/sim/full_link_256_rp1.vcd
 ```
 
 波形页面读取已有 VCD，支持用例切换、缩放和平移。总线数据保留为十六进制字符串，可查看完整 64 位地址和 1024 位数据。
 
 先检查 TC2 的 AW、W、B、AR、R 各一次握手，数据读回一致；再检查 TC3 的拍数为 LEN+1，仅末拍 LAST=1；TC11 中 VALID=1、READY=0 时完整数据须保持不变。计数以时钟上升沿的 VALID 与 READY 同时为 1 为准，不能按电平持续时间计数。
 
-CSV 只记录握手事件，数据字符串最右侧对应字节通道 0。W 行地址为原 AW 突发首地址，R 行地址由已接受 AR 和拍号推导，B 行地址为 0；这些地址不是额外的 W/B/R 引脚。重复 ID 按对应方向的在途队列匹配，不能当作全局唯一编号。具体命令和信号分组见[全链路使用说明](../../doc/UCIe全链路仿真计划与使用.md)。
+CSV 只记录握手事件，数据字符串最右侧对应字节通道 0。W 行地址为原 AW 突发首地址，R 行地址由已接受 AR 和拍号推导，B 行地址为 0；这些地址不是额外的 W/B/R 引脚。重复 ID 按对应方向的在途队列匹配，不能当作全局唯一编号。具体命令和信号分组见[全链路使用说明](../../../../axi_StorageStacked/docs/UCIe全链路仿真计划与使用.md)。
 
 ## 6. 验证边界
 
@@ -154,4 +151,4 @@ CSV 只记录握手事件，数据字符串最右侧对应字节通道 0。W 行
 
 先分别运行“新主机＋简单内存”和“原 BFM＋新后端”，再连接两端。已有 BFM 的窗口、初值和简单内存专用计数应按新配置调整；它不能不加修改地证明任意程序的数据语义。真实主机没有覆盖的长 burst、窄访问、错误和背压场景由合成测试补齐。
 
-验收记录应包含提交号、构建参数、运行配置、最终日志、AXI VCD/CSV、独立数据检查及退出码。各层编号、时间和计数的关联方式见[联仿交接约定](../../doc/全链路联合仿真接入指南.md#11-联仿交接约定)。本节是新增模型的验收要求，当前不存在自动运行这些新模型的 make 目标。
+验收记录应包含提交号、构建参数、运行配置、最终日志、AXI VCD/CSV、独立数据检查及退出码。各层编号、时间和计数的关联方式见[联仿交接约定](../../../../axi_StorageStacked/docs/全链路联合仿真接入指南.md#11-联仿交接约定)。本节是新增模型的验收要求，当前不存在自动运行这些新模型的 make 目标。

@@ -85,14 +85,14 @@ JSON 参数改变后下一次运行生效，不需要重新编译。
 | UCIe 调制                  | `AOU_LINK_BITS_PER_SYMBOL=1`，即 NRZ；2 为 PAM4                      | 同上                                                      |
 | 信用返回时间预算           | `AOU_LINK_TAT_NS=40.0` ns                                            | 同上                                                      |
 | 重放注入概率               | replay=false 时为 0，true 时为 0.02；`storage_axi/aou_backend.cc`    | 当前 JSON 只有开关，改变概率需修改源码并重建              |
-| 原生内存组织／时序         | `config/memory/hbm.cfg`、`lpddr.cfg` 的 organization、dram.timing  | 用于 mem_sim 独立实验，包含层数、bank、行列、数据率和时序 |
+| 原生内存组织／时序         | `components/mem_sim/configs/hbm.cfg`、`components/mem_sim/configs/lpddr.cfg`（相对仓库根） 的 organization、dram.timing  | 用于 mem_sim 独立实验，包含层数、bank、行列、数据率和时序 |
 | 原生控制器／PHY            | 同一 cfg 的 controller、phy、refresh 等节                              | 用于独立实验，包含调度、队列、地址映射、PHY 延迟和刷新    |
 | 存储后端／可靠性／功耗／热 | 同一 cfg 的 storage、reliability、power、thermal 等节                  | 用于独立实验，具体字段和默认值查看模板                    |
 
-链路编译配置见 [link_config.h](../axi2flit/systemc/include/link_config.h)；
-原生内存模板见 [hbm.cfg](../config/memory/hbm.cfg)、[lpddr.cfg](../config/memory/lpddr.cfg)，
-完整字段见 [cfg 指南](../mem_sim/文档/cfg指南.md)。
-**AXI 在线链路不读取这些 cfg**；它通过 [online.cpp](../mem_sim/integration/online.cpp) 用内置标准和
+链路编译配置见 [link_config.h](../../components/axi2flit/systemc/include/link_config.h)；
+原生内存模板见 [hbm.cfg](../../components/mem_sim/configs/hbm.cfg)、[lpddr.cfg](../../components/mem_sim/configs/lpddr.cfg)，
+完整字段见 [cfg 指南](../../components/mem_sim/docs/cfg指南.md)。
+**AXI 在线链路不读取这些 cfg**；它通过 [online.cpp](../../components/mem_sim/integration/online.cpp) 用内置标准和
 上面的 JSON 参数创建内存。要让更多原生参数影响 AXI 链路，需要扩展配置传递并重建，不能只改 cfg。
 
 ## 第 3 步：先用通用入口验证输入

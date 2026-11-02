@@ -1,5 +1,5 @@
-> 本目录是 axi_StorageStacked 的桥组件；同级 `ucie-model` 直接维护链路实现，
-> 公共帧格式在 `../protocol/include`。整机由 CoralNPU RTL 驱动在线 mem_sim，见[项目入口](../README.md)。
+> 本目录独立维护 AXI2Flit 桥；公共帧格式在 `../../common/interfaces`。
+> UCIe 接线、响应端及全链路测试由 [AXI 集成层](../../axi_StorageStacked/README.md) 维护。
 > 下文的 SimpleBurstMemory 用于桥自身的独立测试。
 
 # AXI2FLIT
@@ -25,58 +25,87 @@ AXI 激励 ⇄ Axi2Flit ⇄ UcieAouAdapter ⇄ UcieLink ⇄ AouTarget ⇄ Simple
 
 | 接入方 | 当前可连接的边界 | 首先阅读 |
 |---|---|---|
-| SoC/主机开发者 | `Axi2Flit` 的 AXI 从机端口：AW/W/AR 输入，B/R 输出 | [SoC 侧接口对接表](doc/SoC侧接口对接表.md) |
-| 存储开发者 | `AouTarget.mem_req/mem_rsp`，整突发 `SimpleMemRequest/Response` FIFO | [存储侧接口对接表第 1～3 节](doc/存储侧接口对接表.md) |
-| 联合仿真顶层开发者 | 项目主程序位于 `../examples/axi_storage.cc`；组件测试见 `tb_full_link.cpp` | [联合仿真接入指南](doc/全链路联合仿真接入指南.md) |
+| SoC/主机开发者 | `Axi2Flit` 的 AXI 从机端口：AW/W/AR 输入，B/R 输出 | [SoC 侧接口对接表](docs/SoC侧接口对接表.md) |
+| 存储开发者 | `AouTarget.mem_req/mem_rsp`，整突发 `SimpleMemRequest/Response` FIFO | [存储侧接口对接表第 1～3 节](docs/存储侧接口对接表.md) |
+| 联合仿真顶层开发者 | 项目主程序位于 `../../axi_StorageStacked/examples/axi_storage.cc`；跨组件全链路测试见 [`tests/link`](../../axi_StorageStacked/tests/link/) | [联合仿真接入指南](../../axi_StorageStacked/docs/全链路联合仿真接入指南.md) |
 
-项目级适配已实现：`../examples/axi_storage.cc` 将文件输入转为 AXI256；外部处理器驱动通过公开信号端口接入，`../storage_axi/memsim_backend.cc` 连接在线 mem_sim。`UcieAouAdapter` 是桥到 UCIe 的内部适配。SimpleBurstMemory 仅用于本目录组件测试，不能用于项目计算和访存验收。
+项目级适配已实现：`../../axi_StorageStacked/examples/axi_storage.cc` 将文件输入转为 AXI256；外部处理器驱动通过公开信号端口接入，`../../axi_StorageStacked/storage_axi/memsim_backend.cc` 连接在线 mem_sim。`UcieAouAdapter` 是桥到 UCIe 的内部适配。SimpleBurstMemory 仅用于本目录组件测试，不能用于项目计算和访存验收。
 
 ## 构建与运行
 
 需要 g++、make 和 C++17 构建的 SystemC。默认安装路径为 `$HOME/.local/systemc-2.3.4-cxx17`，可通过 `SYSTEMC_HOME` 覆盖。波形页面生成需要 Python 3 标准库，GTKWave 可用于查看原始 VCD。
 
-整机运行与验收在仓库根目录执行 `./run.sh run` / `./run.sh test`。以下组件测试命令在 `axi2flit/` 目录执行：
+从仓库根目录执行链路集成的 `./axi_StorageStacked/run.sh run` / `test`。在本组件目录执行：
 
 ```bash
-# 桥功能与性能测试，可独立于 UCIe 模型运行。
-make test-all
+make CXX="$CXX" SYSTEMC_HOME="$SYSTEMC_HOME" preflight
 make -C systemc report
-
-# 组件全链路测试使用同仓库的 UCIe 源码。
-make full-link
-make full-link-all
-make full-link-negative
-
-# 从默认全链路测试生成的 VCD 创建波形页面。
-make full-link-wave
 ```
 
-链路模型默认位于同仓库的 `../ucie-model`，路径约定见[接入说明](systemc/integration/README.md)。组件测试更换位置可执行：
+全链路测试从仓库根目录执行：
 
 ```bash
-make UCIE_DIR=/work/models/ucie-model full-link-all
-make SYSTEMC_HOME=/work/systemc UCIE_DIR=/work/models/ucie-model preflight
+./axi_StorageStacked/run.sh link-test preflight
+./axi_StorageStacked/run.sh link-test full-link-wave
 ```
 
-`UCIE_DIR` 的相对路径以 `systemc/` 为基准。`preflight` 运行桥和链路组件回归，`full-link-all` 运行实际链路与存储的联合功能回归，两者需要分别执行。
-
-产物位于 `systemc/sim/`。`perf_report.txt` 是简化链路下的桥性能报告；`full_link_*.log/.csv/.vcd` 是全链路功能结果。性能报告不能代替全链路持续带宽测量。
+组件产物位于 `systemc/sim/`；跨组件产物位于 `axi_StorageStacked/tests/link/sim/`。
+`perf_report.txt` 是简化链路下的桥性能报告，不能代替全链路持续带宽测量。
 
 ## 目录与文档
 
 | 路径 | 内容 |
 |---|---|
 | `systemc/include/`、`systemc/src/` | 接口、消息编码、 credit 管理及桥实现 |
-| `systemc/integration/` | 链路适配器、响应端、简单存储及依赖补丁 |
-| `systemc/tb/` | 桥、组件、性能和全链路测试 |
-| `systemc/scripts/` | 波形页面生成工具 |
+| `../../axi_StorageStacked/storage_axi/link/` | 跨组件链路适配器、响应端与简单测试存储 |
+| `systemc/tb/` | 桥、边界配置与性能测试 |
+| `../../axi_StorageStacked/tests/link/` | 全链路测试与波形工具 |
 | `systemc/sim/` | 可再生的构建与仿真产物 |
 
-- [设计文档](systemc/doc/design.md)：模块职责、握手、容量和顺序规则。
-- [字节格式与接口](systemc/doc/wire_contract.md)：消息、帧头、物理布局和接线约定。
-- [SoC 侧接口对接表](doc/SoC侧接口对接表.md)：端口方向、字段、窄访问、握手和主机接入职责。
-- [存储侧接口对接表](doc/存储侧接口对接表.md)：请求/响应字段、功能、单 RP 简化及外部存储模型映射。
-- [验证文档](systemc/doc/verification.md)：测试范围、判据、性能口径和验证边界。
-- [全链路使用说明](doc/UCIe全链路仿真计划与使用.md)：场景配置、产物和波形判读。
-- [全链路联合仿真接入指南](doc/全链路联合仿真接入指南.md)：CoralNPU 原生接口、独立 SystemC 调度、在线 mem_sim 与验收。
-- [接入与交付说明](systemc/integration/README.md)：依赖安装和路径迁移。
+- [设计文档](docs/systemc/design.md)：模块职责、握手、容量和顺序规则。
+- [字节格式与接口](docs/systemc/wire_contract.md)：消息、帧头、物理布局和接线约定。
+- [SoC 侧接口对接表](docs/SoC侧接口对接表.md)：端口方向、字段、窄访问、握手和主机接入职责。
+- [存储侧接口对接表](docs/存储侧接口对接表.md)：请求/响应字段、功能、单 RP 简化及外部存储模型映射。
+- [验证文档](docs/systemc/verification.md)：测试范围、判据、性能口径和验证边界。
+- [全链路使用说明](../../axi_StorageStacked/docs/UCIe全链路仿真计划与使用.md)：场景配置、产物和波形判读。
+- [全链路联合仿真接入指南](../../axi_StorageStacked/docs/全链路联合仿真接入指南.md)：CoralNPU 原生接口、独立 SystemC 调度、在线 mem_sim 与验收。
+- [接入与交付说明](../../axi_StorageStacked/storage_axi/link/README.md)：依赖安装和路径迁移。
+
+## 当前目录与开发入口
+
+### 职责
+
+AXI 与 AoU Flit 编解码组件。
+
+### 对外接口
+
+见 [接口说明](docs/存储侧接口对接表.md)；跨组件连接位于 `axi_StorageStacked/storage_axi/link`，源码与检查器路径由 `storage_manifest.json` 描述。
+
+### 构建与测试
+
+在本目录执行；先按 [原生开发文档](../../docs/development.md) 准备工具链及兼容的 SystemC。
+
+```bash
+make CXX="$CXX" SYSTEMC_HOME="$SYSTEMC_HOME" preflight
+```
+
+### 文档目录
+
+见 [模块文档](docs/systemc/verification.md)。
+
+### 负责人
+
+以仓库维护者及当前模块协作分工为准。
+
+## 组件验收证据
+
+从本组件目录执行，复用调用方选定的 SystemC：
+
+```bash
+source ../../common/toolchain/env.sh
+export SYSTEMC_HOME=$(../../axi_StorageStacked/run.sh systemc-prefix)
+export SYSTEMC_CXX_STANDARD=${STORAGE_CXX_STANDARD:-17}
+make CXX="$CXX" SUMMARY_DIR="$PWD/build/verification" preflight
+```
+
+`SUMMARY_DIR/summary.json` 同时记录实际子测试数、期望数、命令、退出状态与程序自己输出的 PASS/FAIL 计数；少跑或缺少明确检查输出均失败。期望数由 Makefile 的位宽和场景列表推导。历次日志和结论保存在其 `runs/` 子目录。

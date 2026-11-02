@@ -2,7 +2,7 @@
 
 ## 1. 范围与模型形式
 
-项目实现请求发起侧桥 `Axi2Flit`、链路适配器 `UcieAouAdapter`、存储侧响应端 `AouTarget` 和简单突发内存 `SimpleBurstMemory`。全链路测试由 `tb_full_link.cpp` 实例化这些模块及 UcieLink。
+项目实现请求发起侧桥 `Axi2Flit`、链路适配器 `UcieAouAdapter`、存储侧响应端 `AouTarget` 和简单突发内存 `SimpleBurstMemory`。除 `Axi2Flit` 外，这些模块位于链路集成层 [`axi_StorageStacked/storage_axi/link/`](../../../../axi_StorageStacked/storage_axi/link/)；全链路测试由 [`tb_full_link.cpp`](../../../../axi_StorageStacked/tests/link/tb_full_link.cpp) 实例化它们及 UcieLink。
 
 ```text
 SoC AXI 主机 / 测试激励
@@ -24,7 +24,7 @@ SoC AXI 主机 / 测试激励
 
 `Axi2Flit` 对主机表现为 AXI 从端。AW/W/AR 的有效信号和数据由主机驱动，桥返回就绪信号；B/R 的有效信号和数据由桥驱动，主机返回就绪信号。
 
-主机开发使用[SoC 侧接口对接表](../../doc/SoC侧接口对接表.md)核对全部字段、位宽、字节 lane 与启动方式。本节概述模块边界；协议违例处理以入口检查实现为准。
+主机开发使用[SoC 侧接口对接表](../SoC侧接口对接表.md)核对全部字段、位宽、字节 lane 与启动方式。本节概述模块边界；协议违例处理以入口检查实现为准。
 
 | 通道 | 数据端口及类型 | 握手端口 |
 |---|---|---|
@@ -107,7 +107,7 @@ WRESP FIFO 深度 = floor(环路预算 / 2ns) + 4
 
 定义位于 `simple_mem_if.h`。`AouTarget.mem_req` 为 `sc_fifo_out<SimpleMemRequest>`，`mem_rsp` 为 `sc_fifo_in<SimpleMemResponse>`；内存模型分别绑定同一请求/响应 FIFO 的另一端。
 
-逐字段类型、功能、与外部存储 Request/Response 的映射及可选方案见[存储侧接口对接表](../../doc/存储侧接口对接表.md)。当前可绑定接口为整笔突发 FIFO，保留 LEN、SIZE 和逐拍数据；隐藏链路字段的逻辑 burst 接口尚未实现，仅保留地址/总长度的字节接口也需要包装层转换，两者不能与当前类型混用。
+逐字段类型、功能、与外部存储 Request/Response 的映射及可选方案见[存储侧接口对接表](../存储侧接口对接表.md)。当前可绑定接口为整笔突发 FIFO，保留 LEN、SIZE 和逐拍数据；隐藏链路字段的逻辑 burst 接口尚未实现，仅保留地址/总长度的字节接口也需要包装层转换，两者不能与当前类型混用。
 
 | 类型 | 字段与含义 |
 |---|---|
@@ -132,4 +132,4 @@ RP 表示链路资源平面，不代表独立存储器。单 RP 配置下请求�
 
 桥本地复位清空消息队列、写路由、credit事件、顺序表及打包/解包状态，随后重新发布容量。本地复位测试要求对端同步清理事务；全链路只支持启动协调，运行期间复位需要重建完整链路。
 
-AXI 端口不提供额外的接口激活/停用握手；UcieLink 已有链路训练和状态输出，两者不是同一层次。项目未实现运行期间速率切换、完整 QoS 策略、真实 DRAM 控制器及引脚时序。简单内存不执行独占语义。验证范围、性能判据及结果适用条件见[验证文档](verification.md)，共同配置和接入验收见[联仿交接约定](../../doc/全链路联合仿真接入指南.md#11-联仿交接约定)。
+AXI 端口不提供额外的接口激活/停用握手；UcieLink 已有链路训练和状态输出，两者不是同一层次。项目未实现运行期间速率切换、完整 QoS 策略、真实 DRAM 控制器及引脚时序。简单内存不执行独占语义。验证范围、性能判据及结果适用条件见[验证文档](verification.md)，共同配置和接入验收见[联仿交接约定](../../../../axi_StorageStacked/docs/全链路联合仿真接入指南.md#11-联仿交接约定)。

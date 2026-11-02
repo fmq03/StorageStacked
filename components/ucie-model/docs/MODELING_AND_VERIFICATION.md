@@ -90,7 +90,7 @@ MemoryResponder -> REV TxAdapter -> REV PhyChannel -> REV RxAdapter -> FdiSink
                        +--------- REV ACK/NAK -------------+
 ```
 
-顶层模块实例化和连接位于 [`src/ucie_systemc_main.cpp`](src/ucie_systemc_main.cpp)。主要模块职责如下：
+顶层模块实例化和连接位于 [`src/ucie_systemc_main.cpp`](../src/ucie_systemc_main.cpp)。主要模块职责如下：
 
 | 模块 | 建模职责 |
 | --- | --- |
@@ -983,7 +983,7 @@ PASS=82 FAIL=0
 - lane 数：8/16/32/64；
 - NRZ：24/32 GT/s参考点。
 
-当前 `results/sweep/summary.csv` 中的典型结果：
+历史扫描汇总中的典型结果如下；重新运行扫描后，汇总写入 `build/validation/sweep/summary.csv`：
 
 |    速率 | sigma |  利用率 |  平均延迟 | NAK / replay | 完整性错误 |
 | ------: | ----: | ------: | --------: | -----------: | ---------: |
@@ -1184,8 +1184,8 @@ make test
 结果位于：
 
 ```text
-results/tests/*.log
-results/tests/*.csv
+build/validation/tests/*.log
+build/validation/tests/*.csv
 ```
 
 ### 10.4 参数扫描
@@ -1197,7 +1197,7 @@ make sweep
 汇总结果位于：
 
 ```text
-results/sweep/summary.csv
+build/validation/sweep/summary.csv
 ```
 
 复现实验时应同时记录：源码版本、编译器/SystemC版本、完整命令行、随机seed和输出CSV。
@@ -1222,24 +1222,24 @@ ucie_systemc/
 │   ├── run_tests.sh                   # 82项系统断言
 │   ├── run_sweep.sh                   # 36点参数扫描
 │   └── run_validation.sh              # 一键验证与报告生成
-└── results/
+└── build/validation/
     ├── tests/                         # 功能回归日志和CSV
     └── sweep/                         # 扫描日志、CSV和summary.csv
 ```
 
 相关文件：
 
-- [项目说明](README.md)
+- [项目说明](../README.md)
 - [接口定义](INTERFACE.md)
 - [测试计划](TEST_PLAN.md)
-- [公共配置与Flit定义](src/ucie_common.h)
-- [事务级FDI](src/ucie_fdi.h)
-- [行为级PHY](src/ucie_phy.h)
-- [独立UcieLink及Adapter](src/ucie_link.h)
-- [SystemC测试平台](src/ucie_systemc_main.cpp)
-- [功能测试](scripts/run_tests.sh)
-- [参数扫描](scripts/run_sweep.sh)
-- [当前扫描汇总](results/sweep/summary.csv)
+- [公共配置与Flit定义](../src/ucie_common.h)
+- [事务级FDI](../src/ucie_fdi.h)
+- [行为级PHY](../src/ucie_phy.h)
+- [独立UcieLink及Adapter](../src/ucie_link.h)
+- [SystemC测试平台](../src/ucie_systemc_main.cpp)
+- [功能测试](../scripts/run_tests.sh)
+- [参数扫描](../scripts/run_sweep.sh)
+- 执行 `make validate` 后，扫描汇总位于 `build/validation/sweep/summary.csv`。
 
 ## 12. 总结
 

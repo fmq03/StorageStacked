@@ -31,4 +31,5 @@ fi
 )
 ./vortex_StorageStacked/build.sh --storage ../axi_StorageStacked --jobs "${BUILD_JOBS:-12}" --test
 ./coralnpu_StorageStacked/build.sh --storage ../axi_StorageStacked --jobs "${BUILD_JOBS:-12}" --test
+( source common/toolchain/env.sh; "$SS_PYTHON" tools/check_links.py )
 printf '原生验收通过。各项目真实数据与协议检查的 summary.json 路径见入口输出。\n'

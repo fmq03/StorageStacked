@@ -4,7 +4,7 @@
 
 离线 Docker 包及最新兼容脚本见 [离线发布仓库](https://github.com/hy2581/zhongxing-storagestacked-offline)。
 旧版 Docker 编译出现 `posix_spawn failed: Operation not permitted` 时，按
-[Docker 兼容说明](https://github.com/hy2581/zhongxing-storagestacked-offline/blob/main/DOCKER_COMPATIBILITY.md)
+[Docker 兼容说明](https://github.com/hy2581/zhongxing-storagestacked-delivery/blob/main/DOCKER_COMPATIBILITY.md)
 使用临时入口；源码和文档可通过该入口的 `shell` 命令查看。
 
 在启用 RVV 的 CoralNPU RTL 中执行用户程序，通过 AXI256、UCIe 访问在线 MEMSIM。
@@ -158,3 +158,30 @@ flowchart LR
 许可证和上游版本保留在 `coralnpu/`；交付源码包含本平台的运行接口适配。
 只使用公共存储源码，不加载其他处理器驱动；整个仿真进程使用一套 SystemC，时间分辨率 1 fs。
 PHY/DFI 为行为模型；本项目的结果不代表物理芯片或通用大模型性能。
+
+## 当前目录与开发入口
+
+### 职责
+
+CoralNPU 原生 RTL 与存储链路集成。
+
+### 对外接口
+
+见 [接口说明](integration/storage.hh)；跨组件连接位于 `axi_StorageStacked/storage_axi/link`，源码与检查器路径由 `storage_manifest.json` 描述。
+
+### 构建与测试
+
+在本目录执行；先按 [原生开发文档](../docs/development.md) 准备工具链及兼容的 SystemC。
+
+```bash
+./build.sh --storage ../axi_StorageStacked --test
+cd user && ./run.sh smoke
+```
+
+### 文档目录
+
+见 [模块文档](docs/walkthrough/integration/README.md)。
+
+### 负责人
+
+以仓库维护者及当前模块协作分工为准。

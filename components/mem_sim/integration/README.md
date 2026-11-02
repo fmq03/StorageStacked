@@ -2,7 +2,7 @@
 
 `online.h/.cpp` 将已有 MemorySystem 暴露为 C ABI，共享库目标 `storagestacked_memsim`。
 它不依赖 SystemC，不创建线程或独立时间循环。当前宿主桥在
-`../../storage_axi/memsim_backend.hh/.cc`，由调用方选择的单一 SystemC 内核调度；总入口见 [项目说明](../../README.md)。
+`../../storage_axi/memsim_backend.hh/.cc`，由调用方选择的单一 SystemC 内核调度；总入口见 [项目说明](../../../axi_StorageStacked/README.md)。
 
 宿主顺序：create → 在每个原生时刻尝试 submit → step 一次 → pop 可容纳的响应 → finish → destroy。
 `period_fs` 返回一个原生 step 在宿主时间轴上的时长；`clock` 是已完成的 step 数。
@@ -46,6 +46,6 @@ python3 mem_sim/integration/check_online.py \
 ```
 
 它验证掩码读写、原生完成、满队列无副作用重试，以及重复 ID / 跨粒度请求拒绝。
-完整链路的 `scripts/check_memsim.py` 进一步将 AXI、原始 Flit 解码结果、子请求、
+完整链路的 `axi_StorageStacked/checks/check_memsim.py` 进一步将 AXI、原始 Flit 解码结果、子请求、
 DRAM/DFI 和最终内存逐项关联。当前验收 workload 要求每个子请求均产生 RD/WR，未覆盖
 控制器写合并或读转发；检查器会明确拒绝不符合该范围的结果，而不是静默略过物理证据。

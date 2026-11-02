@@ -4,7 +4,7 @@
 
 离线 Docker 包及最新兼容脚本见 [离线发布仓库](https://github.com/hy2581/zhongxing-storagestacked-offline)。
 旧版 Docker 编译出现 `posix_spawn failed: Operation not permitted` 时，按
-[Docker 兼容说明](https://github.com/hy2581/zhongxing-storagestacked-offline/blob/main/DOCKER_COMPATIBILITY.md)
+[Docker 兼容说明](https://github.com/hy2581/zhongxing-storagestacked-delivery/blob/main/DOCKER_COMPATIBILITY.md)
 使用临时入口；源码和文档可通过该入口的 `shell` 命令查看。
 
 基于 gem5 多核 CPU 与 Vortex GPU 执行用户程序，经 AXI256、UCIe 访问在线 MEMSIM。用户在 `user/` 配置、编译、运行和查看结果；`integration/` 提供与独立 AXI 存储项目的连接。
@@ -120,3 +120,30 @@ flowchart LR
 | [研究成果一分析](docs/05-研究成果一分析.md) | 三项目如何实现 SoC 模型各项内容 |
 
 源码版本、许可证与平台适配记录见 [gem5 来源说明](third_party/gem5/patches/README.md)和 [Vortex 来源说明](third_party/vortex/patches/README.md)。
+
+## 当前目录与开发入口
+
+### 职责
+
+Vortex 与 gem5 的宿主集成。
+
+### 对外接口
+
+见 [接口说明](integration/storage.hh)；跨组件连接位于 `axi_StorageStacked/storage_axi/link`，源码与检查器路径由 `storage_manifest.json` 描述。
+
+### 构建与测试
+
+在本目录执行；先按 [原生开发文档](../docs/development.md) 准备工具链及兼容的 SystemC。
+
+```bash
+./build.sh --storage ../axi_StorageStacked --test
+cd user && ./run.sh smoke
+```
+
+### 文档目录
+
+见 [模块文档](docs/walkthrough/integration/README.md)。
+
+### 负责人
+
+以仓库维护者及当前模块协作分工为准。

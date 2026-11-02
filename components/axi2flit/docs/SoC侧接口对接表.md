@@ -1,8 +1,8 @@
 # SoC 侧接口对接表
 
-本文供主机模型、AXI 激励和 trace 回放器开发者使用，描述当前可以连接的接口。实现定义见 [axi2flit.h](../systemc/include/axi2flit.h)、[axi_if.h](../systemc/include/axi_if.h)，已有接线与监视器见 [tb_full_link.cpp](../systemc/tb/tb_full_link.cpp)。
+本文供主机模型、AXI 激励和 trace 回放器开发者使用，描述当前可以连接的接口。实现定义见 [axi2flit.h](../systemc/include/axi2flit.h)、[axi_if.h](../systemc/include/axi_if.h)，已有接线与监视器见 [tb_full_link.cpp](../../../axi_StorageStacked/tests/link/tb_full_link.cpp)。
 
-本表描述内部 `Axi2Flit` 结构体端口，供组件开发使用。独立项目对外提供固定 256 bit 的 `storage_axi::AouBackend` 信号端口，有效 ID 为 1～1023；其契约见 [INTERFACE.md](../../INTERFACE.md)。外部处理器保留各自的 AXI master，使用同一份公共存储实现。
+本表描述内部 `Axi2Flit` 结构体端口，供组件开发使用。独立项目对外提供固定 256 bit 的 `storage_axi::AouBackend` 信号端口，有效 ID 为 1～1023；其契约见 [INTERFACE.md](../../../axi_StorageStacked/INTERFACE.md)。外部处理器保留各自的 AXI master，使用同一份公共存储实现。
 
 ## 1. 模块边界与端口方向
 
@@ -110,7 +110,7 @@ data[lane + j] 对应内存地址 A[n] + j，0 <= j < S
 
 当前没有可直接复用的统一 `FullLinkSystem` 导出模块，完整实例化位于 `FullLinkTb`。新增主机顶层应参考其模块和接线，替换 stimulus/ready_driver 的驱动职责，并保留监视器；不能让原 BFM 和新主机同时驱动同一组信号。
 
-`tb_full_link.cpp` 中使用的端口绑定形式如下。这里只示例 AW，完整连接须覆盖第 1 节所有端口及内部帧接口：
+[`tb_full_link.cpp`](../../../axi_StorageStacked/tests/link/tb_full_link.cpp) 中使用的端口绑定形式如下。这里只示例 AW，完整连接须覆盖第 1 节所有端口及内部帧接口：
 
 ```cpp
 sc_signal<bool> aw_valid, aw_ready;
@@ -124,4 +124,4 @@ bridge.aw_ch(aw_payload);
 
 时钟周期、AXI 位宽和地址窗口是顶层配置，当前默认值不是 SoC 模型必须采用的硬件参数；修改周期后应重新核对容量预算和性能门限。不能在有在途事务时单独复位一端。
 
-主机开发者负责交付：完整字段映射、请求/响应上下文、地址映射和数据初始化约定、并发/背压策略，以及 AXI 监视结果。模型结束后还要等待 B/R、链路和后端在途事务排空。两侧共同配置和分阶段验收见[联仿交接约定](全链路联合仿真接入指南.md#11-联仿交接约定)。
+主机开发者负责交付：完整字段映射、请求/响应上下文、地址映射和数据初始化约定、并发/背压策略，以及 AXI 监视结果。模型结束后还要等待 B/R、链路和后端在途事务排空。两侧共同配置和分阶段验收见[联仿交接约定](../../../axi_StorageStacked/docs/全链路联合仿真接入指南.md#11-联仿交接约定)。

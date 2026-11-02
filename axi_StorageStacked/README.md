@@ -23,8 +23,8 @@ Linux x86-64，C/C++ 编译器（C++20）、CMake ≥ 3.20、make、Python 3 和
 SystemC 2.3.1 源码直接存放于 `third_party/systemc`，不需要安装全局 SystemC。
 
 ```bash
-git clone https://github.com/hy2581/axi_StorageStacked.git
-cd axi_StorageStacked
+git clone https://github.com/fmq03/StorageStacked
+cd StorageStacked/axi_StorageStacked
 ./run.sh setup
 ./run.sh build
 ./run.sh smoke
@@ -114,3 +114,32 @@ AXI 为对齐、非独占的 INCR 子集；有效 ID 为 1～1023，单 burst �
 mem_sim 的 PHY/DFI 为行为模型，HBM4 预设含临时时序项，验收范围为当前模型功能与时序反馈。
 
 源码版本/来源在 `VERSION` 和 `config/sources.json`，验收入口见 [ACCEPTANCE.md](ACCEPTANCE.md)。
+
+## 当前目录与开发入口
+
+### 职责
+
+AXI → Flit → UCIe → 在线内存的链路集成。
+
+### 对外接口
+
+见 [接口说明](INTERFACE.md)；跨组件连接位于 `axi_StorageStacked/storage_axi/link`，源码与检查器路径由 `storage_manifest.json` 描述。
+
+### 构建与测试
+
+在本目录执行；先按 [原生开发文档](../docs/development.md) 准备工具链及兼容的 SystemC。
+
+```bash
+./run.sh setup && ./run.sh build && ./run.sh test
+./run.sh link-test preflight
+```
+
+### 文档目录
+
+见 [模块文档](../docs/development.md)。
+
+### 负责人
+
+以仓库维护者及当前模块协作分工为准。
+
+旧外部文档仓库仅供历史参考，不是当前构建或验收依赖；本仓库文档与源码为本次开发依据。

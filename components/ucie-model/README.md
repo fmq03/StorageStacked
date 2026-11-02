@@ -1,12 +1,12 @@
 > 本目录现为 axi_StorageStacked 公共存储项目普通源码，AoU与观察接口直接在这里维护。
-> 公共帧格式由 `../protocol/include` 提供，不再由其他内部模块打补丁。
-> 整机运行见[独立存储入口](../README.md)；下文保留独立链路仿真的说明。
+> 公共帧格式由 `../../common/interfaces` 提供，不再由其他内部模块打补丁。
+> 整机运行见[独立存储入口](../../axi_StorageStacked/README.md)；下文保留独立链路仿真的说明。
 
 # UCIe 双向高速互联仿真模型（SystemC）
 
 本模型对应项目研究成果 3，使用 SystemC 建模 UCIe D2D Adapter、事务级 FDI、双向业务链路和行为级 PHY。它支持 24 GT/s 及以上速率、Standard 256B/Compact 68B Flit、PAM4/NRZ、串并转换、CRC、ACK/NAK、重传，以及 AWGN、ISI、jitter、lane skew 和 CDR 抽象。
 
-需求追踪、公式、验证方法和可信范围详见 [`MODELING_AND_VERIFICATION.md`](MODELING_AND_VERIFICATION.md)，源码分工见 [`src/README.md`](src/README.md)。
+需求追踪、公式、验证方法和可信范围详见 [`MODELING_AND_VERIFICATION.md`](docs/MODELING_AND_VERIFICATION.md)，源码分工见 [`src/README.md`](src/README.md)。
 
 ## 1. 双向架构
 
@@ -44,7 +44,7 @@ struct FdiFlit {
 };
 ```
 
-Payload 由 FDI producer 提供，TX Adapter 只负责添加链路序号、replay 标志和 CRC，RX Adapter 校验后重新输出 `FdiFlit`。`transaction_id`、VC、方向和时间戳是当前 SystemC 行为模型中的事务元数据；真正经过 PHY 损伤的是构造后的内部 Flit 字节数组。完整端口契约见 [`INTERFACE.md`](INTERFACE.md)。
+Payload 由 FDI producer 提供，TX Adapter 只负责添加链路序号、replay 标志和 CRC，RX Adapter 校验后重新输出 `FdiFlit`。`transaction_id`、VC、方向和时间戳是当前 SystemC 行为模型中的事务元数据；真正经过 PHY 损伤的是构造后的内部 Flit 字节数组。完整端口契约见 [`INTERFACE.md`](docs/INTERFACE.md)。
 
 有限深度 `sc_fifo<FdiFlit>` 和 Retry Buffer 提供背压。当 FDI FIFO 或 Retry Buffer 无法继续接收时，上游 producer 会停止注入。
 
@@ -148,7 +148,7 @@ make validate
 ./build/ucie_sc_sim --help
 ```
 
-当前包含 22 项确定性单元断言和 82 项 SystemC 系统断言，覆盖 CRC/PAM4/NRZ/lane 黄金向量、内部与外部 Payload、双向 PHY、序号回绕、重传、CDR、deskew、watchdog、24/32/48 GT/s、两种 Flit、背压、精确延迟、P50/P95/P99、确定性和端到端完整性。完整矩阵见 [`TEST_PLAN.md`](TEST_PLAN.md)。
+当前包含 22 项确定性单元断言和 82 项 SystemC 系统断言，覆盖 CRC/PAM4/NRZ/lane 黄金向量、内部与外部 Payload、双向 PHY、序号回绕、重传、CDR、deskew、watchdog、24/32/48 GT/s、两种 Flit、背压、精确延迟、P50/P95/P99、确定性和端到端完整性。完整矩阵见 [`TEST_PLAN.md`](docs/TEST_PLAN.md)。
 
 ## 6. 主要输出指标
 
@@ -180,7 +180,7 @@ CoralNPU RTL -> 原生异步接口 -> AXI256 -> AXI2Flit -> UCIe SystemC Link
             -> AouTarget -> MemSimBackend -> 在线 mem_sim
 ```
 
-读数据和写响应通过 UCIe 反向业务方向返回 CoralNPU。整机运行及验收见[项目入口](../README.md)。
+读数据和写响应通过 UCIe 反向业务方向返回 CoralNPU。整机运行及验收见[项目入口](../../axi_StorageStacked/README.md)。
 
 ## 8. 目录结构
 
@@ -200,3 +200,44 @@ ucie_systemc/
 │   └── run_sweep.sh
 └── results/
 ```
+
+## 当前目录与开发入口
+
+### 职责
+
+UCIe 链路及重放模型。
+
+### 对外接口
+
+见 [接口说明](docs/INTERFACE.md)；跨组件连接位于 `axi_StorageStacked/storage_axi/link`，源码与检查器路径由 `storage_manifest.json` 描述。
+
+### 构建与测试
+
+在本目录执行；先按 [原生开发文档](../../docs/development.md) 准备工具链及兼容的 SystemC。
+
+```bash
+make CXX="$CXX" SYSTEMC_HOME="$SYSTEMC_HOME" validate
+```
+
+### 文档目录
+
+见 [模块文档](docs/TEST_PLAN.md)。
+
+### 负责人
+
+以仓库维护者及当前模块协作分工为准。
+
+## 组件验收证据
+
+从本组件目录执行，复用调用方选定的 SystemC：
+
+```bash
+source ../../common/toolchain/env.sh
+export SYSTEMC_HOME=$(../../axi_StorageStacked/run.sh systemc-prefix)
+export SYSTEMC_CXX_STANDARD=${STORAGE_CXX_STANDARD:-17}
+make CXX="$CXX" SUMMARY_DIR="$PWD/build/validation" validate
+```
+
+`SUMMARY_DIR/summary.json` 同时记录实际子测试数、期望数、命令、退出状态与程序自己输出的 PASS/FAIL 计数；少跑或缺少明确检查输出均失败。期望数由 Makefile 的位宽和场景列表推导。历次日志和结论保存在其 `runs/` 子目录。
+
+默认功能、扫描与报告写到 `build/validation/`，可用 `OUT` 指定报告根目录。`results/LINK_VALIDATION_REPORT.md` 是保留的历史记录，不是当前运行输出。

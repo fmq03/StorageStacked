@@ -13,4 +13,4 @@ summary 使用英文精简人读报告；机器接口使用分区 JSON schema 2�
 整数不能先转 double；JSON 不沿用终端舍入精度。
 
 实现见 [src/stats](../../../src/stats/README.md)，
-契约见 [输出指南](../../../文档/输出指南.md)。
+契约见 [输出指南](../../../docs/输出指南.md)。

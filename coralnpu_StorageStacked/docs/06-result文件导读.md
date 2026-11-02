@@ -8,12 +8,12 @@
 `smoke`、`llm`、`burst` 各自保存结果，不共用一个结果目录。
 先打开所属项目的 `result/README.md`，表中列出场景、验收状态、L0 开关及 ITCM/DTCM 容量。
 
-- [SMOKE 结果索引](../user/smoke/result/README.md)
-- [TinyLLM 结果索引](../user/llm/result/README.md)
-- [AXI burst 结果索引](../user/burst/result/README.md)
+- SMOKE 结果索引（历史路径：`../user/smoke/result/README.md`）
+- TinyLLM 结果索引（历史路径：`../user/llm/result/README.md`）
+- AXI burst 结果索引（历史路径：`../user/burst/result/README.md`）
 
 单次运行可以直接放在 `result/<运行编号>/`；批量验收通常使用
-`result/<批次>/<场景>/`。例如 [L0 开启的 SMOKE](../user/smoke/result/l0-20261021/enabled/report.md)。
+`result/<批次>/<场景>/`。例如 L0 开启的 SMOKE（历史路径：`../user/smoke/result/l0-20261021/enabled/report.md`）。
 矩阵名称中的 `i8-d32-l01` 表示 ITCM 8 KiB、DTCM 32 KiB、L0 开启；`l00` 表示关闭。
 目录名只用于查找，实际参数应核对配置和设备返回值。
 
@@ -134,3 +134,5 @@ cat smoke/result/l0-20261021/enabled/config/npu_model.json
 默认完整回归的 SMOKE=42、TinyLLM=blu、19 项原生测试及五种 burst 场景均通过。
 相关方法、整理核查和完整回归结果统一见 [验证说明](08-验证说明.md)。
 这些是对应批次的记录；后续运行仍需检查各自的 summary.json。
+
+历史报告或外部交付手册可能未随 checkout 提供；以上路径仅保留原文引用，不表示当前已执行。当前结果请从新运行的 result/ 或验收输出目录读取。

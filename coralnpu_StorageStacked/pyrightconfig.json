@@ -2,7 +2,8 @@
   "extraPaths": [
     "coralnpu/runtime",
     "../axi_StorageStacked/scripts",
-    ".."
+    "../axi_StorageStacked/checks",
+    "../common/verif"
   ],
   "stubPath": "../.vscode/gem5-python-stubs",
   "exclude": [
@@ -17,7 +18,8 @@
       "extraPaths": [
         "coralnpu/runtime",
         "../axi_StorageStacked/scripts",
-        ".."
+        "../axi_StorageStacked/checks",
+        "../common/verif"
       ]
     }
   ]

@@ -1,8 +1,8 @@
 # UCIe 全链路仿真使用说明
 
-本测试将 AXI 请求经桥、双向链路及响应端送至字节存储，并检查返回的状态和数据。实现位于 `systemc/tb/tb_full_link.cpp`，外部接口详见[设计文档](../systemc/doc/design.md)。
+本测试将 AXI 请求经桥、双向链路及响应端送至字节存储，并检查返回的状态和数据。实现位于 [`tests/link/tb_full_link.cpp`](../tests/link/tb_full_link.cpp)，外部接口详见[设计文档](../../components/axi2flit/docs/systemc/design.md)。
 
-本文的命令和产物对应 BFM＋简单内存组件测试。接口分别见[SoC 侧接口表](SoC侧接口对接表.md)和[存储侧接口表](存储侧接口对接表.md)；项目生产链路由 CoralNPU RTL 驱动在线 mem_sim，实际适配、时间同步与验收见[全链路联合仿真接入指南](全链路联合仿真接入指南.md)。
+本文的命令和产物对应 BFM＋简单内存组件测试。接口分别见[SoC 侧接口表](../../components/axi2flit/docs/SoC侧接口对接表.md)和[存储侧接口表](../../components/axi2flit/docs/存储侧接口对接表.md)；项目生产链路由 CoralNPU RTL 驱动在线 mem_sim，实际适配、时间同步与验收见[全链路联合仿真接入指南](全链路联合仿真接入指南.md)。
 
 ## 拓扑
 
@@ -28,19 +28,19 @@ AXI 读写间无隐含全局顺序；需要写后读依赖的测试必须先等�
 
 这是时钟驱动桥/Target、事件驱动 UCIe、事务级串行存储的联合行为仿真。
 内存模型一次处理一个 burst，延迟由固定访问时间与每 beat 时间组成；不是
-流水线 HBM 的性能预测。FH 保存序号与重放标志，CRC 使用分半帧的 CRC16-CCITT 校验，详见[字节格式](../systemc/doc/wire_contract.md)。
+流水线 HBM 的性能预测。FH 保存序号与重放标志，CRC 使用分半帧的 CRC16-CCITT 校验，详见[字节格式](../../components/axi2flit/docs/systemc/wire_contract.md)。
 全链路协调启动，不支持在 UcieLink 内有事务时单端热复位。独占/原子语义不实现。
 
 ## 接口与实现
 
 | 模块 | 实现 | 端口/作用 |
 |---|---|---|
-| AXI 事务 BFM、自检与顶层 | `systemc/tb/tb_full_link.cpp` | AW/W/AR 请求、B/R 响应；500MHz，低有效复位 |
-| 请求发起侧桥 | `systemc/include/axi2flit.h` | AXI 请求与消息转换、响应恢复 |
-| 桥与 UCIe 之间的 Adapter | `systemc/integration/ucie_aou_adapter.h` | Flit ready/valid ↔ 250B FDI FIFO，不承担主机到 AXI 转换 |
-| 双向 UCIe | `reference/ucie-model/src/ucie_link.h` | PHY、CRC、序号、ACK/NAK、重放 |
-| 存储侧响应端 | `systemc/integration/aou_target.h` | `link_rx/link_tx`、`mem_req/mem_rsp` |
-| 简单内存 | `systemc/integration/simple_burst_memory.h` | `request/response` FIFO，单请求串行服务 |
+| AXI 事务 BFM、自检与顶层 | `tests/link/tb_full_link.cpp` | AW/W/AR 请求、B/R 响应；500MHz，低有效复位 |
+| 请求发起侧桥 | `components/axi2flit/systemc/include/axi2flit.h` | AXI 请求与消息转换、响应恢复 |
+| 桥与 UCIe 之间的 Adapter | `storage_axi/link/ucie_aou_adapter.h` | Flit ready/valid ↔ 250B FDI FIFO，不承担主机到 AXI 转换 |
+| 双向 UCIe | `components/ucie-model/src/ucie_link.h` | PHY、CRC、序号、ACK/NAK、重放 |
+| 存储侧响应端 | `storage_axi/link/aou_target.h` | `link_rx/link_tx`、`mem_req/mem_rsp` |
+| 简单内存 | `storage_axi/link/simple_burst_memory.h` | `request/response` FIFO，单请求串行服务 |
 
 顶层创建四个 `sc_fifo<FdiFlit>`，连接：
 
@@ -73,28 +73,28 @@ fail-fast。全宽单 burst 最大 beat 数因 4KB 约束为 128/64/32；256 bea
 
 ## 如何运行
 
-在项目根目录执行，依赖安装及 `SYSTEMC_HOME` 设置见[接入说明](../systemc/integration/README.md)：
+在 `axi_StorageStacked/` 目录执行。`SYSTEMC_HOME` 指向兼容的 SystemC 安装（`./run.sh systemc-prefix` 会输出可用的调试前缀），见[接入说明](../storage_axi/link/README.md)。变量写在目标之前：
 
 ```bash
 # 默认256bit、RP1、无误码。终端直接显示逐组结果。
-make full-link
+./run.sh link-test full-link
 
 # 指定数据宽度、资源平面和压力/错误注入。
-make WIDTH=1024 FULL_LINK_ARGS="--rp 2 --stress --replay" full-link
+./run.sh link-test WIDTH=1024 FULL_LINK_ARGS="--rp 2 --stress --replay" full-link
 
 # 256/512/1024 × RP1/2/4 无误码，以及每个位宽的 RP2 压力+重放，共12种配置。
 # 每种配置重新运行全部12组用例；生成独立日志，任一失败立即返回非零。
-make full-link-all
+./run.sh link-test full-link-all
 
 # 有意破坏一处参考读数据；只有观察到数据不匹配且仿真失败，控制测试才通过。
-make full-link-negative
+./run.sh link-test full-link-negative
 
 # 从已有 VCD 生成无需联网、无需第三方 Python 包的浏览器波形页。
-make full-link-wave
-make WIDTH=1024 FULL_LINK_VCD=sim/full_link_1024_rp2_stress_replay.vcd full-link-wave
+./run.sh link-test full-link-wave
+./run.sh link-test WIDTH=1024 FULL_LINK_VCD=sim/full_link_1024_rp2_stress_replay.vcd full-link-wave
 ```
 
-产物在 `systemc/sim/`，名称包含位宽、RP 和场景，与桥功能测试的 `waveform.vcd` 分开保存：
+产物在 `tests/link/sim/`，名称包含位宽、RP 和场景，与桥功能测试的 `waveform.vcd` 分开保存：
 
 ```text
 full_link_256_rp1.vcd              原始逐信号波形
@@ -108,15 +108,13 @@ CSV 数据按总线十六进制表示，最右侧为 lane0；`strb_bits` 为从�
 的 0/1 字符串。R 行的地址与 beat 索引从已接收的 AR 推导，不是 R 通道额外引脚。
 B 行地址为 0，因为 B 通道不携带地址；按 BID 和该 ID 的待完成写请求队列关联 AW。W 行地址记录原 AW 的突发首地址，各拍实际地址需结合拍号和 SIZE 计算；不能把 W 行地址当成每拍实际地址。
 
-`preflight` 汇总桥和链路组件回归；`full-link-all` 运行完整链路功能回归，两者分别执行。
+`./run.sh link-test preflight` 依次运行适配器、链路单元、参数配置和完整链路功能回归；axi2flit 组件自身的回归见[验证文档](../../components/axi2flit/docs/systemc/verification.md)，两者分别执行。
 
-独立交付后可用 `make UCIE_DIR=/新路径/ucie-model full-link-all` 更换链路位置，
-无需修改 C++ 源码。相对路径以 `systemc/` 为基准；补丁检查位置和 UCIe 所需的
-`aou_format6.h` 路径由构建入口自动定位，细节见[接入说明](../systemc/integration/README.md)。
+链路源码与协议头位置由 [`storage_manifest.json`](../storage_manifest.json) 提供，无需修改 C++ 源码；细节见[接入说明](../storage_axi/link/README.md)。
 
 ## 性能结果的适用范围
 
-`make -C systemc report` 生成 `systemc/sim/perf_report.txt`，使用简化链路
+在 `components/axi2flit` 下执行 `make -C systemc report` 生成 `components/axi2flit/systemc/sim/perf_report.txt`，使用简化链路
 `LinkPacer + FlitDelayLine + RemoteAouModel`。1024bit 桥基线读/写吞吐为
 42.66/42.40 GB/s，口径B为94.79%/94.22%，通过现有门限；这些不是全链路
 测试的持续吞吐结果。`full-link-all` 报告功能计数、错误/重放和背压覆盖，
@@ -185,7 +183,7 @@ ALL FULL-LINK TESTS PASSED
 不经过JavaScript浮点数转换。也可使用GTKWave查看原始VCD：
 
 ```bash
-gtkwave systemc/sim/full_link_256_rp1.vcd
+gtkwave tests/link/sim/full_link_256_rp1.vcd
 ```
 
 在GTKWave的`SystemC/axi`中加入awvalid/awready/awaddr/awlen、wvalid/wready/wdata/
@@ -207,4 +205,4 @@ rdata/rid/rlast/rresp；再加入clk、rst_n、testcase。总线选择十六进�
 
 256 位读数据每条占 8 粒度，可整除 48 粒度载荷区，不强制该配置产生响应跨帧；512/1024 位压力配置须观察到响应跨帧。负向记分板测试必须实际检出指定数据错误并得到预期失败退出码，不能仅检查程序发生过退出。
 
-以上是当前行为链路与简单存储的验收方法，不是新主机或新后端已经通过的证明。未覆盖多随机种子长时间运行、热复位、DRAM 引脚时序、独占/原子执行和 RTL 时序。新模型验收见[联仿交接约定](全链路联合仿真接入指南.md#11-联仿交接约定)，性能判据见[验证文档](../systemc/doc/verification.md)。
+以上是当前行为链路与简单存储的验收方法，不是新主机或新后端已经通过的证明。未覆盖多随机种子长时间运行、热复位、DRAM 引脚时序、独占/原子执行和 RTL 时序。新模型验收见[联仿交接约定](全链路联合仿真接入指南.md#11-联仿交接约定)，性能判据见[验证文档](../../components/axi2flit/docs/systemc/verification.md)。

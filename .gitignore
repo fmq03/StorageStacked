@@ -21,7 +21,13 @@
 /.vscode/editor_dependencies.json
 /downloads/
 /results/
-/offline/.build/
-/offline/dist/
-/offline/results/
-/offline/validation/
+/delivery/.build/
+/delivery/dist/
+/delivery/results/
+/delivery/validation/
+
+*.drawio.bkp
+
+/.cache/
+
+/coralnpu_StorageStacked/coralnpu/.bazelrc.user
