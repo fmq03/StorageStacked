@@ -2,16 +2,18 @@ Import('*')
 import os
 import runpy
 storage_root = os.path.dirname(Dir('.').srcnode().abspath)
-link_defines = runpy.run_path(os.path.join(storage_root, 'storage_axi/link_options.py'))['definitions']()
-env.Append(CPPPATH=[Dir('#/src/systemc/ext'),
-    os.path.join(storage_root, 'storage_axi'),
-    os.path.join(storage_root, 'protocol/include'),
-    os.path.join(storage_root, 'axi2flit/systemc/include'),
-    os.path.join(storage_root, 'axi2flit/systemc/integration'),
-    os.path.join(storage_root, 'ucie-model/src'),
-    os.path.join(storage_root, 'mem_sim/integration')])
-for source in ('aou_backend.cc', 'memsim_backend.cc', 'axi_monitor.cc', 'aou_axi2flit.cc',
-               'aou_flit_packer.cc', 'aou_flit_unpacker.cc'):
-    Source(source, append={'CPPDEFINES': link_defines})
+manifest = runpy.run_path(os.path.join(storage_root, 'scripts', 'storage_manifest.py'))['load'](storage_root)
+link_defines = runpy.run_path(str(manifest['link_options']))['definitions']()
+env.Append(CPPPATH=[Dir('#/src/systemc/ext'), *map(str, manifest['include_dirs'])])
+# Give external source directories a build variant, so objects stay in gem5's cache.
+# Source() still compiles the original .cpp files directly; no C++ include wrappers.
+for group, sources in manifest['sources'].items():
+    variants = {}
+    for source in sources:
+        if source.parent not in variants:
+            variant = Dir('manifest/' + group + '/' + str(len(variants)))
+            VariantDir(variant, str(source.parent), duplicate=0)
+            variants[source.parent] = variant
+        Source(variants[source.parent].File(source.name), append={'CPPDEFINES': link_defines})
 memory_build = os.environ['MEMSIM_BUILD']
 env.Append(LIBPATH=[memory_build], LIBS=['storagestacked_memsim'], RPATH=[memory_build])

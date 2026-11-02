@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "include_dirs": [
+    "storage_axi",
+    "storage_axi/link",
+    "../common/interfaces",
+    "../components/axi2flit/systemc/include",
+    "../components/ucie-model/src",
+    "../components/mem_sim/integration"
+  ],
+  "sources": {
+    "storage_axi": [
+      "storage_axi/aou_backend.cc",
+      "storage_axi/memsim_backend.cc",
+      "storage_axi/axi_monitor.cc"
+    ],
+    "axi2flit": [
+      "../components/axi2flit/systemc/src/axi2flit.cpp",
+      "../components/axi2flit/systemc/src/flit_packer.cpp",
+      "../components/axi2flit/systemc/src/flit_unpacker.cpp"
+    ]
+  },
+  "storage_source": "storage_axi",
+  "link_options": "storage_axi/link_options.py",
+  "memsim_source": "../components/mem_sim",
+  "axi2flit_source": "../components/axi2flit",
+  "ucie_source": "../components/ucie-model",
+  "protocol_include": "../common/interfaces",
+  "memsim_online_check": "../components/mem_sim/integration/check_online.py",
+  "checks_dir": "checks",
+  "link_tests": "tests/link",
+  "python_path": [
+    "checks",
+    "scripts"
+  ]
+}
