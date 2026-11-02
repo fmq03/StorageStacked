@@ -19,13 +19,15 @@ Demo::Demo(sc_module_name name, const ConfigParams& p)
     // 将监控器绑定到公共时钟和复位。
     monitor.clk(clock); monitor.resetn(resetn);
     // 在输出目录创建 axi_wave.vcd 波形文件。
-    wave = sc_create_vcd_trace_file((directory + "/axi_wave").c_str());
-    // 将 VCD 的时间单位设为 1 fs。
-    wave->set_time_unit(1, SC_FS);
-    // 注册 AXI 时钟 ACLK 和低有效复位 ARESETn 的波形记录。
-    sc_trace(wave, clock, "ACLK"); sc_trace(wave, resetn, "ARESETn");
-    // 注册公共 AXI 信号和存储后端内部信号的波形记录。
-    wires.trace(wave); storage.trace(wave);
+    if (p.trace_level == "full") {
+        wave = sc_create_vcd_trace_file((directory + "/axi_wave").c_str());
+        // 将 VCD 的时间单位设为 1 fs。
+        wave->set_time_unit(1, SC_FS);
+        // 注册 AXI 时钟 ACLK 和低有效复位 ARESETn 的波形记录。
+        sc_trace(wave, clock, "ACLK"); sc_trace(wave, resetn, "ARESETn");
+        // 注册公共 AXI 信号和存储后端内部信号的波形记录。
+        wires.trace(wave); storage.trace(wave);
+    }
     // 注册可调用 wait 的 SystemC 复位线程。
     SC_THREAD(reset);
 // 结束顶层模块构造函数。
@@ -57,7 +59,7 @@ void Demo::finish() {
     // 把 AXI 周期刻度和主端统计交给协议监控器导出。
     monitor.finish(clock.period().value(), &stats);
     // 关闭波形文件并清空句柄，避免析构时重复关闭。
-    sc_close_vcd_trace_file(wave); wave = nullptr;
+    if (wave) sc_close_vcd_trace_file(wave); wave = nullptr;
     // 标记收尾已完成。
     finished = true;
 // 结束收尾函数。

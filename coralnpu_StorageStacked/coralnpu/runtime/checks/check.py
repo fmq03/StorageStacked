@@ -8,8 +8,8 @@ policy for simultaneous conflicting accesses.
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from storage_dependency import STORAGE_ROOT
-sys.path.insert(0, str(STORAGE_ROOT / 'scripts'))
+from paths import STORAGE_CHECKS
+sys.path.insert(0, str(STORAGE_CHECKS))
 import argparse
 import collections
 import csv

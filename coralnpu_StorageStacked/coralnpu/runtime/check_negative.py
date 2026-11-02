@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from paths import STORAGE_MEMSIM_SOURCE, STORAGE_MEMSIM_ONLINE_CHECK, STORAGE_SOURCE, STORAGE_CHECKS
 """Reject fabricated source evidence, wrong compute bytes and changed waveforms."""
 from storage_dependency import STORAGE_ROOT, MEMSIM_BUILD, storage_version
 import csv,json,shutil,subprocess,sys,tempfile
@@ -6,7 +7,7 @@ from pathlib import Path
 from verify import verify
 from paths import ROOT, RUNTIME
 from result_layout import artifact, unpack
-sys.path.insert(0,str(STORAGE_ROOT/'scripts'))
+sys.path.insert(0,str(STORAGE_CHECKS))
 sys.path.insert(0,str(RUNTIME/'checks'))
 from audit_wave import audit
 from check import check

@@ -1,4 +1,5 @@
 """Keep project-generated text reports independent of the checkout location."""
+from pathlib import Path
 from paths import ROOT,STORAGE_ROOT,relative
 
 def sanitize(directory):
@@ -6,4 +7,6 @@ def sanitize(directory):
         if p.is_file() and p.suffix in ('.json','.log','.md','.html','.txt'):
             text=p.read_text(errors='replace')
             clean=text.replace(str(ROOT)+ '/', '').replace(str(STORAGE_ROOT),relative(STORAGE_ROOT))
+            repository=STORAGE_ROOT.parent
+            clean=clean.replace(str(repository),relative(repository,directory))
             if text!=clean:p.write_text(clean)

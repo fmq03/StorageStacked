@@ -22,7 +22,7 @@ ss_tool_path="$SS_DEPS_ROOT/host-bin:$SS_DEPS_ROOT/xpu-tools/bin:$SS_PREFIX/bin"
 while [[ $PATH == "$ss_tool_path:"* ]]; do PATH=${PATH#"$ss_tool_path:"}; done
 export PATH="$ss_tool_path:$PATH"
 unset ss_tool_path
-export TMPDIR="$SS_DEPS_ROOT/tmp" XDG_CACHE_HOME="$SS_DEPS_ROOT/cache" CCACHE_TEMPDIR="$SS_DEPS_ROOT/tmp/ccache"
+export TMPDIR="${TMPDIR:-$SS_DEPS_ROOT/tmp}" XDG_CACHE_HOME="$SS_DEPS_ROOT/cache" CCACHE_TEMPDIR="$SS_DEPS_ROOT/tmp/ccache"
 export CPATH="$SS_PREFIX/include" LIBRARY_PATH="$SS_PREFIX/lib"
 export LD_LIBRARY_PATH="$MEMSIM_BUILD:$SS_DEPS_ROOT/xpu-native/lib:$SS_PREFIX/lib"
-export PYTHONPATH="$STORAGE_STACK_ROOT/scripts"
+export PYTHONPATH="$SS_ROOT/coralnpu/runtime:$("$AXI_PYTHON" "$STORAGE_STACK_ROOT/scripts/storage_manifest.py" --pythonpath)"

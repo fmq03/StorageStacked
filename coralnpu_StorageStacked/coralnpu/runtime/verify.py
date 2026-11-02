@@ -11,6 +11,8 @@ def read(p):
     return json.loads(p.read_text())
 
 def verify(root):
+    from trace_policy import require_full
+    require_full(root)
     c = read(root / 'resolved.json')
     dev = c['device']
     a = c['architecture']

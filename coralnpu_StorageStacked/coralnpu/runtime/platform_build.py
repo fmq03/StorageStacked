@@ -1,4 +1,6 @@
+from paths import STORAGE_MEMSIM_SOURCE, STORAGE_MEMSIM_ONLINE_CHECK, STORAGE_SOURCE, STORAGE_CHECKS
 """Build platform libraries and one UCIe configuration in private, disposable caches."""
+import hashlib
 import json
 import os
 import shutil
@@ -14,7 +16,7 @@ def command(args):
 
 def build_platform():
     storage_version();BUILD.mkdir(parents=True,exist_ok=True)
-    command(['cmake','-S',relative(STORAGE_ROOT/'mem_sim'),'-B',relative(MEMSIM_BUILD),'-G','Ninja',
+    command(['cmake','-S',relative(STORAGE_MEMSIM_SOURCE),'-B',relative(MEMSIM_BUILD),'-G','Ninja',
              '-DCMAKE_BUILD_TYPE=Release','-DCMAKE_CXX_COMPILER='+os.environ['AXI_CXX']])
     command(['cmake','--build',relative(MEMSIM_BUILD),'-j',SETTINGS['jobs']])
     build_native(load_config(ROOT/'user/smoke/config.json'))
@@ -23,10 +25,14 @@ def build_platform():
 def build_simulator(c):
     u=c['ucie'];name='link-'+ '-'.join(format(u[k],'.12g') for k in ('lanes','rate_gtps','bits_per_symbol','tat_ns'))
     native=build_native(c)
-    directory=BUILD/(name+'-'+variant_name(c))
+    provider={key:os.environ.get(key,default) for key,default in [('STORAGE_SYSTEMC_PREFIX',''),('STORAGE_SYSTEMC_TARGET',''),('STORAGE_CXX_STANDARD','17')]}
+    suffix='-systemc-'+hashlib.sha256(json.dumps(provider,sort_keys=True).encode()).hexdigest()[:12] if any(provider[k] for k in ('STORAGE_SYSTEMC_PREFIX','STORAGE_SYSTEMC_TARGET')) or provider['STORAGE_CXX_STANDARD']!='17' else ''
+    directory=BUILD/(name+'-'+variant_name(c)+suffix)
     args=['cmake','-S','integration','-B',relative(directory),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release',
           '-DCMAKE_CXX_COMPILER='+os.environ['AXI_CXX'],'-DCMAKE_C_COMPILER='+os.environ['AXI_CC'],
           '-DCMAKE_ASM_COMPILER='+os.environ['AXI_CC'],'-DSTORAGE_PATH='+relative(STORAGE_ROOT)]
+    for variable in ('STORAGE_SYSTEMC_PREFIX','STORAGE_CXX_STANDARD','STORAGE_SYSTEMC_TARGET'):
+        args.append('-D'+variable+'='+provider[variable])
     args.append('-DNPU_NATIVE_LIBRARY='+str(native))
     for k,v in u.items():args.append('-DLINK_'+k.upper()+'='+str(v))
     command(args);command(['cmake','--build',relative(directory),'-j',SETTINGS['jobs']])

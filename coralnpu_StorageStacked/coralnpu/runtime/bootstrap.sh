@@ -12,7 +12,7 @@ if [[ ! -x "$deps/toolchain/bin/python" ]]; then
     args=()
     [[ ${SS_OFFLINE:-0} != 1 ]] || args+=(--offline)
     "$mamba" --no-rc create -y --root-prefix "$deps/mamba" --prefix "$deps/toolchain" \
-        --file coralnpu/runtime/defaults/conda-linux-64.lock "${args[@]}"
+        --file ../common/toolchain/conda-linux-64.lock "${args[@]}"
 fi
 source coralnpu/runtime/environment.sh
 "$AXI_PYTHON" coralnpu/runtime/setup_npu_tools.py

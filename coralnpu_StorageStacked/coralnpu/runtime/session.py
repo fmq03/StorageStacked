@@ -3,8 +3,10 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import os
+from environment import describe
 
-from paths import ROOT, BUILD, MEMSIM_BUILD, relative, dump
+from paths import ROOT, BUILD, MEMSIM_BUILD, STORAGE_ROOT, relative, dump
 from configure import load_config, resolved_parts
 from storage_dependency import require_build, storage_version
 from platform_build import build_simulator
@@ -54,6 +56,7 @@ def resolve(output):
     files = (elf, simulator, native_library(config),
              MEMSIM_BUILD / 'libstoragestacked_memsim.so')
     dump(output / 'environment.json', {
+        **describe(cache=simulator.parent/'CMakeCache.txt',bundled=STORAGE_ROOT/'third_party/systemc/src'),
         'storage': storage_version(),
         'files': [{'name': relative(path, output), 'bytes': path.stat().st_size} for path in files]})
     (output / 'build/simulator.path').write_text(relative(simulator, output) + '\n')
@@ -67,7 +70,8 @@ def finish(output, stage, code):
             summary = {}
         if not isinstance(summary, dict):
             summary = {}
-        if code or not summary.get('passed'):
+        diagnostic = summary.get('trace_level') == 'light' and summary.get('link_verified') is False
+        if code or (not summary.get('passed') and not diagnostic):
             log = {'build': 'build.log', 'simulate': 'run.log', 'validate': 'validation.log'}[stage]
             error = summary.get('error') or f'{stage} failed (exit {code}); see {log}'
             write_status(output, stage, error)

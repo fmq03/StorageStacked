@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from paths import STORAGE_MEMSIM_SOURCE, STORAGE_MEMSIM_ONLINE_CHECK, STORAGE_SOURCE, STORAGE_CHECKS
 """One regression run; each selected project executes its default device scenario once."""
 import argparse
 import datetime
@@ -23,6 +24,8 @@ def case(project):
     directory=base/'result'/stamp/name
     config=base/'result'/stamp/'configs'/(name+'.json');config.parent.mkdir(parents=True,exist_ok=True)
     c=read(base/'config.json')
+    if c['simulation'].get('trace_level','full') != 'full':
+        raise ValueError('Acceptance requires trace_level=full')
     dump(config,c)
     print('Running '+project+'/'+name,flush=True)
     invoke(['bash','user/run.sh',project,'--config',relative(config,base),'--output',relative(directory,base)],name+'.log')
@@ -33,7 +36,7 @@ try:
     invoke([sys.executable,relative(RUNTIME/'check.py')],'environment.log')
     plan=json.loads(subprocess.check_output(['ctest','--test-dir',relative(MEMSIM_BUILD),'--show-only=json-v1'],cwd=ROOT,text=True))
     invoke(['ctest','--test-dir',relative(MEMSIM_BUILD),'--output-on-failure'],'native.log')
-    invoke([sys.executable,relative(STORAGE_ROOT/'mem_sim/integration/check_online.py'),relative(MEMSIM_BUILD/'libstoragestacked_memsim.so'),relative(out/'api')],'api.log')
+    invoke([sys.executable,relative(STORAGE_MEMSIM_ONLINE_CHECK),relative(MEMSIM_BUILD/'libstoragestacked_memsim.so'),relative(out/'api')],'api.log')
     if o.project in (None,'smoke'):
         case('smoke')
         for script in ('check_smoke_negative','check_negative'):

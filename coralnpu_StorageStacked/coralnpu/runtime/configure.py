@@ -46,7 +46,9 @@ def validate(c):
     for k in ('channels','scale','queue','slots'): integer(c['memsim'][k],1,1023 if k=='slots' else 1024,'memsim.'+k)
     integer(c['memsim']['response_hold'],0,1000000,'memsim.response_hold')
     if c['memsim']['standard'] not in ('hbm3','hbm4','lpddr5','lpddr6'): raise ValueError('unsupported memsim.standard')
-    keys(c['simulation'],'max_ticks','simulation'); integer(c['simulation']['max_ticks'],1,10**17,'max_ticks')
+    if c['simulation'].get('trace_level','full') not in ('full','light'):
+        raise ValueError('simulation.trace_level must be full or light')
+    keys({k:v for k,v in c['simulation'].items() if k!='trace_level'},'max_ticks','simulation'); integer(c['simulation']['max_ticks'],1,10**17,'max_ticks')
     b=c['program']; kind=b.get('type')
     if kind=='smoke':
         keys(b,'type input','program'); integer(b['input'],0,0xffffffff,'program.input')
@@ -76,6 +78,7 @@ def load_config(path):
 
 def resolved_parts(c):
     a={'npu':c['npu'],'device_clock_mhz':c['npu']['clock_mhz'],'axi':{'burst_beats':4,**c['axi']},'memory':c['memsim'],'max_ticks':c['simulation']['max_ticks'],'ucie':c['ucie']}
+    if 'trace_level' in c['simulation']: a['trace_level']=c['simulation']['trace_level']
     b={'name':c['program']['type'],**{k:v for k,v in c['program'].items() if k!='type'}}
     return a,b
 

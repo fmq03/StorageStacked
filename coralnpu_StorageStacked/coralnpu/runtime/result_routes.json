@@ -1,0 +1,6 @@
+{
+  "npu_requests.csv": "traces/coralnpu/npu_requests.csv",
+  "npu_trace.csv": "traces/coralnpu/npu_trace.csv",
+  "coralnpu_trace.csv": "traces/coralnpu/coralnpu_trace.csv",
+  "transactions.csv": "traces/coralnpu/transactions.csv"
+}

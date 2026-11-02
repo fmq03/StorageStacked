@@ -34,6 +34,8 @@ int sc_main(int argc,char** argv) {
         auto& a=c.get_child("architecture");storage_axi::ConfigParams p;
         // 设置日志输出目录，并读取设备程序 ELF 路径 kernel；相对路径以进程工作目录为基准。
         p.trace_dir=directory;p.kernel=c.get<std::string>("kernel");
+        // 读取诊断 trace 级别：full 保存全部原始记录，light 关闭 VCD 与 UCIe 原始帧记录。
+        p.trace_level=a.get<std::string>("trace_level", "full");
         // 读取 AXI 周期并从 ns 换算为 fs：1 ns = 1000000 fs。
         p.period=a.get<uint64_t>("axi.period_ns")*1000000;
         // 将设备频率 MHz 换算为周期 fs；使用整数除法，例如 500 MHz 对应 2000000 fs。
