@@ -42,6 +42,8 @@ archive/*分支是原维护机器上的辅助历史入口，不要求新克隆�
 
 ## 源码归属
 
+- `hif2mc` 从 UCIe 项目独立移植，作为主仓库普通目录维护，使用相邻 `mem_sim`。
+  它的构建和验证入口见 [使用说明](../hif2mc/README.md)，目前未接入原生在线链路。
 - UCIe的AoU格式支持和观察接口直接在ucie-model源码中维护；不再由axi2flit/gem5_axi打补丁。
 - AoU公共帧映射在protocol/include，UCIe与AXI2Flit共同引用。
 - gem5设备封装在gem5_new/gem5int/src/dev；每次env/build.sh自动安装到外部gem5的构建副本。

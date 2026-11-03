@@ -9,10 +9,15 @@ CPU / Vortex GPU / CoralNPU → 原生AXI256 → AXI2Flit → UCIe → 在线mem
 | axi2flit | AXI与Flit转换 |
 | ucie-model | UCIe链路、重放与观察接口 |
 | mem_sim | 内存控制器与DRAM行为模型 |
+| hif2mc | 独立的 HIF 到 mem_sim 适配模型、测试与可选 Verilator 示例 |
 | protocol/include | 两端共享的AoU帧格式 |
 
 外部子模块仍为gem5、coralnpu、vortex-gpu/vortex（含Vortex递归依赖）。
 内部五个目录已通过保留完整历史的导入合并成为主仓库源码，不再各自维护Git仓库。
+
+`hif2mc` 另从 UCIe 项目移植为普通源码目录，直接使用本仓库的 `mem_sim`。
+构建、接口契约与示例见 [hif2mc 使用说明](hif2mc/README.md)。
+该模块可独立验证，目前尚未接入上述 CPU/GPU/NPU 在线链路。
 
 ```bash
 git clone --recurse-submodules https://github.com/fmq03/StorageStacked.git
